@@ -24,10 +24,11 @@ async function callAnthropic({ system, user }) {
   });
 
   if (!res.ok) {
-    // Log a short, sanitized diagnostic server-side only; never include
-    // provider response bodies (could echo request content) in the thrown
-    // message that eventually surfaces to the UI.
-    console.error(`anthropic request failed: status ${res.status}`);
+    // Log a short, sanitized diagnostic server-side only (truncated provider
+    // error body — describes the request schema issue, not our content);
+    // never include it in the thrown message that surfaces to the UI.
+    const bodyText = await res.text().catch(() => '');
+    console.error(`anthropic request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     throw new Error(`AI provider request failed (${res.status})`);
   }
 
