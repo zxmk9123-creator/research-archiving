@@ -38,11 +38,7 @@ async function callAnthropic({ system, user }) {
   return text;
 }
 
-async function callGemini({ system, user }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-
+async function callGeminiOnce(model, apiKey, system, user) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
@@ -60,7 +56,9 @@ async function callGemini({ system, user }) {
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
     console.error(`gemini request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
-    throw new Error(`AI provider request failed (${res.status})`);
+    const err = new Error(`AI provider request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
   }
 
   const data = await res.json();
@@ -69,6 +67,23 @@ async function callGemini({ system, user }) {
     && data.candidates[0].content.parts[0].text;
   if (!text) throw new Error('AI provider returned an empty response');
   return text;
+}
+
+// 503 from Gemini means transient server-side overload ("try again later"),
+// not a config problem — one short retry smooths that over without turning
+// into the kind of aggressive auto-retry loop the product rules warn against.
+async function callGemini({ system, user }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+
+  try {
+    return await callGeminiOnce(model, apiKey, system, user);
+  } catch (err) {
+    if (err.status !== 503) throw err;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return callGeminiOnce(model, apiKey, system, user);
+  }
 }
 
 // Dispatches on AI_PROVIDER so a different provider can be added later
