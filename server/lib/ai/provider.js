@@ -86,13 +86,49 @@ async function callGemini({ system, user }) {
   }
 }
 
+// Groq: OpenAI-compatible chat completions API.
+async function callGroq({ system, user }) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
+  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 600,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    console.error(`groq request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+    throw new Error(`AI provider request failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!text) throw new Error('AI provider returned an empty response');
+  return text;
+}
+
 // Dispatches on AI_PROVIDER so a different provider can be added later
 // without touching aiDraft.js's orchestration logic.
 async function callProvider(promptMessages) {
   const providerName = process.env.AI_PROVIDER || 'anthropic';
   if (providerName === 'anthropic') return callAnthropic(promptMessages);
   if (providerName === 'gemini') return callGemini(promptMessages);
+  if (providerName === 'groq') return callGroq(promptMessages);
   throw new Error(`Unsupported AI_PROVIDER: ${providerName}`);
 }
 
-module.exports = { callProvider, callAnthropic, callGemini };
+module.exports = { callProvider, callAnthropic, callGemini, callGroq };
