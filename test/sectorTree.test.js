@@ -75,3 +75,36 @@ test('multi-select: selected ids across branches stay unique via Set semantics',
   assert.deepEqual([...selected], [3, 6]);
   assert.equal([...selected].join(','), '3,6');
 });
+
+// Regression: the real bug (fixed at the DB layer in schema.sql) was
+// duplicate ROWS with different ids and the same name — e.g. a corrupted
+// /api/sectors response returning two distinct '식용유지' root rows. These
+// must NOT be merged by buildSectorMaps: they are legitimately different
+// nodes and both must remain selectable/navigable by their own id.
+test('buildSectorMaps: does not merge distinct ids that share a display name', () => {
+  const corrupted = [
+    { id: 1, name: '식용유지', parent_id: null },
+    { id: 34, name: '식용유지', parent_id: null }, // different id, same label — real duplicate row from the old bug
+    { id: 3, name: '팜유', parent_id: 1 },
+    { id: 41, name: '팜유', parent_id: 34 },
+  ];
+  const { byParent, byId } = buildSectorMaps(corrupted);
+  assert.equal(byParent.get(null).length, 2, 'both distinct root ids must still be present');
+  assert.equal(byId.size, 4);
+  assert.equal(byParent.get(1).length, 1);
+  assert.equal(byParent.get(34).length, 1);
+});
+
+// Regression: identity is the id, never the array position or the label. A
+// literal duplicate ROW (exact same id appearing twice in the API response,
+// e.g. from a bad JOIN) must be deduped, since it is not a new node.
+test('buildSectorMaps: dedupes an exact-id duplicate row instead of double-counting it', () => {
+  const withRepeatedRow = [
+    { id: 1, name: '식용유지', parent_id: null },
+    { id: 1, name: '식용유지', parent_id: null }, // same row served twice
+    { id: 3, name: '팜유', parent_id: 1 },
+  ];
+  const { byParent, byId } = buildSectorMaps(withRepeatedRow);
+  assert.equal(byId.size, 2);
+  assert.equal(byParent.get(null).length, 1);
+});

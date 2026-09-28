@@ -87,18 +87,109 @@ CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
 CREATE INDEX IF NOT EXISTS idx_items_published_at ON items(published_at);
 
+-- Root-level dedup guard: UNIQUE(name, parent_id) does NOT stop duplicate
+-- roots, because Postgres treats every NULL in a unique key as distinct from
+-- every other NULL. Since db:init runs on every deploy (see package.json
+-- "start"), the old seed below re-inserted '식용유지'/'비식용유지' on each
+-- boot, and each duplicate root then multiplied its children via the CROSS
+-- JOIN subquery matching more than one row. Fix root cause at the data layer:
+--
+-- 1) merge any duplicates that already exist (idempotent, no-op once clean)
+-- 2) add a partial unique index so root names can never duplicate again
+
+-- Phase 1: merge duplicate ROOT sectors (parent_id IS NULL) by name into the
+-- lowest id. Children are re-parented ONE AT A TIME (not a bulk UPDATE):
+-- moving two rows named "UCO" under the same parent in one statement would
+-- itself violate UNIQUE(name, parent_id) mid-statement, since Postgres checks
+-- it per row, not at statement end. A child that collides with an existing
+-- child of the canonical root is itself a duplicate and gets merged instead.
+DO $$
+DECLARE
+  dup RECORD;
+  child RECORD;
+  existing_id INTEGER;
+BEGIN
+  FOR dup IN
+    SELECT name, MIN(id) AS canonical_id, array_agg(id ORDER BY id) AS ids
+    FROM sectors WHERE parent_id IS NULL
+    GROUP BY name HAVING COUNT(*) > 1
+  LOOP
+    UPDATE item_sectors SET sector_id = dup.canonical_id
+    WHERE sector_id = ANY(dup.ids) AND sector_id <> dup.canonical_id
+      AND NOT EXISTS (SELECT 1 FROM item_sectors x WHERE x.item_id = item_sectors.item_id AND x.sector_id = dup.canonical_id);
+    DELETE FROM item_sectors WHERE sector_id = ANY(dup.ids) AND sector_id <> dup.canonical_id;
+
+    FOR child IN
+      SELECT id, name FROM sectors WHERE parent_id = ANY(dup.ids) AND parent_id <> dup.canonical_id
+    LOOP
+      SELECT id INTO existing_id FROM sectors WHERE parent_id = dup.canonical_id AND name = child.name AND id <> child.id;
+      IF existing_id IS NULL THEN
+        UPDATE sectors SET parent_id = dup.canonical_id WHERE id = child.id;
+      ELSE
+        UPDATE item_sectors SET sector_id = existing_id
+        WHERE sector_id = child.id
+          AND NOT EXISTS (SELECT 1 FROM item_sectors x WHERE x.item_id = item_sectors.item_id AND x.sector_id = existing_id);
+        DELETE FROM item_sectors WHERE sector_id = child.id;
+        DELETE FROM sectors WHERE id = child.id;
+      END IF;
+    END LOOP;
+
+    DELETE FROM sectors WHERE id = ANY(dup.ids) AND id <> dup.canonical_id;
+  END LOOP;
+END $$;
+
+-- Phase 2: merge any remaining duplicate CHILD sectors (same name, same
+-- non-null parent) — pre-existing corruption independent of root duplication.
+-- Same per-row approach for any grandchildren these nodes might have.
+DO $$
+DECLARE
+  dup RECORD;
+  child RECORD;
+  existing_id INTEGER;
+BEGIN
+  FOR dup IN
+    SELECT name, parent_id, MIN(id) AS canonical_id, array_agg(id ORDER BY id) AS ids
+    FROM sectors WHERE parent_id IS NOT NULL
+    GROUP BY name, parent_id HAVING COUNT(*) > 1
+  LOOP
+    UPDATE item_sectors SET sector_id = dup.canonical_id
+    WHERE sector_id = ANY(dup.ids) AND sector_id <> dup.canonical_id
+      AND NOT EXISTS (SELECT 1 FROM item_sectors x WHERE x.item_id = item_sectors.item_id AND x.sector_id = dup.canonical_id);
+    DELETE FROM item_sectors WHERE sector_id = ANY(dup.ids) AND sector_id <> dup.canonical_id;
+
+    FOR child IN
+      SELECT id, name FROM sectors WHERE parent_id = ANY(dup.ids) AND parent_id <> dup.canonical_id
+    LOOP
+      SELECT id INTO existing_id FROM sectors WHERE parent_id = dup.canonical_id AND name = child.name AND id <> child.id;
+      IF existing_id IS NULL THEN
+        UPDATE sectors SET parent_id = dup.canonical_id WHERE id = child.id;
+      ELSE
+        UPDATE item_sectors SET sector_id = existing_id
+        WHERE sector_id = child.id
+          AND NOT EXISTS (SELECT 1 FROM item_sectors x WHERE x.item_id = item_sectors.item_id AND x.sector_id = existing_id);
+        DELETE FROM item_sectors WHERE sector_id = child.id;
+        DELETE FROM sectors WHERE id = child.id;
+      END IF;
+    END LOOP;
+
+    DELETE FROM sectors WHERE id = ANY(dup.ids) AND id <> dup.canonical_id;
+  END LOOP;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS sectors_root_name_uidx ON sectors(name) WHERE parent_id IS NULL;
+
 -- Seed: MECE sector tree (2 levels)
 INSERT INTO sectors (name, parent_id) VALUES ('식용유지', NULL) ON CONFLICT DO NOTHING;
 INSERT INTO sectors (name, parent_id) VALUES ('비식용유지', NULL) ON CONFLICT DO NOTHING;
 
 INSERT INTO sectors (name, parent_id)
 SELECT v.name, p.id FROM (VALUES ('팜유'),('대두유'),('유채씨유'),('해바라기유'),('기타 식용유지')) AS v(name)
-CROSS JOIN (SELECT id FROM sectors WHERE name='식용유지' AND parent_id IS NULL) p
+CROSS JOIN (SELECT id FROM sectors WHERE name='식용유지' AND parent_id IS NULL ORDER BY id LIMIT 1) p
 ON CONFLICT DO NOTHING;
 
 INSERT INTO sectors (name, parent_id)
 SELECT v.name, p.id FROM (VALUES ('UCO'),('UCOME'),('SAF'),('Tallow'),('FAME'),('기타 비식용유지')) AS v(name)
-CROSS JOIN (SELECT id FROM sectors WHERE name='비식용유지' AND parent_id IS NULL) p
+CROSS JOIN (SELECT id FROM sectors WHERE name='비식용유지' AND parent_id IS NULL ORDER BY id LIMIT 1) p
 ON CONFLICT DO NOTHING;
 
 -- Seed: flat usage tags

@@ -71,25 +71,38 @@ async function renderArchive(query = {}) {
     ? sectorAncestryPath(byId, [...selectedSectorIds][0]).slice(0, -1)
     : [];
 
+  const hasActiveFilters = Boolean(query.q || query.usage || query.type || selectedSectorIds.size);
+  const emptyState = items.length
+    ? ''
+    : `<div class="archive-empty">
+        <strong>결과가 없습니다</strong>
+        ${hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
+      </div>`;
+
   app.innerHTML = `
     <h1>Archive</h1>
-    <div class="filters">
-      <input id="f-q" placeholder="검색" value="${query.q || ''}">
-      <select id="f-usage"><option value="">활용처 전체</option>${usageOpts}</select>
-      <select id="f-type">
-        <option value="">유형 전체</option>
-        ${['뉴스', '보고서', '통계', '규제'].map((t) => `<option ${query.type === t ? 'selected' : ''}>${t}</option>`).join('')}
-      </select>
-      <button class="btn" id="f-apply">필터 적용</button>
-      <button class="btn" id="f-clear">초기화</button>
+    <div class="archive">
+      <div class="archive-filter-panel">
+        <div class="filters">
+          <input id="f-q" placeholder="검색" value="${query.q || ''}">
+          <select id="f-usage"><option value="">활용처 전체</option>${usageOpts}</select>
+          <select id="f-type">
+            <option value="">유형 전체</option>
+            ${['뉴스', '보고서', '통계', '규제'].map((t) => `<option ${query.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+          <button class="btn" id="f-clear">초기화</button>
+          <button class="btn primary" id="f-apply">필터 적용</button>
+        </div>
+        <div class="archive-hierarchy">
+          <div class="archive-hierarchy-title">섹터 (다중 선택 가능)</div>
+          <div class="sector-tree" id="sector-tree"></div>
+          <div class="archive-chip-row" id="sector-chips"></div>
+        </div>
+      </div>
+      <div class="archive-results-count">${items.length}개 결과</div>
+      ${emptyState}
+      <div class="grid">${items.map(itemCard).join('')}</div>
     </div>
-    <div class="form-row">
-      <label>섹터 (다중 선택 가능)</label>
-      <div class="chiplist" id="sector-chips"></div>
-      <div class="sector-tree" id="sector-tree"></div>
-    </div>
-    <div class="count">${items.length}개 결과</div>
-    <div class="grid">${items.map(itemCard).join('') || '<p>결과가 없습니다.</p>'}</div>
   `;
 
   const treeEl = document.getElementById('sector-tree');
@@ -98,8 +111,8 @@ async function renderArchive(query = {}) {
   function renderChips() {
     const ids = [...selectedSectorIds];
     chipsEl.innerHTML = ids.length
-      ? ids.map((id) => `<span class="chip active" data-remove-sector="${id}">${(byId.get(id) || {}).name || id} ✕</span>`).join('')
-      : '<span class="meta">선택된 섹터 없음</span>';
+      ? ids.map((id) => `<button type="button" class="chip active" data-remove-sector="${id}">${(byId.get(id) || {}).name || id} <span aria-hidden="true">✕</span></button>`).join('')
+      : '<span class="chip-empty">선택된 섹터 없음</span>';
     chipsEl.querySelectorAll('[data-remove-sector]').forEach((el) => {
       el.onclick = () => {
         selectedSectorIds.delete(Number(el.dataset.removeSector));
@@ -119,11 +132,11 @@ async function renderArchive(query = {}) {
           const isActiveBranch = activePath[col.level] === s.id;
           const isChecked = selectedSectorIds.has(s.id);
           return `<div class="sector-node ${isActiveBranch ? 'active' : ''}">
-            <label>
-              <input type="checkbox" data-check="${s.id}" ${isChecked ? 'checked' : ''}>
-              <span class="sector-node-label" data-nav="${s.id}" data-level="${col.level}">${s.name}</span>
+            <label class="sector-node-check">
+              <input type="checkbox" data-check="${s.id}" ${isChecked ? 'checked' : ''} aria-label="${s.name} 필터로 선택">
             </label>
-            ${hasChildren ? '<span class="sector-node-arrow">›</span>' : ''}
+            <button type="button" class="sector-node-label" data-nav="${s.id}" data-level="${col.level}">${s.name}</button>
+            <span class="sector-node-arrow" aria-hidden="true">${hasChildren ? '›' : ''}</span>
           </div>`;
         }).join('')}
       </div>

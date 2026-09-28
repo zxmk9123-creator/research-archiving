@@ -11,10 +11,16 @@
   // Derives parent->children groupings and an id->node index from the flat
   // sectors list (id, name, parent_id) returned by GET /api/sectors. This is
   // the taxonomy's single source of truth, reshaped — no separate copy.
+  //
+  // Identity is always the stable id, never array index or name: a row whose
+  // id repeats in the input (e.g. an upstream join returning it twice) is
+  // deduped here; two different ids that happen to share a display name are
+  // NOT merged — they are legitimately distinct nodes.
   function buildSectorMaps(sectors) {
     const byParent = new Map();
     const byId = new Map();
     for (const s of sectors) {
+      if (byId.has(s.id)) continue;
       byId.set(s.id, s);
       const key = s.parent_id ?? null;
       if (!byParent.has(key)) byParent.set(key, []);
