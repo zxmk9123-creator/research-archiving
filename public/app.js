@@ -57,10 +57,11 @@ async function renderHome() {
 }
 
 async function renderArchive(query = {}) {
-  const [sectors, usages, items] = await Promise.all([
-    api('/sectors'), api('/usages'), api('/items?status=Published' + toQuery(query)),
+  const [sectors, usages, sources, items] = await Promise.all([
+    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
   ]);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
+  const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
 
   const { byParent, byId } = buildSectorMaps(sectors);
   const selectedSectorIds = new Set(
@@ -71,7 +72,9 @@ async function renderArchive(query = {}) {
     ? sectorAncestryPath(byId, [...selectedSectorIds][0]).slice(0, -1)
     : [];
 
-  const hasActiveFilters = Boolean(query.q || query.usage || query.type || selectedSectorIds.size);
+  const hasActiveFilters = Boolean(
+    query.q || query.usage || query.type || query.source_id || query.from || query.to || selectedSectorIds.size
+  );
   const emptyState = items.length
     ? ''
     : `<div class="archive-empty">
@@ -90,6 +93,9 @@ async function renderArchive(query = {}) {
             <option value="">유형 전체</option>
             ${['뉴스', '보고서', '통계', '규제'].map((t) => `<option ${query.type === t ? 'selected' : ''}>${t}</option>`).join('')}
           </select>
+          <select id="f-source"><option value="">발행처 전체</option>${sourceOpts}</select>
+          <input id="f-from" type="date" value="${query.from || ''}" title="시작일">
+          <input id="f-to" type="date" value="${query.to || ''}" title="종료일">
           <button class="btn" id="f-clear">초기화</button>
           <button class="btn primary" id="f-apply">필터 적용</button>
         </div>
@@ -169,6 +175,9 @@ async function renderArchive(query = {}) {
       sector: [...selectedSectorIds].join(','),
       usage: document.getElementById('f-usage').value,
       type: document.getElementById('f-type').value,
+      source_id: document.getElementById('f-source').value,
+      from: document.getElementById('f-from').value,
+      to: document.getElementById('f-to').value,
     }).slice(1);
   };
   document.getElementById('f-clear').onclick = () => { location.hash = '#/archive'; };
@@ -179,11 +188,33 @@ function toQuery(obj) {
   return params.length ? '&' + new URLSearchParams(params).toString() : '';
 }
 
+// Lightweight per-browser identity (no auth system) used only to tell "my"
+// personal saves / team picks apart from everyone else's, and to avoid
+// double-counting the same person's team pick in the ranking.
+function getUserEmail(promptIfMissing) {
+  let email = localStorage.getItem('ra_user_email');
+  if (!email && promptIfMissing) {
+    email = (prompt('개인 저장 / 팀 Pick은 이메일로 구분됩니다. 이메일을 입력해주세요:') || '').trim();
+    if (email) localStorage.setItem('ra_user_email', email);
+  }
+  return email || null;
+}
+
 async function renderDetail(id) {
-  const item = await api(`/items/${id}`);
+  const [item, picks, related] = await Promise.all([
+    api(`/items/${id}`),
+    api(`/picks?item_id=${id}`).catch(() => []),
+    api(`/items/${id}/related`).catch(() => []),
+  ]);
   const usageTags = (item.usages || []).map((u) => `<span class="pill">${u.name}</span>`).join('');
   const sectorTags = (item.sectors || []).map((s) => `<span class="pill">${s.name}</span>`).join('');
   const companyTags = (item.companies || []).map((c) => `<span class="pill">🏢 ${c.name}</span>`).join('');
+
+  const myEmail = getUserEmail(false);
+  const myPersonalPick = myEmail ? picks.find((p) => p.kind === 'personal' && p.user_email === myEmail) : null;
+  const myTeamPick = myEmail ? picks.find((p) => p.kind === 'team' && p.user_email === myEmail) : null;
+  const teamPickCount = picks.filter((p) => p.kind === 'team').length;
+
   app.innerHTML = `
     <div class="detail">
       ${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
@@ -198,14 +229,39 @@ async function renderDetail(id) {
       <div class="section"><h2>출처 표기</h2><code id="attr">${item.attribution || item.source_url}</code>
         <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('attr').textContent)">복사</button>
       </div>
-      <div class="section">
-        <button class="btn primary" id="pick-btn">팀 Pick 저장</button>
+      <div class="section" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button class="btn ${myPersonalPick ? 'primary' : ''}" id="personal-pick-btn">${myPersonalPick ? '개인 저장됨 (취소)' : '개인 저장'}</button>
+        <button class="btn ${myTeamPick ? 'primary' : ''}" id="team-pick-btn">${myTeamPick ? '팀 Pick 취소' : '팀 Pick 저장'}</button>
+        <span class="meta">팀 Pick ${teamPickCount}명</span>
       </div>
+      ${related.length ? `
+        <div class="section">
+          <h2>관련 자료</h2>
+          <div class="grid">${related.map(itemCard).join('')}</div>
+        </div>
+      ` : ''}
     </div>
   `;
-  document.getElementById('pick-btn').onclick = async () => {
-    await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'team' }) });
-    alert('Pick 저장됨');
+
+  document.getElementById('personal-pick-btn').onclick = async () => {
+    if (myPersonalPick) {
+      await api(`/picks/${myPersonalPick.id}`, { method: 'DELETE' });
+    } else {
+      const email = getUserEmail(true);
+      if (!email) return;
+      await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'personal', user_email: email }) });
+    }
+    renderDetail(id);
+  };
+  document.getElementById('team-pick-btn').onclick = async () => {
+    if (myTeamPick) {
+      await api(`/picks/${myTeamPick.id}`, { method: 'DELETE' });
+    } else {
+      const email = getUserEmail(true);
+      if (!email) return;
+      await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'team', user_email: email }) });
+    }
+    renderDetail(id);
   };
 }
 

@@ -72,6 +72,25 @@ router.get('/:id', async (req, res) => {
   res.json(rows[0]);
 });
 
+// Related = published items sharing at least one sector or usage tag,
+// ranked by how many tags overlap. No separate recommendation model needed.
+router.get('/:id/related', async (req, res) => {
+  const { rows } = await pool.query(`
+    ${ITEM_SELECT}
+    WHERE i.id <> $1 AND i.status = 'Published'
+      AND (
+        EXISTS (SELECT 1 FROM item_sectors a WHERE a.item_id = i.id AND a.sector_id IN (SELECT sector_id FROM item_sectors WHERE item_id = $1))
+        OR EXISTS (SELECT 1 FROM item_usages a WHERE a.item_id = i.id AND a.usage_id IN (SELECT usage_id FROM item_usages WHERE item_id = $1))
+      )
+    ORDER BY (
+      (SELECT COUNT(*) FROM item_sectors a WHERE a.item_id = i.id AND a.sector_id IN (SELECT sector_id FROM item_sectors WHERE item_id = $1))
+      + (SELECT COUNT(*) FROM item_usages a WHERE a.item_id = i.id AND a.usage_id IN (SELECT usage_id FROM item_usages WHERE item_id = $1))
+    ) DESC, i.published_at DESC NULLS LAST
+    LIMIT 6
+  `, [req.params.id]);
+  res.json(rows);
+});
+
 async function setTags(itemId, sectorIds = [], usageIds = []) {
   await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
   await pool.query('DELETE FROM item_usages WHERE item_id = $1', [itemId]);
