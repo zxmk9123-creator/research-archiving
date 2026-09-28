@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const { runDueCollections } = require('./lib/collector');
 
 const app = express();
 app.use(express.json());
@@ -17,3 +18,9 @@ app.get('*', (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`listening on ${port}`));
+
+// Scheduled auto-collection: check hourly for RSS sources due per their frequency_days.
+const COLLECTION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+setInterval(() => {
+  runDueCollections().catch((err) => console.error('collection run failed', err));
+}, COLLECTION_CHECK_INTERVAL_MS);

@@ -23,8 +23,13 @@ CREATE TABLE IF NOT EXISTS sources (
   owner TEXT,
   trust_grade CHAR(1) CHECK (trust_grade IN ('A','B','C')) DEFAULT 'A',
   last_collected_at TIMESTAMPTZ,
+  last_error TEXT,
+  last_error_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (

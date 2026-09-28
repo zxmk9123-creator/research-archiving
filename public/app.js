@@ -27,13 +27,24 @@ function itemCard(item) {
 }
 
 async function renderHome() {
-  const [published, ranking] = await Promise.all([
+  const [published, ranking, sources] = await Promise.all([
     api('/items?status=Published'),
     api('/picks/ranking').catch(() => []),
+    api('/sources').catch(() => []),
   ]);
   const recent = published.slice(0, 9);
+  const failedSources = sources.filter((s) => s.last_error);
+  const warning = failedSources.length
+    ? `<div class="section" style="border:1px solid var(--reg);border-radius:8px;padding:12px;margin-bottom:16px;background:#fef2f2">
+        <strong class="stale">수집 실패 경고</strong>
+        <ul style="margin:8px 0 0;padding-left:18px">
+          ${failedSources.map((s) => `<li>${s.name}: ${s.last_error} (${new Date(s.last_error_at).toLocaleString()})</li>`).join('')}
+        </ul>
+      </div>`
+    : '';
   app.innerHTML = `
     <h1>Home</h1>
+    ${warning}
     <h2>이번 주 최신 이슈</h2>
     <div class="grid">${recent.map(itemCard).join('') || '<p>발행된 자료가 없습니다.</p>'}</div>
     <h2 style="margin-top:28px">팀 Pick · 많이 본 자료</h2>
@@ -116,25 +127,42 @@ async function renderSources() {
   app.innerHTML = `
     <h1>Sources</h1>
     <table>
-      <tr><th>이름</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th></tr>
+      <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
       ${sources.map((s) => `<tr>
-        <td>${s.name}</td><td>${s.owner || '-'}</td><td>${s.frequency_days}</td>
+        <td>${s.name}</td><td>${s.method}</td><td>${s.owner || '-'}</td><td>${s.frequency_days}</td>
         <td>${s.trust_grade}</td><td>${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
-        <td>${s.stale ? '<span class="stale">Stale</span>' : 'OK'}</td>
+        <td>${s.last_error ? `<span class="stale" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="stale">Stale</span>' : 'OK')}</td>
+        <td>${s.method === 'rss' ? `<button class="btn" data-collect="${s.id}">지금 수집</button>` : ''}</td>
       </tr>`).join('')}
     </table>
     <h2 style="margin-top:24px">소스 추가</h2>
     <div class="form-row"><label>이름</label><input id="s-name"></div>
-    <div class="form-row"><label>URL</label><input id="s-url"></div>
+    <div class="form-row"><label>수집방식</label>
+      <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="crawl">crawl</option></select>
+    </div>
+    <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
     <div class="form-row"><label>오너</label><input id="s-owner"></div>
     <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
     <button class="btn primary" id="s-add">추가</button>
   `;
+  document.querySelectorAll('[data-collect]').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = '수집 중...';
+      try {
+        await api(`/sources/${btn.dataset.collect}/collect`, { method: 'POST' });
+      } catch (err) {
+        alert(`수집 실패: ${err.message}`);
+      }
+      renderSources();
+    };
+  });
   document.getElementById('s-add').onclick = async () => {
     await api('/sources', {
       method: 'POST',
       body: JSON.stringify({
         name: document.getElementById('s-name').value,
+        method: document.getElementById('s-method').value,
         url: document.getElementById('s-url').value,
         owner: document.getElementById('s-owner').value,
         frequency_days: Number(document.getElementById('s-freq').value) || 1,
