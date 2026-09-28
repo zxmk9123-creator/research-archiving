@@ -121,6 +121,7 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
     return { ok: true };
   } catch (err) {
     const reason = sanitizeError(err);
+    console.error(`AI draft generation failed for item ${itemId}: ${reason}`);
     await pool.query(`UPDATE items SET ai_status = 'failed', ai_error = $1 WHERE id = $2`, [reason, itemId]);
     return { ok: false, error: reason };
   }
