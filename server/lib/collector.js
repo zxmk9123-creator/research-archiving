@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { parseFeed, toDateOnly } = require('./feedParser');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
+const { generateAiDraftForItem } = require('./aiDraft');
 
 const MAX_ITEMS_PER_RUN = 20;
 const TITLE_SIMILARITY_THRESHOLD = 0.82;
@@ -52,6 +53,15 @@ async function collectSource(source) {
         [fi.title, fi.link, toDateOnly(fi.pubDate), source.id, fi.description]
       );
       await matchCompanies(rows[0].id, `${fi.title} ${fi.description || ''}`);
+
+      // Fire-and-forget: AI drafting must never block or fail RSS collection.
+      // generateAiDraftForItem never throws (it resolves { ok: false, ... }
+      // on failure and records it on the item), so this .catch is only a
+      // last-resort safety net.
+      generateAiDraftForItem(rows[0].id).catch((err) => {
+        console.error(`AI draft generation errored for item ${rows[0].id}: ${err.message}`);
+      });
+
       existingUrls.add(fi.link);
       recentTitles.push(fi.title);
       inserted++;

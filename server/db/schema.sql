@@ -56,6 +56,18 @@ CREATE TABLE IF NOT EXISTS items (
   collected_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- AI draft layer: suggestions only, kept in their own columns so they can
+-- never silently overwrite reviewer-confirmed summary/insight/tags. A
+-- reviewer must explicitly apply a suggestion (client-side copy) before it
+-- becomes part of the canonical record.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_status TEXT CHECK (ai_status IN ('not_requested','pending','completed','failed')) DEFAULT 'not_requested';
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_key_takeaway TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_suggested_sectors INTEGER[] DEFAULT '{}';
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_suggested_usages INTEGER[] DEFAULT '{}';
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_error TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_generated_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,

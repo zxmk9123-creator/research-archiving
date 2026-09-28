@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata } = require('../lib/extractMetadata');
+const { generateAiDraftForItem } = require('../lib/aiDraft');
 
 const router = express.Router();
 
@@ -89,6 +90,27 @@ router.get('/:id/related', async (req, res) => {
     LIMIT 6
   `, [req.params.id]);
   res.json(rows);
+});
+
+// Manual trigger/retry for a Draft item's AI draft. Restricted to Draft
+// status (the milestone's scope: newly collected / manually added Draft
+// items — never bulk-regenerating the published archive). A reviewer may
+// explicitly retry even after 'completed'; concurrent 'pending' is rejected
+// so double-clicking can't fire two overlapping generations for one item.
+router.post('/:id/ai-draft', async (req, res) => {
+  const { rows } = await pool.query('SELECT id, status, ai_status FROM items WHERE id = $1', [req.params.id]);
+  const item = rows[0];
+  if (!item) return res.status(404).json({ error: 'not found' });
+  if (item.status !== 'Draft') {
+    return res.status(400).json({ error: 'Draft 상태의 항목만 AI 초안을 생성할 수 있습니다.' });
+  }
+  if (item.ai_status === 'pending') {
+    return res.status(409).json({ error: 'AI 초안 생성이 이미 진행 중입니다.' });
+  }
+
+  const result = await generateAiDraftForItem(item.id);
+  const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [item.id]);
+  res.json({ ok: result.ok, error: result.error, item: full[0] });
 });
 
 async function setTags(itemId, sectorIds = [], usageIds = []) {

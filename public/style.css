@@ -38,6 +38,13 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 .chiplist { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
 .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
+.chip.ai-suggested { background: #eef2ff; border: 1px dashed var(--news); color: var(--news); }
+.chip.ai-suggested:hover { background: #dfe6ff; }
+
+.ai-box { border: 1px solid var(--border); border-left: 3px solid var(--news); border-radius: 8px; padding: 12px; background: #f8fafc; margin-top: 12px; }
+.ai-box h3 { margin: 0 0 8px; font-size: 13px; color: var(--news); display: flex; align-items: center; }
+.ai-box .form-row { margin-bottom: 8px; }
+.ai-box .form-row p { margin: 0; font-size: 13px; }
 
 /* Archive filter module — scoped local tokens (60:30:10 calm blue), so the
    rest of the app (Home/Sources/Review/Detail) keeps its existing look. */

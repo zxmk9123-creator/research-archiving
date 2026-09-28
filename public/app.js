@@ -332,6 +332,8 @@ async function renderReview() {
   const sourceOpts = sources.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
   const sectorChips = sectors.map((s) => `<span class="chip" data-sector="${s.id}">${s.name}</span>`).join('');
   const usageChips = usages.map((u) => `<span class="chip" data-usage="${u.id}">${u.name}</span>`).join('');
+  const sectorById = new Map(sectors.map((s) => [s.id, s]));
+  const usageById = new Map(usages.map((u) => [u.id, u]));
 
   function bindChips(container, selectedIds) {
     container.querySelectorAll('.chip').forEach((chip) => {
@@ -413,12 +415,54 @@ async function renderReview() {
       return;
     }
     const item = await api(`/items/${id}`);
+
+    function renderAiBox() {
+      if (item.ai_status === 'pending') {
+        return `<div class="ai-box"><h3>AI 초안</h3><p class="meta">AI 초안 생성 중...</p></div>`;
+      }
+      if (item.ai_status === 'failed') {
+        return `<div class="ai-box">
+          <h3>AI 초안</h3>
+          <p class="meta">AI 초안을 생성하지 못했습니다. 원문을 확인해 직접 작성할 수 있습니다.</p>
+          <button class="btn" id="ai-retry-btn" type="button">다시 시도</button>
+        </div>`;
+      }
+      if (item.ai_status === 'completed') {
+        const sectorChipsAi = (item.ai_suggested_sectors || [])
+          .map((sid) => sectorById.get(sid))
+          .filter(Boolean)
+          .map((s) => `<span class="chip ai-suggested" data-apply-sector="${s.id}">${s.name}</span>`)
+          .join('') || '<span class="meta">제안 없음</span>';
+        const usageChipsAi = (item.ai_suggested_usages || [])
+          .map((uid) => usageById.get(uid))
+          .filter(Boolean)
+          .map((u) => `<span class="chip ai-suggested" data-apply-usage="${u.id}">${u.name}</span>`)
+          .join('') || '<span class="meta">제안 없음</span>';
+        return `<div class="ai-box">
+          <h3>AI 초안 <button class="btn" id="ai-retry-btn" type="button" style="margin-left:8px">다시 생성</button></h3>
+          <p class="meta">AI는 제목/원문 요약만을 근거로 초안을 작성했습니다. 전체 본문을 검토한 것은 아니니 반드시 확인 후 사용하세요.</p>
+          <div class="form-row"><label>요약</label><p>${item.ai_summary || ''}</p></div>
+          <div class="form-row"><label>핵심 내용</label><p>${item.ai_key_takeaway || ''}</p></div>
+          <div class="form-row"><label>추천 섹터 (클릭하여 적용)</label><div class="chiplist">${sectorChipsAi}</div></div>
+          <div class="form-row"><label>추천 활용처 (클릭하여 적용)</label><div class="chiplist">${usageChipsAi}</div></div>
+          <button class="btn primary" id="ai-apply-all-btn" type="button">AI 제안 전체 적용</button>
+        </div>`;
+      }
+      // not_requested
+      return `<div class="ai-box">
+        <h3>AI 초안</h3>
+        <p class="meta">아직 AI 초안이 생성되지 않았습니다.</p>
+        <button class="btn" id="ai-retry-btn" type="button">AI 초안 생성</button>
+      </div>`;
+    }
+
     document.getElementById('review-body').innerHTML = `
       <div class="review-layout">
         <div class="orig">
           <h2>원문</h2>
           <p><a href="${item.source_url}" target="_blank">${item.source_url}</a></p>
           <p>${item.title}</p>
+          ${renderAiBox()}
         </div>
         <div class="orig">
           <div class="form-row"><label>핵심 요약</label><textarea id="d-summary" rows="4">${item.summary || ''}</textarea></div>
@@ -431,6 +475,50 @@ async function renderReview() {
     `;
     bindChips(document.getElementById('d-sectors'), (item.sectors || []).map((s) => s.id));
     bindChips(document.getElementById('d-usages'), (item.usages || []).map((u) => u.id));
+
+    // AI suggestion chips activate the corresponding real chip; they never
+    // write to the server directly — only "발행" persists anything.
+    document.querySelectorAll('[data-apply-sector]').forEach((el) => {
+      el.onclick = () => {
+        const chip = document.querySelector(`#d-sectors [data-sector="${el.dataset.applySector}"]`);
+        if (chip) chip.classList.add('active');
+      };
+    });
+    document.querySelectorAll('[data-apply-usage]').forEach((el) => {
+      el.onclick = () => {
+        const chip = document.querySelector(`#d-usages [data-usage="${el.dataset.applyUsage}"]`);
+        if (chip) chip.classList.add('active');
+      };
+    });
+    const applyAllBtn = document.getElementById('ai-apply-all-btn');
+    if (applyAllBtn) {
+      applyAllBtn.onclick = () => {
+        if (item.ai_summary) document.getElementById('d-summary').value = item.ai_summary;
+        if (item.ai_key_takeaway) document.getElementById('d-insight').value = item.ai_key_takeaway;
+        (item.ai_suggested_sectors || []).forEach((sid) => {
+          const chip = document.querySelector(`#d-sectors [data-sector="${sid}"]`);
+          if (chip) chip.classList.add('active');
+        });
+        (item.ai_suggested_usages || []).forEach((uid) => {
+          const chip = document.querySelector(`#d-usages [data-usage="${uid}"]`);
+          if (chip) chip.classList.add('active');
+        });
+      };
+    }
+    const aiRetryBtn = document.getElementById('ai-retry-btn');
+    if (aiRetryBtn) {
+      aiRetryBtn.onclick = async () => {
+        aiRetryBtn.disabled = true;
+        aiRetryBtn.textContent = '생성 중...';
+        try {
+          await api(`/items/${id}/ai-draft`, { method: 'POST' });
+        } catch (err) {
+          // sanitized message already; just surface it and let the reload show state
+        }
+        loadDraft(id);
+      };
+    }
+
     document.getElementById('d-publish').onclick = async () => {
       await api(`/items/${id}`, {
         method: 'PATCH',
