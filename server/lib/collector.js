@@ -1,8 +1,11 @@
 const pool = require('../db/pool');
 const { parseFeed, toDateOnly } = require('./feedParser');
 const { matchCompanies } = require('./companyMatch');
+const { titleSimilarity } = require('./similarity');
 
 const MAX_ITEMS_PER_RUN = 20;
+const TITLE_SIMILARITY_THRESHOLD = 0.82;
+const RECENT_TITLES_LIMIT = 500;
 
 async function fetchFeedItems(url) {
   const res = await fetch(url, {
@@ -14,14 +17,34 @@ async function fetchFeedItems(url) {
   return parseFeed(xml).slice(0, MAX_ITEMS_PER_RUN);
 }
 
-// Collect one source: fetch its feed, skip URLs already archived (dedup),
-// insert the rest as Draft items, then record success/failure on the source.
+// Dedup an incoming (title, url) against exact URL matches and near-duplicate
+// titles (Dice bigram similarity) among recently collected items.
+function isDuplicate(fi, existingUrls, recentTitles) {
+  if (existingUrls.has(fi.link)) return true;
+  return recentTitles.some((t) => titleSimilarity(fi.title, t) >= TITLE_SIMILARITY_THRESHOLD);
+}
+
+// Collect one source: fetch its feed, skip items already archived by URL or
+// near-duplicate title, insert the rest as Draft, then record source status.
 async function collectSource(source) {
   try {
     const feedItems = await fetchFeedItems(source.url);
+
+    const { rows: urlRows } = await pool.query(
+      'SELECT source_url FROM items WHERE source_url = ANY($1)',
+      [feedItems.map((fi) => fi.link)]
+    );
+    const existingUrls = new Set(urlRows.map((r) => r.source_url));
+
+    const { rows: titleRows } = await pool.query(
+      'SELECT title FROM items ORDER BY collected_at DESC LIMIT $1',
+      [RECENT_TITLES_LIMIT]
+    );
+    const recentTitles = titleRows.map((r) => r.title);
+
+    let inserted = 0;
     for (const fi of feedItems) {
-      const { rows: existing } = await pool.query('SELECT id FROM items WHERE source_url = $1', [fi.link]);
-      if (existing.length) continue;
+      if (isDuplicate(fi, existingUrls, recentTitles)) continue;
 
       const { rows } = await pool.query(
         `INSERT INTO items (title, source_url, published_at, source_id, type, summary)
@@ -29,12 +52,15 @@ async function collectSource(source) {
         [fi.title, fi.link, toDateOnly(fi.pubDate), source.id, fi.description]
       );
       await matchCompanies(rows[0].id, `${fi.title} ${fi.description || ''}`);
+      existingUrls.add(fi.link);
+      recentTitles.push(fi.title);
+      inserted++;
     }
     await pool.query(
       'UPDATE sources SET last_collected_at = now(), last_error = NULL, last_error_at = NULL WHERE id = $1',
       [source.id]
     );
-    return { sourceId: source.id, ok: true, count: feedItems.length };
+    return { sourceId: source.id, ok: true, count: inserted, fetched: feedItems.length };
   } catch (err) {
     await pool.query(
       'UPDATE sources SET last_error = $1, last_error_at = now() WHERE id = $2',
