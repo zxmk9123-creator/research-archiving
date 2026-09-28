@@ -15,6 +15,8 @@ function typeTag(t) {
   return `<span class="tag ${TYPE_CLASS[t] || ''}">${t}</span>`;
 }
 
+const { buildSectorMaps, sectorAncestryPath, buildColumns } = SectorTree;
+
 function itemCard(item) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
   return `<div class="card" onclick="location.hash='#/detail/${item.id}'">
@@ -58,13 +60,21 @@ async function renderArchive(query = {}) {
   const [sectors, usages, items] = await Promise.all([
     api('/sectors'), api('/usages'), api('/items?status=Published' + toQuery(query)),
   ]);
-  const sectorOpts = sectors.map((s) => `<option value="${s.id}" ${String(query.sector) === String(s.id) ? 'selected' : ''}>${s.parent_id ? '　' : ''}${s.name}</option>`).join('');
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
+
+  const { byParent, byId } = buildSectorMaps(sectors);
+  const selectedSectorIds = new Set(
+    (query.sector ? String(query.sector).split(',') : []).filter(Boolean).map(Number)
+  );
+  // Pre-open the branch leading to the first selected sector, if any, so it's visible on load.
+  let activePath = selectedSectorIds.size
+    ? sectorAncestryPath(byId, [...selectedSectorIds][0]).slice(0, -1)
+    : [];
+
   app.innerHTML = `
     <h1>Archive</h1>
     <div class="filters">
       <input id="f-q" placeholder="검색" value="${query.q || ''}">
-      <select id="f-sector"><option value="">섹터 전체</option>${sectorOpts}</select>
       <select id="f-usage"><option value="">활용처 전체</option>${usageOpts}</select>
       <select id="f-type">
         <option value="">유형 전체</option>
@@ -73,13 +83,77 @@ async function renderArchive(query = {}) {
       <button class="btn" id="f-apply">필터 적용</button>
       <button class="btn" id="f-clear">초기화</button>
     </div>
+    <div class="form-row">
+      <label>섹터 (다중 선택 가능)</label>
+      <div class="chiplist" id="sector-chips"></div>
+      <div class="sector-tree" id="sector-tree"></div>
+    </div>
     <div class="count">${items.length}개 결과</div>
     <div class="grid">${items.map(itemCard).join('') || '<p>결과가 없습니다.</p>'}</div>
   `;
+
+  const treeEl = document.getElementById('sector-tree');
+  const chipsEl = document.getElementById('sector-chips');
+
+  function renderChips() {
+    const ids = [...selectedSectorIds];
+    chipsEl.innerHTML = ids.length
+      ? ids.map((id) => `<span class="chip active" data-remove-sector="${id}">${(byId.get(id) || {}).name || id} ✕</span>`).join('')
+      : '<span class="meta">선택된 섹터 없음</span>';
+    chipsEl.querySelectorAll('[data-remove-sector]').forEach((el) => {
+      el.onclick = () => {
+        selectedSectorIds.delete(Number(el.dataset.removeSector));
+        renderTree();
+        renderChips();
+      };
+    });
+  }
+
+  function renderTree() {
+    const columns = buildColumns(byParent, activePath);
+
+    treeEl.innerHTML = columns.map((col) => `
+      <div class="sector-col">
+        ${col.nodes.map((s) => {
+          const hasChildren = (byParent.get(s.id) || []).length > 0;
+          const isActiveBranch = activePath[col.level] === s.id;
+          const isChecked = selectedSectorIds.has(s.id);
+          return `<div class="sector-node ${isActiveBranch ? 'active' : ''}">
+            <label>
+              <input type="checkbox" data-check="${s.id}" ${isChecked ? 'checked' : ''}>
+              <span class="sector-node-label" data-nav="${s.id}" data-level="${col.level}">${s.name}</span>
+            </label>
+            ${hasChildren ? '<span class="sector-node-arrow">›</span>' : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    `).join('');
+
+    treeEl.querySelectorAll('[data-nav]').forEach((el) => {
+      el.onclick = () => {
+        const id = Number(el.dataset.nav);
+        const lvl = Number(el.dataset.level);
+        activePath = activePath.slice(0, lvl);
+        activePath[lvl] = id;
+        renderTree();
+      };
+    });
+    treeEl.querySelectorAll('[data-check]').forEach((el) => {
+      el.onchange = () => {
+        const id = Number(el.dataset.check);
+        if (el.checked) selectedSectorIds.add(id); else selectedSectorIds.delete(id);
+        renderChips();
+      };
+    });
+  }
+
+  renderTree();
+  renderChips();
+
   document.getElementById('f-apply').onclick = () => {
     location.hash = '#/archive?' + toQuery({
       q: document.getElementById('f-q').value,
-      sector: document.getElementById('f-sector').value,
+      sector: [...selectedSectorIds].join(','),
       usage: document.getElementById('f-usage').value,
       type: document.getElementById('f-type').value,
     }).slice(1);

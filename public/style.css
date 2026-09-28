@@ -38,3 +38,12 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 .chiplist { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
 .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
+
+.sector-tree { display: flex; gap: 8px; margin-top: 8px; overflow-x: auto; max-width: 100%; padding-bottom: 4px; }
+.sector-col { flex: 0 0 200px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 4px; }
+.sector-node { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.sector-node:hover { background: var(--bg); }
+.sector-node.active { background: #eef2f7; font-weight: 600; }
+.sector-node label { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; min-width: 0; font-size: 13px; }
+.sector-node-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sector-node-arrow { color: var(--muted); font-size: 14px; flex-shrink: 0; }

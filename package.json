@@ -5,7 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "db:init": "node server/db/init.js"
+    "db:init": "node server/db/init.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -49,8 +49,12 @@ router.get('/', async (req, res) => {
   if (to) { params.push(to); clauses.push(`i.published_at <= $${params.length}`); }
   if (q) { params.push(`%${q}%`); clauses.push(`(i.title ILIKE $${params.length} OR i.summary ILIKE $${params.length})`); }
   if (sector) {
-    params.push(sector);
-    clauses.push(`EXISTS (SELECT 1 FROM item_sectors isec WHERE isec.item_id = i.id AND isec.sector_id = $${params.length})`);
+    // Comma-separated list of sector ids (multi-select tree filter); a single id still works.
+    const sectorIds = String(sector).split(',').map(Number).filter((n) => !Number.isNaN(n));
+    if (sectorIds.length) {
+      params.push(sectorIds);
+      clauses.push(`EXISTS (SELECT 1 FROM item_sectors isec WHERE isec.item_id = i.id AND isec.sector_id = ANY($${params.length}))`);
+    }
   }
   if (usage) {
     params.push(usage);
