@@ -112,6 +112,20 @@ async function callGroq({ system, user }) {
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
     console.error(`groq request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+    if (res.status === 404) {
+      // One-off diagnostic: list this account's actual available model ids
+      // so a stale/renamed default can be corrected without guessing.
+      try {
+        const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { authorization: `Bearer ${apiKey}` },
+        });
+        const modelsData = await modelsRes.json();
+        const ids = (modelsData.data || []).map((m) => m.id).join(', ');
+        console.error(`groq available models: ${ids}`);
+      } catch (listErr) {
+        console.error(`groq model list lookup failed: ${listErr.message}`);
+      }
+    }
     throw new Error(`AI provider request failed (${res.status})`);
   }
 
