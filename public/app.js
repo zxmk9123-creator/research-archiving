@@ -18,6 +18,7 @@ function typeTag(t) {
 function itemCard(item) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
   return `<div class="card" onclick="location.hash='#/detail/${item.id}'">
+    ${item.thumbnail_url ? `<img src="${item.thumbnail_url}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:6px;margin-bottom:8px" onerror="this.remove()">` : ''}
     ${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
     <h3>${item.title}</h3>
     <p>${item.summary || ''}</p>
@@ -178,8 +179,15 @@ async function renderReview() {
       document.getElementById('review-body').innerHTML = `
         <div class="review-layout">
           <div class="orig">
+            <div class="form-row"><label>원문 URL</label>
+              <div style="display:flex;gap:6px">
+                <input id="d-url" style="flex:1">
+                <button class="btn" id="d-extract" type="button">메타데이터 가져오기</button>
+              </div>
+              <div class="meta" id="d-extract-status"></div>
+            </div>
             <div class="form-row"><label>제목</label><input id="d-title"></div>
-            <div class="form-row"><label>원문 URL</label><input id="d-url"></div>
+            <div class="form-row"><label>썸네일 URL</label><input id="d-thumb"></div>
             <div class="form-row"><label>유형</label>
               <select id="d-type">${['뉴스', '보고서', '통계', '규제'].map((t) => `<option>${t}</option>`).join('')}</select>
             </div>
@@ -197,12 +205,29 @@ async function renderReview() {
       `;
       bindChips(document.getElementById('d-sectors'), []);
       bindChips(document.getElementById('d-usages'), []);
+      document.getElementById('d-extract').onclick = async () => {
+        const url = document.getElementById('d-url').value;
+        if (!url) return;
+        const status = document.getElementById('d-extract-status');
+        status.textContent = '가져오는 중...';
+        try {
+          const meta = await api('/items/extract-metadata', { method: 'POST', body: JSON.stringify({ url }) });
+          if (meta.title) document.getElementById('d-title').value = meta.title;
+          if (meta.summary) document.getElementById('d-summary').value = meta.summary;
+          if (meta.thumbnail_url) document.getElementById('d-thumb').value = meta.thumbnail_url;
+          if (meta.published_at) document.getElementById('d-date').value = meta.published_at;
+          status.textContent = '메타데이터를 가져왔습니다. 확인 후 필요하면 수정하세요.';
+        } catch (err) {
+          status.textContent = `자동 추출 실패: ${err.message} — 직접 입력해주세요.`;
+        }
+      };
       document.getElementById('d-save').onclick = async () => {
         await api('/items', {
           method: 'POST',
           body: JSON.stringify({
             title: document.getElementById('d-title').value,
             source_url: document.getElementById('d-url').value,
+            thumbnail_url: document.getElementById('d-thumb').value || null,
             type: document.getElementById('d-type').value,
             source_id: document.getElementById('d-source').value || null,
             published_at: document.getElementById('d-date').value || null,

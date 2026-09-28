@@ -1,8 +1,20 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
+const { extractMetadata } = require('../lib/extractMetadata');
 
 const router = express.Router();
+
+router.post('/extract-metadata', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  try {
+    const meta = await extractMetadata(url);
+    res.json(meta);
+  } catch (err) {
+    res.status(422).json({ error: `metadata extraction failed: ${err.message}` });
+  }
+});
 
 const ITEM_SELECT = `
   SELECT i.*, s.name AS source_name, s.trust_grade,
