@@ -38,12 +38,46 @@ async function callAnthropic({ system, user }) {
   return text;
 }
 
+async function callGemini({ system, user }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: { maxOutputTokens: 600 },
+      }),
+      signal: AbortSignal.timeout(20000),
+    }
+  );
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    console.error(`gemini request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+    throw new Error(`AI provider request failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+    && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+    && data.candidates[0].content.parts[0].text;
+  if (!text) throw new Error('AI provider returned an empty response');
+  return text;
+}
+
 // Dispatches on AI_PROVIDER so a different provider can be added later
 // without touching aiDraft.js's orchestration logic.
 async function callProvider(promptMessages) {
   const providerName = process.env.AI_PROVIDER || 'anthropic';
   if (providerName === 'anthropic') return callAnthropic(promptMessages);
+  if (providerName === 'gemini') return callGemini(promptMessages);
   throw new Error(`Unsupported AI_PROVIDER: ${providerName}`);
 }
 
-module.exports = { callProvider, callAnthropic };
+module.exports = { callProvider, callAnthropic, callGemini };
