@@ -267,3 +267,27 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://policy.trade.ec.eur
 INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
 SELECT 'just-food', 'GlobalData (just-food)', 'https://www.just-food.com/feed/', 'rss', 1, 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.just-food.com/feed/');
+
+-- Seed: registry expansion batch 4 (5 sources) — trade/regulation,
+-- shipping/logistics, agriculture/commodities, energy, edible oils/food.
+-- Not pre-verified from this sandbox (outbound network blocked here) —
+-- production's own fetch during collection is the check.
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'World Bank News', 'World Bank', 'https://www.worldbank.org/en/news/all.rss', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.worldbank.org/en/news/all.rss');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'gCaptain', 'gCaptain', 'https://gcaptain.com/feed/', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://gcaptain.com/feed/');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'Farm Policy News', 'University of Illinois', 'https://farmpolicynews.illinois.edu/feed/', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://farmpolicynews.illinois.edu/feed/');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'U.S. EIA Today in Energy', 'U.S. Energy Information Administration', 'https://www.eia.gov/rss/todayinenergy.xml', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.eia.gov/rss/todayinenergy.xml');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'Food Business News — Edible Oils', 'Sosland Publishing', 'https://www.foodbusinessnews.net/rss/topic/79-edible-oils', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.foodbusinessnews.net/rss/topic/79-edible-oils');
