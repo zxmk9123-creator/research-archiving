@@ -18,14 +18,24 @@ function typeTag(t) {
 const { buildSectorMaps, sectorAncestryPath, buildColumns, getSectorCheckState, setSectorSelection } = SectorTree;
 const { classifyEligibilityMatch } = EligibilityMatch;
 
-function itemCard(item) {
+const STAR_ICON = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1.5l2.6 5.5 6 .7-4.4 4.1 1.2 6-5.4-3-5.4 3 1.2-6L1.4 7.7l6-.7z"/></svg>';
+
+// "Important" reuses the existing team-pick signal (picks.kind='team',
+// surfaced today via GET /api/picks/ranking) rather than any new field or
+// an invented scoring algorithm — a team pick is already an explicit human
+// judgment that an item matters. importantIds is optional; callers that
+// don't have that context (e.g. Detail's related-items grid) simply get no
+// importance treatment rather than a wrong guess.
+function itemCard(item, importantIds) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
-  return `<div class="card" onclick="location.hash='#/detail/${item.id}'">
-    ${item.thumbnail_url ? `<img src="${item.thumbnail_url}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:6px;margin-bottom:8px" onerror="this.remove()">` : ''}
-    ${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
+  const isImportant = Boolean(importantIds && importantIds.has(item.id));
+  return `<div class="card ${isImportant ? 'is-important' : ''}" onclick="location.hash='#/detail/${item.id}'">
+    ${item.thumbnail_url ? `<img src="${item.thumbnail_url}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-bottom:10px" onerror="this.remove()">` : ''}
+    ${isImportant ? `<div class="card-importance">${STAR_ICON} 주요 리서치</div>` : ''}
+    <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span></div>
     <h3>${item.title}</h3>
     <p>${item.summary || ''}</p>
-    <div class="meta">${item.source_name || ''} · ${item.published_at || ''} · ${sectors}</div>
+    <div class="meta">${item.source_name || ''} · ${item.published_at || ''}${sectors ? ` · ${sectors}` : ''}</div>
   </div>`;
 }
 
@@ -50,6 +60,18 @@ async function renderArchive(query = {}) {
   const hasActiveFilters = Boolean(
     query.q || query.usage || query.type || query.source_id || query.from || query.to || selectedSectorIds.size
   );
+  // Read-only summary of what's active, shown in the always-visible compact
+  // bar so the filter panel itself doesn't need to stay open to see it.
+  const activeChips = [];
+  if (selectedSectorIds.size) activeChips.push(`섹터 ${selectedSectorIds.size}개`);
+  if (query.usage) activeChips.push((usages.find((u) => String(u.id) === String(query.usage)) || {}).name || '활용처');
+  if (query.type) activeChips.push(query.type);
+  if (query.source_id) activeChips.push((sources.find((s) => String(s.id) === String(query.source_id)) || {}).name || '발행처');
+  if (query.from || query.to) activeChips.push(`${query.from || ''}~${query.to || ''}`);
+  const activeChipsHtml = activeChips.map((c) => `<span class="pill">${c}</span>`).join('');
+
+  const importantIds = new Set(ranking.map((r) => r.id));
+
   const emptyState = items.length
     ? ''
     : `<div class="archive-empty">
@@ -61,10 +83,15 @@ async function renderArchive(query = {}) {
     <h1>Research Archive</h1>
     <p class="page-lede">오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.</p>
     <div class="archive">
-      <details class="archive-filter-panel" ${hasActiveFilters ? 'open' : ''}>
-        <summary>필터 · 섹터${hasActiveFilters ? ` <span class="pill">적용됨</span>` : ''}</summary>
+      <div class="archive-search-bar">
+        <input id="f-q" placeholder="검색" value="${query.q || ''}">
+        <div class="archive-active-chips">${activeChipsHtml}</div>
+        <button class="btn filter-toggle-btn" id="filter-toggle-btn" type="button" aria-expanded="${hasActiveFilters}">
+          필터${activeChips.length ? ` <span class="pill">${activeChips.length}</span>` : ''}
+        </button>
+      </div>
+      <div class="archive-filter-panel ${hasActiveFilters ? 'is-open' : ''}" id="filter-panel">
         <div class="filters">
-          <input id="f-q" placeholder="검색" value="${query.q || ''}">
           <select id="f-usage"><option value="">활용처 전체</option>${usageOpts}</select>
           <select id="f-type">
             <option value="">유형 전체</option>
@@ -81,11 +108,11 @@ async function renderArchive(query = {}) {
           <div class="sector-tree" id="sector-tree"></div>
           <div class="archive-chip-row" id="sector-chips"></div>
         </div>
-      </details>
+      </div>
 
       <div class="section" style="margin-top:0">
         <h2>최신 자료</h2>
-        <div class="grid">${latest.map(itemCard).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
+        <div class="grid">${latest.map((it) => itemCard(it, importantIds)).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
       </div>
 
       <details class="section">
@@ -98,7 +125,7 @@ async function renderArchive(query = {}) {
       <div class="section">
         <div class="section-header"><h2>전체 결과</h2><span class="count">${items.length}개</span></div>
         ${emptyState}
-        <div class="grid">${items.map(itemCard).join('')}</div>
+        <div class="grid">${items.map((it) => itemCard(it, importantIds)).join('')}</div>
       </div>
     </div>
   `;
@@ -177,6 +204,19 @@ async function renderArchive(query = {}) {
     }).slice(1);
   };
   document.getElementById('f-clear').onclick = () => { location.hash = '#/archive'; };
+
+  const filterPanel = document.getElementById('filter-panel');
+  const filterToggleBtn = document.getElementById('filter-toggle-btn');
+  filterToggleBtn.onclick = () => {
+    const willOpen = !filterPanel.classList.contains('is-open');
+    filterPanel.classList.toggle('is-open', willOpen);
+    filterToggleBtn.setAttribute('aria-expanded', String(willOpen));
+  };
+  // Enter in the always-visible search box applies immediately, without
+  // requiring the detail panel to be open.
+  document.getElementById('f-q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('f-apply').click();
+  });
 }
 
 function toQuery(obj) {
