@@ -252,3 +252,18 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.foodnavigator.c
 INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
 SELECT 'FreightWaves', 'FreightWaves', 'https://www.freightwaves.com/news/feed', 'rss', 1, 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.freightwaves.com/news/feed');
+
+-- Seed: replacement batch for feeds that failed in production (USDA/IMF: 403,
+-- FoodNavigator: 404, WTO: fetched 0). Not pre-verified from this sandbox
+-- (outbound network blocked here) — production's own fetch is the check.
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'Reuters Agriculture', 'Reuters', 'https://www.reutersagency.com/feed/?best-sectors=agriculture&post_type=best', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.reutersagency.com/feed/?best-sectors=agriculture&post_type=best');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'European Commission Trade News', 'European Commission', 'https://policy.trade.ec.europa.eu/news_en.rss', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://policy.trade.ec.europa.eu/news_en.rss');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'just-food', 'GlobalData (just-food)', 'https://www.just-food.com/feed/', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.just-food.com/feed/');
