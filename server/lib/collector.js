@@ -3,6 +3,7 @@ const { parseFeed, toDateOnly } = require('./feedParser');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem } = require('./aiDraft');
+const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 
 const MAX_ITEMS_PER_RUN = 20;
 const TITLE_SIMILARITY_THRESHOLD = 0.82;
@@ -44,8 +45,17 @@ async function collectSource(source) {
     const recentTitles = titleRows.map((r) => r.title);
 
     let inserted = 0;
+    let filtered = 0;
     for (const fi of feedItems) {
       if (isDuplicate(fi, existingUrls, recentTitles)) continue;
+
+      // Topic pre-filter: skip entirely (no row, no AI call) for anything
+      // outside the Oil & Fats scope — separate from ai_eligible, which
+      // only ever runs on items that already passed this check.
+      if (!isRelevantToOilFatsScope(fi.title, fi.description)) {
+        filtered++;
+        continue;
+      }
 
       const { rows } = await pool.query(
         `INSERT INTO items (title, source_url, published_at, source_id, type, summary)
@@ -70,7 +80,7 @@ async function collectSource(source) {
       'UPDATE sources SET last_collected_at = now(), last_error = NULL, last_error_at = NULL WHERE id = $1',
       [source.id]
     );
-    return { sourceId: source.id, ok: true, count: inserted, fetched: feedItems.length };
+    return { sourceId: source.id, ok: true, count: inserted, fetched: feedItems.length, filtered };
   } catch (err) {
     await pool.query(
       'UPDATE sources SET last_error = $1, last_error_at = now() WHERE id = $2',
