@@ -100,7 +100,13 @@ async function callGroq({ system, user }) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 600,
+      // Some Groq models (e.g. openai/gpt-oss-20b) are reasoning models that
+      // spend part of the token budget on internal reasoning before writing
+      // the final answer. The JSON contract grew (eligibility + 5W1H facts +
+      // summary), and 600 was getting fully consumed by reasoning, leaving
+      // an empty final message. Raised well above the expanded response's
+      // actual size to leave headroom for reasoning overhead.
+      max_tokens: 2000,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
