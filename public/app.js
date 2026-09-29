@@ -352,9 +352,11 @@ async function renderReview() {
   const reviewed = drafts
     .map((d) => ({ ...d, match: classifyEligibilityMatch(d.ai_eligible, d.reviewer_eligible) }))
     .filter((d) => d.match !== null);
+  // Collapsed by default via the native <details> element — no extra JS
+  // state or event wiring needed, and it degrades to a plain toggle.
   const comparisonSection = reviewed.length
-    ? `<div class="section">
-        <h2>AI vs 리뷰어 적합성 비교</h2>
+    ? `<details class="section">
+        <summary style="cursor:pointer;font-weight:600">AI vs 리뷰어 적합성 비교 ▾</summary>
         <table>
           <tr><th>제목</th><th>AI 판단</th><th>리뷰어 판단</th><th>결과</th></tr>
           ${reviewed.map((d) => `<tr>
@@ -364,7 +366,7 @@ async function renderReview() {
             <td>${MATCH_LABELS[d.match]}</td>
           </tr>`).join('')}
         </table>
-      </div>`
+      </details>`
     : '';
 
   app.innerHTML = `
