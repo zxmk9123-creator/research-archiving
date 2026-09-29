@@ -90,6 +90,24 @@ function buildFactualSummary(facts, modelSummary) {
   return what || '핵심 사실이 확인되지 않았습니다.';
 }
 
+// Groq's chat completion API has no JSON-schema enforcement (see
+// callGroq in provider.js) — the "strict JSON contract" above is prompt
+// text only, so the model frequently emits booleans as quoted strings
+// ("eligible": "true") instead of raw JSON booleans. A pure
+// `typeof === 'boolean'` check treats every one of those as missing and
+// falls back to null, which is what actually happened in production
+// (near-total NULL despite the model rendering an answer almost every
+// time). This normalizes the common string forms before giving up.
+function parseEligible(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
 // Pure validation: parses the model's raw text, enforces the contract, and
 // discards any sector/usage id not present in the taxonomy passed in. Never
 // touches the DB — fully unit-testable without a provider or a database.
@@ -118,7 +136,7 @@ function parseDraftResponse(raw, taxonomy) {
   // Advisory only — a non-boolean verdict means "no recommendation" (null),
   // never a silent false, so Review can tell "AI said no" apart from
   // "AI draft is incomplete/failed to opine".
-  const eligible = typeof parsed.eligible === 'boolean' ? parsed.eligible : null;
+  const eligible = parseEligible(parsed.eligible);
   const eligibilityReason = typeof parsed.eligibility_reason === 'string' && parsed.eligibility_reason.trim()
     ? parsed.eligibility_reason.trim()
     : UNCONFIRMED;
@@ -199,6 +217,7 @@ module.exports = {
   buildUserPrompt,
   buildFactualSummary,
   factOrUnconfirmed,
+  parseEligible,
   parseDraftResponse,
   getTaxonomy,
   sanitizeError,

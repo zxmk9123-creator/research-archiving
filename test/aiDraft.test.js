@@ -6,6 +6,7 @@ const {
   buildTaxonomyBlock,
   buildFactualSummary,
   factOrUnconfirmed,
+  parseEligible,
   UNCONFIRMED,
 } = require('../server/lib/aiDraft');
 
@@ -95,6 +96,36 @@ test('parseDraftResponse: eligible=false is preserved as an explicit recommendat
   const draft = parseDraftResponse(fullResponse({ eligible: false, eligibility_reason: '단순 헤드라인, 구체적 사실 없음' }), taxonomy);
   assert.equal(draft.eligible, false);
   assert.equal(draft.eligibilityReason, '단순 헤드라인, 구체적 사실 없음');
+});
+
+test('parseDraftResponse: a quoted "true"/"false" string from the model (the observed production bug — Groq has no JSON-schema enforcement) is still recognized as a real verdict', () => {
+  assert.equal(parseDraftResponse(fullResponse({ eligible: 'true' }), taxonomy).eligible, true);
+  assert.equal(parseDraftResponse(fullResponse({ eligible: 'false' }), taxonomy).eligible, false);
+});
+
+test('parseEligible: preserves genuine booleans as-is', () => {
+  assert.equal(parseEligible(true), true);
+  assert.equal(parseEligible(false), false);
+});
+
+test('parseEligible: normalizes "true"/"false" strings, including case and surrounding whitespace', () => {
+  assert.equal(parseEligible('true'), true);
+  assert.equal(parseEligible('false'), false);
+  assert.equal(parseEligible('True'), true);
+  assert.equal(parseEligible('FALSE'), false);
+  assert.equal(parseEligible('  true  '), true);
+  assert.equal(parseEligible('  FALSE  '), false);
+});
+
+test('parseEligible: numeric 1/0 are not guessed as booleans — they stay null', () => {
+  assert.equal(parseEligible(1), null);
+  assert.equal(parseEligible(0), null);
+});
+
+test('parseEligible: an unrecognized string, or a missing/undefined value, stays null', () => {
+  assert.equal(parseEligible('yes'), null);
+  assert.equal(parseEligible(undefined), null);
+  assert.equal(parseEligible(null), null);
 });
 
 test('parseDraftResponse: missing eligibility_reason falls back to 미확보 rather than an empty string', () => {
