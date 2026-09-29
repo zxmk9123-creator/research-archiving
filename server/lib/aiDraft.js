@@ -1,5 +1,5 @@
 const pool = require('../db/pool');
-const { callProvider } = require('./ai/provider');
+const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
@@ -223,7 +223,7 @@ function sanitizeError(err) {
 // Safe to call repeatedly: it only ever updates the same row by id, so a
 // retry can never create a duplicate item. Never throws — always resolves
 // with { ok, error? } so a fire-and-forget caller can't crash on it.
-async function generateAiDraftForItem(itemId, providerFn = callProvider) {
+async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallback) {
   const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
   const item = rows[0];
   if (!item) return { ok: false, error: 'item not found' };
@@ -233,7 +233,13 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
   try {
     const taxonomy = await getTaxonomy();
     const userPrompt = buildUserPrompt(item, taxonomy);
-    const raw = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
+    const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
+    // providerFn is callProviderWithFallback by default ({ text, provider }),
+    // but a caller (e.g. a test, or an explicit single-provider override)
+    // may still pass a function returning a bare string — accept both
+    // without changing the output contract.
+    const raw = typeof result === 'string' ? result : result.text;
+    const usedProvider = typeof result === 'string' ? null : result.provider;
     const draft = parseDraftResponse(raw, taxonomy);
 
     await pool.query(
@@ -251,6 +257,9 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
        WHERE id = $8`,
       [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, itemId]
     );
+    // Operational visibility: which provider actually produced this draft
+    // (useful once a fallback chain means it isn't always the same one).
+    console.log(`AI draft generated for item ${itemId} via ${usedProvider || 'unknown provider'}`);
     return { ok: true };
   } catch (err) {
     const reason = sanitizeError(err);
