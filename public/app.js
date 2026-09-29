@@ -88,6 +88,41 @@ function itemCard(item, importantIds, savedIds) {
   </div>`;
 }
 
+// Shared, single implementation reused by whichever page currently
+// displays it (position-only concern — the data/rendering logic itself
+// never duplicates): compact collection-failure summary, collapsed by
+// default, expanding to translated per-source messages.
+function collectionWarningHtml(sources) {
+  const failedSources = sources.filter((s) => s.last_error);
+  if (!failedSources.length) return '';
+  return `<details class="archive-collection-warning">
+      <summary>⚠ ${failedSources.length}개 수집 소스에서 확인이 필요합니다</summary>
+      <ul class="collection-warning-list">
+        ${failedSources.map((s) => {
+          const { message, detail } = translateSourceError(s.last_error);
+          const checked = s.last_error_at ? new Date(s.last_error_at).toLocaleString() : '-';
+          return `<li>
+            <span class="collection-warning-source">${s.name}</span>
+            <span class="collection-warning-message">${message}</span>
+            <span class="collection-warning-meta">마지막 확인 ${checked}${detail ? ` · ${detail}` : ''}</span>
+          </li>`;
+        }).join('')}
+      </ul>
+    </details>`;
+}
+
+// Shared, single implementation of the trust-grade explanation — static
+// markup, no page-specific data, reused by whichever page currently
+// displays it.
+const TRUST_GRADE_EXPLANATION_HTML = `<details class="section">
+      <summary>신뢰등급(A/B/C)이란?</summary>
+      <p class="meta">
+        신뢰등급은 별도의 자동 산정 로직 없이, 소스 등록 시 담당자가 발행처의 공신력·정확성 이력을 근거로
+        직접 A(가장 신뢰)·B·C 중 하나로 지정합니다. 기본값은 A이며, 이후 자동으로 재계산되지 않습니다.
+        수집 성공/실패 이력(위 "상태" 열)은 신뢰등급과 별개로 기록되며, 등급에 영향을 주지 않습니다.
+      </p>
+    </details>`;
+
 async function renderArchive(query = {}) {
   const [sectors, usages, sources, items, ranking] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
@@ -142,24 +177,6 @@ async function renderArchive(query = {}) {
     `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(t.key)}">${t.label}</a>`
   ).join('');
 
-  const failedSources = sources.filter((s) => s.last_error);
-  const collectionWarning = failedSources.length
-    ? `<details class="archive-collection-warning">
-        <summary>⚠ ${failedSources.length}개 수집 소스에서 확인이 필요합니다</summary>
-        <ul class="collection-warning-list">
-          ${failedSources.map((s) => {
-            const { message, detail } = translateSourceError(s.last_error);
-            const checked = s.last_error_at ? new Date(s.last_error_at).toLocaleString() : '-';
-            return `<li>
-              <span class="collection-warning-source">${s.name}</span>
-              <span class="collection-warning-message">${message}</span>
-              <span class="collection-warning-meta">마지막 확인 ${checked}${detail ? ` · ${detail}` : ''}</span>
-            </li>`;
-          }).join('')}
-        </ul>
-      </details>`
-    : '';
-
   const emptyState = visibleItems.length
     ? ''
     : `<div class="archive-empty">
@@ -170,7 +187,7 @@ async function renderArchive(query = {}) {
   app.innerHTML = `
     <h1>Research Archive</h1>
     <p class="page-lede">오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.</p>
-    ${collectionWarning}
+    ${TRUST_GRADE_EXPLANATION_HTML}
     <div class="archive-tabs">${viewTabsHtml}</div>
     <div class="archive">
       <div class="archive-search-bar">
@@ -396,11 +413,6 @@ async function renderDetail(id) {
 
 async function renderSources() {
   const sources = await api('/sources');
-  // The compact collection-failure summary/detail module now lives on
-  // Research Archive (see collectionWarning in renderArchive) — the
-  // canonical place for it, since it's what every visitor sees, not just
-  // whoever manages Sources. Per-row status ("상태" column below) stays
-  // here as part of ordinary source management.
   app.innerHTML = `
     <h1>Sources</h1>
     <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
@@ -426,14 +438,7 @@ async function renderSources() {
       <button class="btn primary" id="s-add">추가</button>
     </details>
 
-    <details class="section">
-      <summary>신뢰등급(A/B/C)이란?</summary>
-      <p class="meta">
-        신뢰등급은 별도의 자동 산정 로직 없이, 소스 등록 시 담당자가 발행처의 공신력·정확성 이력을 근거로
-        직접 A(가장 신뢰)·B·C 중 하나로 지정합니다. 기본값은 A이며, 이후 자동으로 재계산되지 않습니다.
-        수집 성공/실패 이력(위 "상태" 열)은 신뢰등급과 별개로 기록되며, 등급에 영향을 주지 않습니다.
-      </p>
-    </details>
+    ${collectionWarningHtml(sources)}
   `;
   document.querySelectorAll('[data-collect]').forEach((btn) => {
     btn.onclick = async () => {
