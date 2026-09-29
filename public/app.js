@@ -16,6 +16,7 @@ function typeTag(t) {
 }
 
 const { buildSectorMaps, sectorAncestryPath, buildColumns, getSectorCheckState, setSectorSelection } = SectorTree;
+const { classifyEligibilityMatch } = EligibilityMatch;
 
 function itemCard(item) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
@@ -326,13 +327,49 @@ function reviewPriority(d) {
   return 2;
 }
 
+const MATCH_LABELS = {
+  match: '<span class="pill" style="background:#f0fdf4;color:#15803d">일치</span>',
+  ai_false_positive: '<span class="pill" style="background:#fef2f2;color:#b91c1c">AI 오탐 (적합→비적합)</span>',
+  ai_false_negative: '<span class="pill" style="background:#fef2f2;color:#b91c1c">AI 누락 (비적합→적합)</span>',
+};
+
+function eligibilityLabel(v) {
+  if (v === true) return '적합';
+  if (v === false) return '비적합';
+  return '-';
+}
+
 async function renderReview() {
   const [draftsRaw, sectors, usages, sources] = await Promise.all([
     api('/items?status=Draft'), api('/sectors'), api('/usages'), api('/sources'),
   ]);
   const drafts = [...draftsRaw].sort((a, b) => reviewPriority(a) - reviewPriority(b));
+
+  // Comparison view: only Drafts the reviewer has actually confirmed/
+  // overridden (reviewer_eligible is not null) are shown — an unreviewed
+  // item has nothing to compare yet. Read-only, no new DB columns; purely
+  // derived from the existing ai_eligible/reviewer_eligible fields.
+  const reviewed = drafts
+    .map((d) => ({ ...d, match: classifyEligibilityMatch(d.ai_eligible, d.reviewer_eligible) }))
+    .filter((d) => d.match !== null);
+  const comparisonSection = reviewed.length
+    ? `<div class="section">
+        <h2>AI vs 리뷰어 적합성 비교</h2>
+        <table>
+          <tr><th>제목</th><th>AI 판단</th><th>리뷰어 판단</th><th>결과</th></tr>
+          ${reviewed.map((d) => `<tr>
+            <td><a href="#/detail/${d.id}">${d.title}</a></td>
+            <td>${eligibilityLabel(d.ai_eligible)}</td>
+            <td>${eligibilityLabel(d.reviewer_eligible)}</td>
+            <td>${MATCH_LABELS[d.match]}</td>
+          </tr>`).join('')}
+        </table>
+      </div>`
+    : '';
+
   app.innerHTML = `
     <h1>Review</h1>
+    ${comparisonSection}
     <div class="filters">
       <select id="draft-select">
         ${drafts.map((d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
