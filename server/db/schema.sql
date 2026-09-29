@@ -227,3 +227,28 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.hellenicshippin
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'OilPrice.com', 'OilPrice.com', 'https://oilprice.com/rss/main', 'rss', 1, 'e2e-test', 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://oilprice.com/rss/main');
+
+-- Seed: registry expansion batch 2 (5 sources) — agriculture/commodities,
+-- trade/regulation, food/edible oils, shipping/logistics, macro/geopolitics.
+-- FAO News excluded (prior batch found it returns 404). As before, these
+-- URLs are not pre-verified from this sandbox (outbound network blocked
+-- here) — production's own fetch during collection is the verification.
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'USDA Newsroom', 'U.S. Department of Agriculture', 'https://www.usda.gov/rss/latest-releases.xml', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.usda.gov/rss/latest-releases.xml');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'WTO News', 'World Trade Organization', 'https://www.wto.org/english/news_e/news_e.rss', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.wto.org/english/news_e/news_e.rss');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'IMF News', 'International Monetary Fund', 'https://www.imf.org/en/News/rss?language=eng', 'rss', 1, 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.imf.org/en/News/rss?language=eng');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'FoodNavigator', 'FoodNavigator (William Reed)', 'https://www.foodnavigator.com/rss', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.foodnavigator.com/rss');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
+SELECT 'FreightWaves', 'FreightWaves', 'https://www.freightwaves.com/news/feed', 'rss', 1, 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.freightwaves.com/news/feed');
