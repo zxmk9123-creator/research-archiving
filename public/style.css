@@ -157,25 +157,55 @@ th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700; col
 td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); color: var(--text); }
 .stale { color: var(--danger); font-weight: 700; }
 
-.review-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+/* Review workspace: two panes that size to their own content — never
+   forced to equal height, never nested cards. A single hairline column
+   divider (desktop only) is the only border; hierarchy comes from
+   typography, whitespace and the review-divider between sections. */
+.review-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); align-items: start; }
 @media (max-width: 900px) { .review-layout { grid-template-columns: 1fr; } }
-.review-layout iframe, .review-layout .orig {
-  border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--sp-4);
-  background: var(--surface); min-height: 300px; box-shadow: var(--shadow-card);
+.review-pane { min-width: 0; }
+.review-pane:first-child { padding-right: var(--sp-6); border-right: 1px solid var(--border); }
+@media (max-width: 900px) { .review-pane:first-child { padding-right: 0; border-right: none; padding-bottom: var(--sp-5); border-bottom: 1px solid var(--border); } }
+
+.review-meta-row { font-size: 13px; font-weight: 400; color: var(--text-tertiary); margin-bottom: 4px; }
+.review-article-title { font-size: 24px; font-weight: 700; line-height: 1.4; margin: 0 0 var(--sp-2); }
+
+.review-divider { border-top: 1px solid var(--border); margin: var(--sp-5) 0; }
+.review-section + .review-divider { margin-top: var(--sp-5); }
+.review-section { margin-bottom: var(--sp-3); }
+.review-section-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: var(--sp-2); }
+.review-section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); }
+.review-section-title-row .review-section-title { margin-bottom: 0; }
+.review-body-text { font-size: 15px; font-weight: 400; line-height: 1.7; color: var(--text); }
+.review-insight-text { color: var(--text-secondary); }
+.review-status-text { font-size: 13px; font-weight: 400; color: var(--text-tertiary); }
+
+.review-section textarea { width: 100%; padding: 0; border: none; background: transparent; font-size: 15px; font-family: inherit; line-height: 1.7; color: var(--text); resize: vertical; }
+.review-section textarea:focus { outline: none; }
+
+.verdict-badge { display: inline-block; font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+.verdict-badge.is-eligible { color: var(--success); }
+.verdict-badge.is-ineligible { color: var(--danger); }
+.verdict-badge.is-unknown { color: var(--text-tertiary); font-weight: 500; }
+.review-verdict-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); flex-wrap: wrap; }
+
+/* Text-styled action: for secondary/tertiary actions that shouldn't
+   compete visually with a page's one primary button (발행, 필터 적용 등). */
+.btn-text {
+  background: none; border: none; padding: 0; font-size: 13px; font-weight: 500;
+  color: var(--action); cursor: pointer; font-family: inherit;
 }
+.btn-text:hover { text-decoration: underline; }
+.btn-text:disabled { color: var(--text-tertiary); cursor: not-allowed; text-decoration: none; }
+
 .form-row { margin-bottom: var(--sp-3); }
-.form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }
+.form-row label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
 .form-row textarea, .form-row input, .form-row select { width: 100%; padding: 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 14px; font-family: inherit; }
 .chiplist { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 13px; font-weight: 500; cursor: pointer; background: var(--surface); transition: background .15s var(--ease), border-color .15s var(--ease); }
 .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
 .chip.ai-suggested { background: var(--action-soft); border: 1px dashed var(--news); color: var(--news); }
 .chip.ai-suggested:hover { background: #dfe6ff; }
-
-.ai-box { border-left: 3px solid var(--news); border-radius: var(--radius-card); padding: var(--sp-4); background: var(--surface-sunken); margin-top: var(--sp-3); }
-.ai-box h3 { margin: 0 0 var(--sp-2); font-size: 13px; font-weight: 700; color: var(--news); display: flex; align-items: center; }
-.ai-box .form-row { margin-bottom: var(--sp-2); }
-.ai-box .form-row p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text); }
 
 /* Progressive disclosure: one shared look for every collapsed-by-default
    block. Motion communicates "revealing," not decoration. */

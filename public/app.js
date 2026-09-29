@@ -473,7 +473,7 @@ async function renderReview() {
     if (!id) {
       document.getElementById('review-body').innerHTML = `
         <div class="review-layout">
-          <div class="orig">
+          <div class="review-pane">
             <div class="form-row"><label>원문 URL</label>
               <div style="display:flex;gap:6px">
                 <input id="d-url" style="flex:1">
@@ -489,7 +489,7 @@ async function renderReview() {
             <div class="form-row"><label>소스</label><select id="d-source"><option value="">-</option>${sourceOpts}</select></div>
             <div class="form-row"><label>발행일</label><input id="d-date" type="date"></div>
           </div>
-          <div class="orig">
+          <div class="review-pane">
             <div class="form-row"><label>핵심 요약</label><textarea id="d-summary" rows="4"></textarea></div>
             <div class="form-row"><label>인사이트</label><textarea id="d-insight" rows="4"></textarea></div>
             <div class="form-row"><label>섹터</label><div class="chiplist" id="d-sectors">${sectorChips}</div></div>
@@ -540,13 +540,13 @@ async function renderReview() {
 
     function renderAiBox() {
       if (item.ai_status === 'pending') {
-        return `<div class="ai-box"><h3>AI 초안</h3><p class="meta">AI 초안 생성 중...</p></div>`;
+        return `<div class="review-section"><div class="review-section-title">AI 판단</div><p class="review-status-text">생성 중...</p></div>`;
       }
       if (item.ai_status === 'failed') {
-        return `<div class="ai-box">
-          <h3>AI 초안</h3>
-          <p class="meta">AI 초안을 생성하지 못했습니다. 원문을 확인해 직접 작성할 수 있습니다.</p>
-          <button class="btn" id="ai-retry-btn" type="button">다시 시도</button>
+        return `<div class="review-section">
+          <div class="review-section-title">AI 판단</div>
+          <p class="review-status-text">초안을 생성하지 못했습니다. 원문을 확인해 직접 작성할 수 있습니다.</p>
+          <button class="btn-text" id="ai-retry-btn" type="button">다시 시도</button>
         </div>`;
       }
       if (item.ai_status === 'completed') {
@@ -554,63 +554,85 @@ async function renderReview() {
           .map((sid) => sectorById.get(sid))
           .filter(Boolean)
           .map((s) => `<span class="chip ai-suggested" data-apply-sector="${s.id}">${s.name}</span>`)
-          .join('') || '<span class="meta">제안 없음</span>';
+          .join('') || '<span class="review-status-text">제안 없음</span>';
         const usageChipsAi = (item.ai_suggested_usages || [])
           .map((uid) => usageById.get(uid))
           .filter(Boolean)
           .map((u) => `<span class="chip ai-suggested" data-apply-usage="${u.id}">${u.name}</span>`)
-          .join('') || '<span class="meta">제안 없음</span>';
-        const eligibilityBadge = item.ai_eligible === false
-          ? '<span class="pill" style="background:#fef2f2;color:#b91c1c">⚠ 아카이빙 비적합 추정</span>'
-          : item.ai_eligible === true
-            ? '<span class="pill" style="background:#f0fdf4;color:#15803d">아카이빙 적합 추정</span>'
-            : '<span class="pill">AI 판단 없음</span>';
-        const reviewerBadge = item.reviewer_eligible === true
-          ? '<span class="pill" style="background:#f0fdf4;color:#15803d">✓ 리뷰어 확인: 적합</span>'
+          .join('') || '<span class="review-status-text">제안 없음</span>';
+        const verdictClass = item.ai_eligible === false ? 'is-ineligible' : item.ai_eligible === true ? 'is-eligible' : 'is-unknown';
+        const verdictLabel = item.ai_eligible === false ? '비적합' : item.ai_eligible === true ? '적합' : '판단 없음';
+        const reviewerStatus = item.reviewer_eligible === true
+          ? '리뷰어 확인 완료 · 적합'
           : item.reviewer_eligible === false
-            ? '<span class="pill" style="background:#fef2f2;color:#b91c1c">✓ 리뷰어 확인: 비적합</span>'
-            : '<span class="pill">리뷰어 미확인</span>';
-        return `<div class="ai-box">
-          <h3>AI 초안 <button class="btn" id="ai-retry-btn" type="button" style="margin-left:8px">다시 생성</button></h3>
-          <p class="meta">AI는 제목/원문 요약만을 근거로 초안을 작성했습니다. 전체 본문을 검토한 것은 아니니 반드시 확인 후 사용하세요.</p>
-          <div class="form-row"><label>아카이빙 적합성 (AI 추천, 최종 판단은 리뷰어)</label>
-            ${eligibilityBadge}
-            <p class="meta">${item.ai_eligibility_reason || ''}</p>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px">
-              ${reviewerBadge}
-              <button class="btn" id="reviewer-eligible-confirm-btn" type="button">적합으로 확정</button>
-              <button class="btn" id="reviewer-eligible-override-btn" type="button">비적합으로 확정</button>
+            ? '리뷰어 확인 완료 · 비적합'
+            : '리뷰어 미확인';
+        return `
+          <div class="review-section">
+            <div class="review-section-title-row">
+              <span class="review-section-title">AI 판단</span>
+              <button class="btn-text" id="ai-retry-btn" type="button">다시 생성</button>
+            </div>
+            <div class="verdict-badge ${verdictClass}">${verdictLabel}</div>
+            <p class="review-body-text">${item.ai_eligibility_reason || ''}</p>
+            <div class="review-verdict-actions">
+              <button class="btn-text" id="reviewer-eligible-confirm-btn" type="button">적합으로 확정</button>
+              <button class="btn-text" id="reviewer-eligible-override-btn" type="button">비적합으로 확정</button>
+              <span class="review-status-text">${reviewerStatus}</span>
             </div>
           </div>
-          <div class="form-row"><label>AI 요약 (사실, 확인 필요)</label><p>${item.ai_summary || ''}</p></div>
-          <div class="form-row"><label>AI 인사이트 (추론 — 사실 아님)</label><p style="color:#6b21a8">${item.ai_insight || ''}</p></div>
-          <div class="form-row"><label>핵심 내용</label><p>${item.ai_key_takeaway || ''}</p></div>
-          <div class="form-row"><label>추천 섹터 (클릭하여 적용)</label><div class="chiplist">${sectorChipsAi}</div></div>
-          <div class="form-row"><label>추천 활용처 (클릭하여 적용)</label><div class="chiplist">${usageChipsAi}</div></div>
-          <button class="btn primary" id="ai-apply-all-btn" type="button">AI 제안 전체 적용</button>
-        </div>`;
+          <div class="review-divider"></div>
+          <div class="review-section">
+            <div class="review-section-title">AI 요약</div>
+            <p class="review-body-text">${item.ai_summary || ''}</p>
+          </div>
+          <div class="review-divider"></div>
+          <div class="review-section">
+            <div class="review-section-title">AI 인사이트</div>
+            <p class="review-body-text review-insight-text">${item.ai_insight || ''}</p>
+          </div>
+          <div class="review-divider"></div>
+          <div class="review-section">
+            <div class="review-section-title">분류 제안</div>
+            <div class="chiplist">${sectorChipsAi}</div>
+            <div class="chiplist" style="margin-top:6px">${usageChipsAi}</div>
+            <button class="btn-text" id="ai-apply-all-btn" type="button">AI 제안 전체 적용</button>
+          </div>`;
       }
       // not_requested
-      return `<div class="ai-box">
-        <h3>AI 초안</h3>
-        <p class="meta">아직 AI 초안이 생성되지 않았습니다.</p>
-        <button class="btn" id="ai-retry-btn" type="button">AI 초안 생성</button>
+      return `<div class="review-section">
+        <div class="review-section-title">AI 판단</div>
+        <p class="review-status-text">아직 AI 초안이 생성되지 않았습니다.</p>
+        <button class="btn-text" id="ai-retry-btn" type="button">AI 초안 생성</button>
       </div>`;
     }
 
     document.getElementById('review-body').innerHTML = `
       <div class="review-layout">
-        <div class="orig">
-          <h2>원문</h2>
-          <p><a href="${item.source_url}" target="_blank">${item.source_url}</a></p>
-          <p>${item.title}</p>
+        <div class="review-pane">
+          <div class="review-meta-row">${item.source_name || ''} · ${item.published_at || ''}${item.trust_grade ? ` · ${item.trust_grade}` : ''}</div>
+          <h2 class="review-article-title">${item.title}</h2>
+          <a class="btn-text" href="${item.source_url}" target="_blank">원문 보기 ↗</a>
+          <div class="review-divider" style="margin-top:16px"></div>
           ${renderAiBox()}
         </div>
-        <div class="orig">
-          <div class="form-row"><label>핵심 요약</label><textarea id="d-summary" rows="4">${item.summary || ''}</textarea></div>
-          <div class="form-row"><label>인사이트</label><textarea id="d-insight" rows="4">${item.insight || ''}</textarea></div>
-          <div class="form-row"><label>섹터</label><div class="chiplist" id="d-sectors">${sectorChips}</div></div>
-          <div class="form-row"><label>활용처</label><div class="chiplist" id="d-usages">${usageChips}</div></div>
+        <div class="review-pane">
+          <div class="review-section">
+            <div class="review-section-title">핵심 요약</div>
+            <textarea id="d-summary" rows="4">${item.summary || ''}</textarea>
+          </div>
+          <div class="review-section">
+            <div class="review-section-title">인사이트</div>
+            <textarea id="d-insight" rows="4">${item.insight || ''}</textarea>
+          </div>
+          <div class="review-section">
+            <div class="review-section-title">섹터</div>
+            <div class="chiplist" id="d-sectors">${sectorChips}</div>
+          </div>
+          <div class="review-section">
+            <div class="review-section-title">활용처</div>
+            <div class="chiplist" id="d-usages">${usageChips}</div>
+          </div>
           <button class="btn primary" id="d-publish">발행</button>
         </div>
       </div>
