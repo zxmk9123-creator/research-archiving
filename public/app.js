@@ -26,16 +26,32 @@ const STAR_ICON = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="tru
 // judgment that an item matters. importantIds is optional; callers that
 // don't have that context (e.g. Detail's related-items grid) simply get no
 // importance treatment rather than a wrong guess.
+//
+// Editorial grid module: image (existing thumbnail_url) or, when absent, a
+// text-based source-identity module at the same aspect ratio — never a
+// generated image. The hover/mobile summary reuses existing ai_summary
+// first, then summary, exactly as already stored; no new field.
 function itemCard(item, importantIds) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
   const isImportant = Boolean(importantIds && importantIds.has(item.id));
-  return `<div class="card ${isImportant ? 'is-important' : ''}" onclick="location.hash='#/detail/${item.id}'">
-    ${item.thumbnail_url ? `<img src="${item.thumbnail_url}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-bottom:10px" onerror="this.remove()">` : ''}
-    ${isImportant ? `<div class="card-importance">${STAR_ICON} 주요 리서치</div>` : ''}
-    <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span></div>
-    <h3>${item.title}</h3>
-    <p>${item.summary || ''}</p>
-    <div class="meta">${item.source_name || ''} · ${item.published_at || ''}${sectors ? ` · ${sectors}` : ''}</div>
+  const summaryText = item.ai_summary || item.summary || '';
+
+  const media = item.thumbnail_url
+    ? `<img src="${item.thumbnail_url}" alt="" loading="lazy" onerror="this.closest('.card-media').classList.add('is-fallback');this.remove()">`
+    : `<div class="card-media-fallback"><span>${item.source_name || item.type || '자료'}</span></div>`;
+
+  return `<div class="card" onclick="location.hash='#/detail/${item.id}'">
+    <div class="card-media ${item.thumbnail_url ? '' : 'is-fallback'}">
+      ${media}
+      ${isImportant ? `<span class="card-priority-star" title="주요 리서치">${STAR_ICON}</span>` : ''}
+      ${summaryText ? `<div class="card-hover-summary"><p>${summaryText}</p></div>` : ''}
+    </div>
+    <div class="card-body">
+      <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span></div>
+      <h3>${item.title}</h3>
+      <div class="meta">${item.source_name || ''} · ${item.published_at || ''}${sectors ? ` · ${sectors}` : ''}</div>
+      ${summaryText ? `<p class="card-summary-mobile">${summaryText}</p>` : ''}
+    </div>
   </div>`;
 }
 

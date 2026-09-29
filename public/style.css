@@ -90,43 +90,67 @@ p { margin: 0; }
 
 .page-lede { font-size: 15px; font-weight: 400; color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 60ch; }
 
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
 @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------------
-   Research cards — typography and whitespace carry hierarchy, not
-   borders/pills. A minimal border-soft only, shadow for depth on hover.
+   Editorial content module — image (or source-identity fallback) sits
+   outside/above the text, not wrapped in a bordered/shadowed card.
+   Hierarchy comes from whitespace and type, not chrome.
 ------------------------------------------------------------------------ */
-.card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
-  padding: var(--sp-4) var(--sp-4) var(--sp-3); cursor: pointer; box-shadow: none;
-  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
-  position: relative;
+.card { background: transparent; border: none; border-radius: 0; padding: 0; cursor: pointer; box-shadow: none; position: relative; }
+
+.card-media {
+  position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 14px;
+  overflow: hidden; background: var(--surface-sunken);
 }
-.card:hover, .card:focus-visible { border-color: var(--text-tertiary); box-shadow: var(--shadow-card); }
-.card.is-important { border-color: var(--importance-border); }
-.card.is-important:hover { box-shadow: var(--shadow-card-hover), 0 0 0 1px var(--importance-border); }
+.card-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-media-fallback {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: var(--surface-sunken); color: var(--text-tertiary); font-size: 14px; font-weight: 600; text-align: center; padding: var(--sp-3);
+}
 
-.card-importance { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--importance); margin-bottom: 6px; }
-.card-importance svg { color: var(--importance-accent); }
-.card-importance svg { width: 12px; height: 12px; }
+.card-priority-star {
+  position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  color: var(--importance-accent); filter: drop-shadow(0 1px 2px rgba(25, 31, 40, .25));
+}
+.card-priority-star svg { width: 14px; height: 14px; }
 
+/* Desktop-only hover overlay: 2-3 line summary, no modal/tooltip. */
+.card-hover-summary {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  background: linear-gradient(to top, rgba(25, 31, 40, .82), rgba(25, 31, 40, 0));
+  opacity: 0; transform: translateY(4px); transition: opacity .15s var(--ease), transform .15s var(--ease);
+  pointer-events: none;
+}
+.card-hover-summary p {
+  margin: 0; color: #fff; font-size: 13px; font-weight: 400; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .card-hover-summary, .card:focus-visible .card-hover-summary { opacity: 1; transform: none; }
+}
+
+.card-body { padding-top: var(--sp-3); }
 .card-eyebrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .card h3 {
-  margin: 0 0 6px; font-size: 17px; font-weight: 700; line-height: 1.5; color: var(--text);
+  margin: 0 0 6px; font-size: 16px; font-weight: 600; line-height: 23px; color: var(--text); letter-spacing: -.01em;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.card p {
-  font-size: 14px; font-weight: 400; line-height: 1.6; color: var(--text-secondary);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+.card-summary-mobile {
+  display: none; margin-top: 6px; font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--text-secondary);
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+@media (hover: none) {
+  .card-summary-mobile { display: -webkit-box; }
 }
 
-.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; }
+.tag { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; color: #fff; }
 .tag.news { background: var(--news); } .tag.report { background: var(--report); } .tag.stat { background: var(--stat); } .tag.reg { background: var(--reg); }
-.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); margin: 2px 4px 2px 0; }
+.pill { display: inline-block; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); margin: 2px 4px 2px 0; }
 /* Metadata: the quietest tier by design — small, low-contrast, last to read. */
-.meta { font-size: 12px; font-weight: 500; color: var(--text-tertiary); margin-top: var(--sp-2); }
+.meta { font-size: 13px; font-weight: 400; color: var(--text-tertiary); margin-top: var(--sp-2); }
 
 .section { margin-top: var(--sp-7); }
 .section-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--sp-3); }
