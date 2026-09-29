@@ -102,36 +102,40 @@ test('runProviderChain: throws a clear error when no provider is configured', as
   await assert.rejects(() => runProviderChain([]), /No AI provider configured/);
 });
 
-test('buildProviderChain: only includes providers whose API key env var is set', () => {
-  const prevGroq = process.env.GROQ_API_KEY;
-  const prevGemini = process.env.GEMINI_API_KEY;
-  const prevOpenRouter = process.env.OPENROUTER_API_KEY;
+const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'NVIDIA_API_KEY'];
+
+function withProviderEnv(set, fn) {
+  const prev = Object.fromEntries(PROVIDER_ENV_VARS.map((k) => [k, process.env[k]]));
   try {
-    process.env.GROQ_API_KEY = 'test-key';
-    delete process.env.GEMINI_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
+    for (const key of PROVIDER_ENV_VARS) {
+      if (set.includes(key)) process.env[key] = 'test-key';
+      else delete process.env[key];
+    }
+    fn();
+  } finally {
+    for (const key of PROVIDER_ENV_VARS) {
+      if (prev[key] === undefined) delete process.env[key]; else process.env[key] = prev[key];
+    }
+  }
+}
+
+test('buildProviderChain: only includes providers whose API key env var is set', () => {
+  withProviderEnv(['GROQ_API_KEY'], () => {
     const chain = buildProviderChain({ system: 's', user: 'u' });
     assert.deepEqual(chain.map((p) => p.name), ['groq']);
-  } finally {
-    if (prevGroq === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = prevGroq;
-    if (prevGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prevGemini;
-    if (prevOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = prevOpenRouter;
-  }
+  });
 });
 
-test('buildProviderChain: builds the full Groq -> Gemini -> OpenRouter order when all keys are set', () => {
-  const prevGroq = process.env.GROQ_API_KEY;
-  const prevGemini = process.env.GEMINI_API_KEY;
-  const prevOpenRouter = process.env.OPENROUTER_API_KEY;
-  try {
-    process.env.GROQ_API_KEY = 'test-key';
-    process.env.GEMINI_API_KEY = 'test-key';
-    process.env.OPENROUTER_API_KEY = 'test-key';
+test('buildProviderChain: builds the full Groq -> Gemini -> OpenRouter -> Llama -> NVIDIA order when all keys are set', () => {
+  withProviderEnv(PROVIDER_ENV_VARS, () => {
     const chain = buildProviderChain({ system: 's', user: 'u' });
-    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'openrouter']);
-  } finally {
-    if (prevGroq === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = prevGroq;
-    if (prevGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = prevGemini;
-    if (prevOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = prevOpenRouter;
-  }
+    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'openrouter', 'llama', 'nvidia']);
+  });
+});
+
+test('buildProviderChain: falls through to Llama/NVIDIA when only those keys are set', () => {
+  withProviderEnv(['LLAMA_API_KEY', 'NVIDIA_API_KEY'], () => {
+    const chain = buildProviderChain({ system: 's', user: 'u' });
+    assert.deepEqual(chain.map((p) => p.name), ['llama', 'nvidia']);
+  });
 });

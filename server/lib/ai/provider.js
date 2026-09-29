@@ -192,6 +192,62 @@ async function callOpenRouter({ system, user }) {
   return text;
 }
 
+// Meta's Llama API (OpenAI-compatible chat completions).
+async function callLlama({ system, user }) {
+  const apiKey = process.env.LLAMA_API_KEY;
+  if (!apiKey) throw new Error('LLAMA_API_KEY is not configured');
+  const model = process.env.LLAMA_MODEL || 'Llama-3.3-70B-Instruct';
+
+  const res = await fetchProvider('llama', 'https://api.llama.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2000,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+
+  const data = await res.json();
+  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!text) throw new Error('AI provider returned an empty response');
+  return text;
+}
+
+// NVIDIA's hosted NIM endpoint (build.nvidia.com), also OpenAI-compatible.
+async function callNvidia({ system, user }) {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) throw new Error('NVIDIA_API_KEY is not configured');
+  const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-70b-instruct';
+
+  const res = await fetchProvider('nvidia', 'https://integrate.api.nvidia.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2000,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+
+  const data = await res.json();
+  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!text) throw new Error('AI provider returned an empty response');
+  return text;
+}
+
 // Dispatches on AI_PROVIDER to call exactly one named provider — kept as-is
 // for explicit single-provider use (e.g. tests, or forcing one provider).
 async function callProvider(promptMessages) {
@@ -200,6 +256,8 @@ async function callProvider(promptMessages) {
   if (providerName === 'gemini') return callGemini(promptMessages);
   if (providerName === 'groq') return callGroq(promptMessages);
   if (providerName === 'openrouter') return callOpenRouter(promptMessages);
+  if (providerName === 'llama') return callLlama(promptMessages);
+  if (providerName === 'nvidia') return callNvidia(promptMessages);
   throw new Error(`Unsupported AI_PROVIDER: ${providerName}`);
 }
 
@@ -233,6 +291,8 @@ function buildProviderChain(promptMessages) {
   if (process.env.GROQ_API_KEY) chain.push({ name: 'groq', run: () => callGroq(promptMessages) });
   if (process.env.GEMINI_API_KEY) chain.push({ name: 'gemini', run: () => callGemini(promptMessages) });
   if (process.env.OPENROUTER_API_KEY) chain.push({ name: 'openrouter', run: () => callOpenRouter(promptMessages) });
+  if (process.env.LLAMA_API_KEY) chain.push({ name: 'llama', run: () => callLlama(promptMessages) });
+  if (process.env.NVIDIA_API_KEY) chain.push({ name: 'nvidia', run: () => callNvidia(promptMessages) });
   return chain;
 }
 
@@ -251,6 +311,8 @@ module.exports = {
   callGemini,
   callGroq,
   callOpenRouter,
+  callLlama,
+  callNvidia,
   runProviderChain,
   buildProviderChain,
 };
