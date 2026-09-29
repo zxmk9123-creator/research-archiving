@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runProviderChain, buildProviderChain } = require('../server/lib/ai/provider');
+const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback } = require('../server/lib/ai/provider');
 
 function transientError(message) {
   const err = new Error(message);
@@ -87,15 +87,35 @@ test('runProviderChain: a non-transient (invalid contract/application) error doe
   assert.equal(secondCalled, false);
 });
 
-test('runProviderChain: an empty-response error (application-level) does NOT trigger fallback', async () => {
-  let secondCalled = false;
-  const emptyErr = new Error('AI provider returned an empty response'); // no .transient flag
+// Regression for the reported bug: an HTTP 200 response with empty/null
+// content IS a provider failure and MUST trigger fallback — it must never
+// terminate the chain as if it were an application/prompt error.
+test('runProviderChain: Groq 200 + empty content falls back to Gemini', async () => {
   const chain = [
-    fakeProvider('groq', async () => { throw emptyErr; }),
-    fakeProvider('gemini', async () => { secondCalled = true; return 'gemini response'; }),
+    fakeProvider('groq', async () => { throw requireNonEmptyTextError(); }),
+    fakeProvider('gemini', async () => 'gemini response'),
   ];
-  await assert.rejects(() => runProviderChain(chain), /empty response/);
-  assert.equal(secondCalled, false);
+  const result = await runProviderChain(chain);
+  assert.equal(result.provider, 'gemini');
+});
+
+function requireNonEmptyTextError() {
+  try {
+    requireNonEmptyText('', 'groq');
+  } catch (err) {
+    return err;
+  }
+  throw new Error('requireNonEmptyText should have thrown for empty text');
+}
+
+test('requireNonEmptyText: throws a transient error for empty/null/undefined content', () => {
+  for (const value of ['', null, undefined, 0, false]) {
+    assert.throws(() => requireNonEmptyText(value, 'groq'), (err) => err.transient === true);
+  }
+});
+
+test('requireNonEmptyText: returns the text unchanged when non-empty', () => {
+  assert.equal(requireNonEmptyText('hello', 'groq'), 'hello');
 });
 
 test('runProviderChain: throws a clear error when no provider is configured', async () => {
@@ -138,4 +158,123 @@ test('buildProviderChain: falls through to Llama/NVIDIA when only those keys are
     const chain = buildProviderChain({ system: 's', user: 'u' });
     assert.deepEqual(chain.map((p) => p.name), ['llama', 'nvidia']);
   });
+});
+
+// --- End-to-end fetch-mocked tests: exercise the REAL callGroq/callGemini
+// HTTP handling (not just synthetic fake providers), the same code path
+// that had the empty-response bug. ---
+
+function jsonResponse(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
+}
+
+function mockFetchByUrl(handlers) {
+  const original = global.fetch;
+  global.fetch = async (url, init) => {
+    for (const [match, handler] of handlers) {
+      if (url.includes(match)) return handler(url, init);
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  return () => { global.fetch = original; };
+}
+
+test('callProviderWithFallback: Groq success — Gemini is NOT called', async () => {
+  let geminiCalled = false;
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(200, { choices: [{ message: { content: 'groq says hi' } }] })],
+    ['generativelanguage.googleapis.com', async () => { geminiCalled = true; return jsonResponse(200, {}); }],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'groq says hi');
+    assert.equal(result.provider, 'groq');
+    assert.equal(geminiCalled, false);
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: Groq HTTP 200 with empty content falls back to Gemini (the reported bug, fixed)', async () => {
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(200, { choices: [{ message: { content: '' } }] })],
+    ['generativelanguage.googleapis.com', async () => jsonResponse(200, { candidates: [{ content: { parts: [{ text: 'gemini filled in' }] } }] })],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'gemini filled in');
+    assert.equal(result.provider, 'gemini');
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: Groq 429 falls back to Gemini (real HTTP path)', async () => {
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(429, { error: { message: 'rate limited' } })],
+    ['generativelanguage.googleapis.com', async () => jsonResponse(200, { candidates: [{ content: { parts: [{ text: 'gemini response' }] } }] })],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.provider, 'gemini');
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: a non-empty Groq response with invalid-JSON text is returned as-is — no fallback, no parsing here', async () => {
+  // runProviderChain's job stops at "got non-empty text"; JSON validity is
+  // parseDraftResponse's concern later in aiDraft.js, entirely outside this
+  // module. This proves a successful-but-unparseable response never causes
+  // a second provider to be called.
+  let geminiCalled = false;
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(200, { choices: [{ message: { content: 'this is not json' } }] })],
+    ['generativelanguage.googleapis.com', async () => { geminiCalled = true; return jsonResponse(200, {}); }],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'this is not json');
+    assert.equal(result.provider, 'groq');
+    assert.equal(geminiCalled, false);
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: all configured providers failing preserves the existing failed behavior (throws)', async () => {
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(500, { error: 'down' })],
+    ['generativelanguage.googleapis.com', async () => jsonResponse(503, { error: { message: 'overloaded' } })],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    await assert.rejects(() => callProviderWithFallback({ system: 's', user: 'u' }));
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+  }
 });

@@ -13,6 +13,24 @@ function markTransient(err) {
   return err;
 }
 
+// ROOT CAUSE (fixed here): every provider function threw a plain
+// `new Error('AI provider returned an empty response')` with no
+// `.transient` flag when the provider returned HTTP 200 with empty/null
+// content. runProviderChain only advances to the next provider on
+// err.transient === true, so an empty-content response was silently
+// treated as a non-transient "application" failure and stopped the whole
+// chain right there — this is why fallback appeared to "stop at Groq"
+// even though 429/5xx/timeout fallback worked fine. An empty response
+// from the provider is unambiguously a provider-side failure (the model
+// didn't answer), not anything our prompt/parsing did, so it must be
+// transient. This single helper is now used by every provider instead of
+// each one throwing its own untagged error.
+function requireNonEmptyText(text, providerLabel) {
+  if (text) return text;
+  console.error(`${providerLabel} returned HTTP 200 with empty/null content`);
+  throw markTransient(new Error('AI provider returned an empty response'));
+}
+
 // Wraps a provider's fetch call: HTTP 429/5xx become transient errors,
 // other non-ok statuses (400/401/403/404 — bad request, bad key, wrong
 // model id) stay non-transient, and a network-level failure (DNS, refused
@@ -62,7 +80,7 @@ async function callAnthropic({ system, user }) {
   const text = data && data.content && data.content[0] && data.content[0].text;
   // Empty-response is an application/content-quality issue, not provider
   // capacity — deliberately NOT marked transient (see runProviderChain).
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'anthropic');
   return text;
 }
 
@@ -85,7 +103,7 @@ async function callGeminiOnce(model, apiKey, system, user) {
   const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
     && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
     && data.candidates[0].content.parts[0].text;
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'gemini');
   return text;
 }
 
@@ -155,7 +173,7 @@ async function callGroq({ system, user }) {
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'groq');
   return text;
 }
 
@@ -188,7 +206,7 @@ async function callOpenRouter({ system, user }) {
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'openrouter');
   return text;
 }
 
@@ -216,7 +234,7 @@ async function callLlama({ system, user }) {
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'llama');
   return text;
 }
 
@@ -244,7 +262,7 @@ async function callNvidia({ system, user }) {
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!text) throw new Error('AI provider returned an empty response');
+  requireNonEmptyText(text, 'nvidia');
   return text;
 }
 
@@ -270,14 +288,23 @@ async function callProvider(promptMessages) {
 async function runProviderChain(providers) {
   if (!providers.length) throw new Error('No AI provider configured');
   let lastErr;
-  for (const p of providers) {
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i];
+    // Structured, greppable log lines (provider name/status only — never
+    // API keys or prompt/response content) to verify failover behavior
+    // directly from production logs.
+    console.log(`ai_provider request_started provider=${p.name}`);
     try {
       const text = await p.run();
+      console.log(`ai_provider request_succeeded provider=${p.name}`);
       return { text, provider: p.name };
     } catch (err) {
       lastErr = err;
+      const status = err.status ? ` status=${err.status}` : '';
+      console.error(`ai_provider provider_failed provider=${p.name}${status} transient=${Boolean(err.transient)} reason=${err.message}`);
       if (!err.transient) throw err;
-      console.error(`AI provider ${p.name} failed transiently, trying next provider: ${err.message}`);
+      const next = providers[i + 1];
+      if (next) console.log(`ai_provider fallback from=${p.name} to=${next.name}`);
     }
   }
   throw lastErr;
@@ -315,4 +342,5 @@ module.exports = {
   callNvidia,
   runProviderChain,
   buildProviderChain,
+  requireNonEmptyText,
 };
