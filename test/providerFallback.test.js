@@ -365,7 +365,7 @@ test('runProviderChain: an application/JSON/Zod-style error (no .transient flag)
   assert.equal(nvidiaCalled, false);
 });
 
-test('callNvidia: sends the currently supported model, not the EOL meta/llama-3.1-70b-instruct', async () => {
+test('callNvidia: sends the currently supported model, not a retired one', async () => {
   let sentBody;
   const restore = mockFetchByUrl([
     ['integrate.api.nvidia.com', async (url, init) => {
@@ -378,7 +378,8 @@ test('callNvidia: sends the currently supported model, not the EOL meta/llama-3.
     delete process.env.NVIDIA_MODEL;
     await callNvidia({ system: 's', user: 'u' });
     assert.notEqual(sentBody.model, 'meta/llama-3.1-70b-instruct');
-    assert.equal(sentBody.model, 'meta/llama-3.3-70b-instruct');
+    assert.notEqual(sentBody.model, 'meta/llama-3.3-70b-instruct');
+    assert.equal(sentBody.model, 'nvidia/nemotron-3-super-120b-a12b');
   } finally {
     restore();
     delete process.env.NVIDIA_API_KEY;

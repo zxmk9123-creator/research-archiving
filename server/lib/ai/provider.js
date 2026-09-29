@@ -254,13 +254,15 @@ async function callLlama({ system, user }) {
 }
 
 // NVIDIA's hosted NIM endpoint (build.nvidia.com), also OpenAI-compatible.
-// meta/llama-3.3-70b-instruct confirmed current/supported (not EOL) via
-// NVIDIA's official NIM API reference (docs.api.nvidia.com) and NGC
-// catalog listing; meta/llama-3.1-70b-instruct reached EOL 2026-08-26.
+// meta/llama-3.3-70b-instruct's hosted route on this endpoint was retired
+// 2026-08-26 (returns HTTP 410 in production despite still appearing on
+// NVIDIA's static catalog pages); nvidia/nemotron-3-super-120b-a12b is
+// confirmed currently served on this same integrate.api.nvidia.com/v1
+// endpoint via its own docs.api.nvidia.com reference and NGC listing.
 async function callNvidia({ system, user }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY is not configured');
-  const model = process.env.NVIDIA_MODEL || 'meta/llama-3.3-70b-instruct';
+  const model = process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b';
 
   const res = await fetchProvider('nvidia', 'https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
