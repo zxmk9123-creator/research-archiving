@@ -2,14 +2,24 @@
 // `fetch` already used by extractMetadata.js/collector.js. Provider and model
 // are environment-configured; nothing is hardcoded, no API key is logged.
 
-// Marks an error as "transient" — the kind of failure (rate limit, server
-// overload, timeout, network unavailable) that justifies trying the next
-// provider in the fallback chain. Anything NOT marked transient (bad
-// request, auth failure, empty/invalid response) is an application-level
-// problem the next provider can't fix either, so it propagates immediately
-// instead of triggering a pointless rotation through the rest of the chain.
-function markTransient(err) {
-  err.transient = true;
+// Marks an error with a failureType so the router (runProviderChain) knows
+// to advance to the next provider and can log *why*. Two distinct
+// fallback-worthy categories, both non-terminal for the chain:
+//   - transient (429/5xx/timeout/network): the provider is temporarily
+//     unavailable/overloaded — the same provider might work again later.
+//   - auth (401/403/missing or invalid credential): THIS provider is
+//     misconfigured and will never succeed on its own, but that says
+//     nothing about the other configured providers, so it must not take
+//     the whole chain down with it — skip straight to the next one
+//     (never retry the same provider).
+// Anything left unmarked (400/404/other non-ok status, or an error thrown
+// by our own prompt construction/JSON parsing/Zod validation/DB code) is
+// an application/contract problem no other provider can fix either, so it
+// propagates immediately and stops the chain, preserving the existing
+// ai_status=failed behavior.
+function markFallback(err, failureType) {
+  err.transient = true; // kept for back-compat with existing call sites/tests
+  err.failureType = failureType;
   return err;
 }
 
@@ -28,29 +38,34 @@ function markTransient(err) {
 function requireNonEmptyText(text, providerLabel) {
   if (text) return text;
   console.error(`${providerLabel} returned HTTP 200 with empty/null content`);
-  throw markTransient(new Error('AI provider returned an empty response'));
+  throw markFallback(new Error('AI provider returned an empty response'), 'empty_response');
 }
 
-// Wraps a provider's fetch call: HTTP 429/5xx become transient errors,
-// other non-ok statuses (400/401/403/404 — bad request, bad key, wrong
-// model id) stay non-transient, and a network-level failure (DNS, refused
-// connection, or our own AbortSignal timeout firing) is transient too,
-// since "provider unavailable" is explicitly in scope for fallback.
+// Wraps a provider's fetch call and classifies the failure:
+//   429            -> 'rate_limit'   (transient)
+//   5xx            -> 'server_error' (transient)
+//   401/403        -> 'auth'         (this provider misconfigured, skip it)
+//   other non-ok   -> unmarked (application/contract-ish — e.g. 400 bad
+//                     request, 404 unknown model id — stops the chain)
+//   network/DNS/refused connection, or our own AbortSignal timeout firing
+//                  -> 'timeout' / 'network' (transient)
 async function fetchProvider(providerLabel, url, init) {
   let res;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });
   } catch (err) {
-    const reason = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network error';
-    console.error(`${providerLabel} request failed: ${reason} (${err.message})`);
-    throw markTransient(new Error(`AI provider unavailable (${reason})`));
+    const failureType = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    console.error(`${providerLabel} request failed: ${failureType} (${err.message})`);
+    throw markFallback(new Error(`AI provider unavailable (${failureType})`), failureType);
   }
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
     console.error(`${providerLabel} request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     const err = new Error(`AI provider request failed (${res.status})`);
     err.status = res.status;
-    if (res.status === 429 || res.status >= 500) markTransient(err);
+    if (res.status === 429) markFallback(err, 'rate_limit');
+    else if (res.status >= 500) markFallback(err, 'server_error');
+    else if (res.status === 401 || res.status === 403) markFallback(err, 'auth');
     throw err;
   }
   return res;
@@ -301,7 +316,8 @@ async function runProviderChain(providers) {
     } catch (err) {
       lastErr = err;
       const status = err.status ? ` status=${err.status}` : '';
-      console.error(`ai_provider provider_failed provider=${p.name}${status} transient=${Boolean(err.transient)} reason=${err.message}`);
+      const failureType = err.failureType || 'application_error';
+      console.error(`ai_provider provider_failed provider=${p.name}${status} failure_type=${failureType} reason=${err.message}`);
       if (!err.transient) throw err;
       const next = providers[i + 1];
       if (next) console.log(`ai_provider fallback from=${p.name} to=${next.name}`);

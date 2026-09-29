@@ -278,3 +278,124 @@ test('callProviderWithFallback: all configured providers failing preserves the e
     delete process.env.GEMINI_API_KEY;
   }
 });
+
+// --- Auth/config failures (401/403): a misconfigured provider must be
+// skipped, never retried, and must not take the whole chain down. ---
+
+function authError(status) {
+  const err = new Error(`AI provider request failed (${status})`);
+  err.status = status;
+  err.transient = true;
+  err.failureType = 'auth';
+  return err;
+}
+
+test('runProviderChain: Gemini 429 falls back to Llama', async () => {
+  const err429 = transientError('rate limited');
+  err429.status = 429;
+  err429.failureType = 'rate_limit';
+  const chain = [
+    fakeProvider('gemini', async () => { throw err429; }),
+    fakeProvider('llama', async () => 'llama response'),
+  ];
+  const result = await runProviderChain(chain);
+  assert.equal(result.provider, 'llama');
+});
+
+test('runProviderChain: Llama 401 (auth failure) is skipped, falls back to NVIDIA — does not terminate the chain', async () => {
+  const chain = [
+    fakeProvider('llama', async () => { throw authError(401); }),
+    fakeProvider('nvidia', async () => 'nvidia response'),
+  ];
+  const result = await runProviderChain(chain);
+  assert.equal(result.provider, 'nvidia');
+});
+
+test('runProviderChain: Llama 403 (auth failure) is skipped, falls back to NVIDIA', async () => {
+  const chain = [
+    fakeProvider('llama', async () => { throw authError(403); }),
+    fakeProvider('nvidia', async () => 'nvidia response'),
+  ];
+  const result = await runProviderChain(chain);
+  assert.equal(result.provider, 'nvidia');
+});
+
+test('runProviderChain: an auth failure is never retried on the same provider — the failing provider is called exactly once', async () => {
+  let llamaCallCount = 0;
+  const chain = [
+    fakeProvider('llama', async () => { llamaCallCount++; throw authError(401); }),
+    fakeProvider('nvidia', async () => 'nvidia response'),
+  ];
+  await runProviderChain(chain);
+  assert.equal(llamaCallCount, 1);
+});
+
+test('runProviderChain: a provider 5xx falls back to the next provider', async () => {
+  const err500 = transientError('internal error');
+  err500.status = 500;
+  err500.failureType = 'server_error';
+  const chain = [
+    fakeProvider('nvidia', async () => { throw err500; }),
+    fakeProvider('openrouter', async () => 'openrouter response'),
+  ];
+  const result = await runProviderChain(chain);
+  assert.equal(result.provider, 'openrouter');
+});
+
+test('runProviderChain: all providers unavailable (mix of transient/auth) ends in the final failed state', async () => {
+  const chain = [
+    fakeProvider('groq', async () => { throw transientError('groq rate limited'); }),
+    fakeProvider('gemini', async () => { throw transientError('gemini overloaded'); }),
+    fakeProvider('llama', async () => { throw authError(401); }),
+    fakeProvider('nvidia', async () => { throw authError(403); }),
+    fakeProvider('openrouter', async () => { throw transientError('openrouter down'); }),
+  ];
+  await assert.rejects(() => runProviderChain(chain), /openrouter down/);
+});
+
+test('runProviderChain: an application/JSON/Zod-style error (no .transient flag) stops the chain immediately, even mid-way through', async () => {
+  let nvidiaCalled = false;
+  const appErr = new Error('AI response was not valid JSON'); // no .transient — application/contract error
+  const chain = [
+    fakeProvider('groq', async () => { throw transientError('groq down'); }),
+    fakeProvider('gemini', async () => { throw appErr; }),
+    fakeProvider('llama', async () => { nvidiaCalled = true; return 'should never be reached'; }),
+  ];
+  await assert.rejects(() => runProviderChain(chain), /not valid JSON/);
+  assert.equal(nvidiaCalled, false);
+});
+
+// --- The most important regression from this task: the exact reported
+// production sequence must now end in success instead of stopping at
+// Llama's 401. Uses real HTTP mocking through the actual provider
+// functions (callGroq/callGemini/callLlama/callNvidia), not fakes. ---
+test('callProviderWithFallback: Groq 429 -> Gemini 503/429 -> Llama 401 -> NVIDIA succeeds (exact production regression)', async () => {
+  let geminiCallCount = 0;
+  const restore = mockFetchByUrl([
+    ['api.groq.com', async () => jsonResponse(429, { error: { message: 'rate limited' } })],
+    ['generativelanguage.googleapis.com', async () => {
+      geminiCallCount++;
+      return geminiCallCount === 1
+        ? jsonResponse(503, { error: { code: 503, message: 'overloaded' } })
+        : jsonResponse(429, { error: { code: 429, message: 'quota exceeded' } });
+    }],
+    ['api.llama.com', async () => jsonResponse(401, { title: 'Authentication Error', status: 401 })],
+    ['integrate.api.nvidia.com', async () => jsonResponse(200, { choices: [{ message: { content: 'nvidia success' } }] })],
+  ]);
+  try {
+    process.env.GROQ_API_KEY = 'test';
+    process.env.GEMINI_API_KEY = 'test';
+    process.env.LLAMA_API_KEY = 'test';
+    process.env.NVIDIA_API_KEY = 'test';
+    delete process.env.OPENROUTER_API_KEY;
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'nvidia success');
+    assert.equal(result.provider, 'nvidia');
+  } finally {
+    restore();
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.LLAMA_API_KEY;
+    delete process.env.NVIDIA_API_KEY;
+  }
+});
