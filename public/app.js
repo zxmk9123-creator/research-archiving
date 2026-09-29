@@ -59,8 +59,10 @@ async function renderArchive(query = {}) {
 
   app.innerHTML = `
     <h1>Research Archive</h1>
+    <p class="page-lede">오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.</p>
     <div class="archive">
-      <div class="archive-filter-panel">
+      <details class="archive-filter-panel" ${hasActiveFilters ? 'open' : ''}>
+        <summary>필터 · 섹터${hasActiveFilters ? ` <span class="pill">적용됨</span>` : ''}</summary>
         <div class="filters">
           <input id="f-q" placeholder="검색" value="${query.q || ''}">
           <select id="f-usage"><option value="">활용처 전체</option>${usageOpts}</select>
@@ -79,16 +81,25 @@ async function renderArchive(query = {}) {
           <div class="sector-tree" id="sector-tree"></div>
           <div class="archive-chip-row" id="sector-chips"></div>
         </div>
+      </details>
+
+      <div class="section" style="margin-top:0">
+        <h2>최신 자료</h2>
+        <div class="grid">${latest.map(itemCard).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
       </div>
-      <h2>최신 자료</h2>
-      <div class="grid">${latest.map(itemCard).join('') || '<p>발행된 자료가 없습니다.</p>'}</div>
-      <h2 style="margin-top:28px">팀 Pick · 많이 본 자료</h2>
-      <table><tr><th>제목</th><th>유형</th><th>Pick 수</th></tr>
-        ${ranking.map((r) => `<tr><td><a href="#/detail/${r.id}">${r.title}</a></td><td>${r.type}</td><td>${r.pick_count}</td></tr>`).join('') || '<tr><td colspan="3">아직 팀 Pick이 없습니다.</td></tr>'}
-      </table>
-      <h2 style="margin-top:28px">전체 결과 (${items.length}개)</h2>
-      ${emptyState}
-      <div class="grid">${items.map(itemCard).join('')}</div>
+
+      <details class="section">
+        <summary>팀 Pick · 많이 본 자료</summary>
+        <table><tr><th>제목</th><th>유형</th><th>Pick 수</th></tr>
+          ${ranking.map((r) => `<tr><td><a href="#/detail/${r.id}">${r.title}</a></td><td>${r.type}</td><td>${r.pick_count}</td></tr>`).join('') || '<tr><td colspan="3">아직 팀 Pick이 없습니다.</td></tr>'}
+        </table>
+      </details>
+
+      <div class="section">
+        <div class="section-header"><h2>전체 결과</h2><span class="count">${items.length}개</span></div>
+        ${emptyState}
+        <div class="grid">${items.map(itemCard).join('')}</div>
+      </div>
     </div>
   `;
 
@@ -272,6 +283,7 @@ async function renderSources() {
     : '';
   app.innerHTML = `
     <h1>Sources</h1>
+    <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
     <table>
       <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
       ${sources.map((s) => `<tr>
@@ -281,23 +293,28 @@ async function renderSources() {
         <td>${s.method === 'rss' ? `<button class="btn" data-collect="${s.id}">지금 수집</button>` : ''}</td>
       </tr>`).join('')}
     </table>
-    <h2 style="margin-top:24px">소스 추가</h2>
-    <div class="form-row"><label>이름</label><input id="s-name"></div>
-    <div class="form-row"><label>수집방식</label>
-      <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="crawl">crawl</option></select>
-    </div>
-    <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
-    <div class="form-row"><label>오너</label><input id="s-owner"></div>
-    <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
-    <button class="btn primary" id="s-add">추가</button>
-    <details class="section" style="margin-top:24px">
-      <summary style="cursor:pointer;font-weight:600;color:var(--muted)">신뢰등급(A/B/C)이란? ▾</summary>
-      <p class="meta" style="margin-top:8px">
+
+    <details class="section">
+      <summary>소스 추가</summary>
+      <div class="form-row"><label>이름</label><input id="s-name"></div>
+      <div class="form-row"><label>수집방식</label>
+        <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="crawl">crawl</option></select>
+      </div>
+      <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
+      <div class="form-row"><label>오너</label><input id="s-owner"></div>
+      <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
+      <button class="btn primary" id="s-add">추가</button>
+    </details>
+
+    <details class="section">
+      <summary>신뢰등급(A/B/C)이란?</summary>
+      <p class="meta">
         신뢰등급은 별도의 자동 산정 로직 없이, 소스 등록 시 담당자가 발행처의 공신력·정확성 이력을 근거로
         직접 A(가장 신뢰)·B·C 중 하나로 지정합니다. 기본값은 A이며, 이후 자동으로 재계산되지 않습니다.
         수집 성공/실패 이력(위 "상태" 열)은 신뢰등급과 별개로 기록되며, 등급에 영향을 주지 않습니다.
       </p>
     </details>
+
     ${failureWarning}
   `;
   document.querySelectorAll('[data-collect]').forEach((btn) => {
@@ -367,7 +384,7 @@ async function renderReview() {
   // state or event wiring needed, and it degrades to a plain toggle.
   const comparisonSection = reviewed.length
     ? `<details class="section">
-        <summary style="cursor:pointer;font-weight:600">AI vs 리뷰어 적합성 비교 ▾</summary>
+        <summary>AI vs 리뷰어 적합성 비교</summary>
         <table>
           <tr><th>제목</th><th>AI 판단</th><th>리뷰어 판단</th><th>결과</th></tr>
           ${reviewed.map((d) => `<tr>
@@ -382,6 +399,7 @@ async function renderReview() {
 
   app.innerHTML = `
     <h1>Review</h1>
+    <p class="page-lede">AI 초안을 확인하고 발행 여부를 결정합니다.</p>
     ${comparisonSection}
     <div class="filters">
       <select id="draft-select">

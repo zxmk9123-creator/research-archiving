@@ -1,73 +1,200 @@
+/* ---------------------------------------------------------------------
+   Design tokens. Same blue B2B identity as before (accent stays the calm
+   blue already used by the Archive filter module) — reworked as a
+   systematic type/spacing/surface scale instead of scattered inline
+   styles. Inspired by the density, whitespace and soft-surface language
+   of modern financial product pages (info-dense but never cluttered):
+   large breathing room between sections, near-borderless cards that rely
+   on shadow + background instead of hard outlines, and a clear
+   title > body > meta contrast ladder. No proprietary assets or colors
+   copied — tokens below are original.
+------------------------------------------------------------------------ */
 :root {
   --news: #2563eb; --report: #16a34a; --stat: #7c3aed; --reg: #dc2626;
-  --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #64748b; --border: #e2e8f0;
+
+  --bg: #f6f7fa;
+  --card: #ffffff;
+  --text: #0f1729;
+  --muted: #5b6472;
+  --subtle: #97a0ad;
+  --border: #e7e9ef;
+  --border-soft: #eef0f4;
+
+  --accent: #2b5ea8;
+  --accent-hover: #204a87;
+  --accent-soft: #eaf1fb;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px -12px rgba(15, 23, 42, .10);
+  --shadow-card-hover: 0 1px 2px rgba(15, 23, 42, .05), 0 16px 32px -14px rgba(15, 23, 42, .16);
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+
+  --ease: cubic-bezier(.2, .7, .3, 1);
 }
+
 * { box-sizing: border-box; }
-body { margin: 0; font-family: -apple-system, "Pretendard", "Noto Sans KR", sans-serif; background: var(--bg); color: var(--text); }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
-.brand { font-weight: 700; }
-.topbar nav a { margin-left: 16px; color: var(--muted); text-decoration: none; font-size: 14px; }
-.topbar nav a:hover { color: var(--text); }
-#app { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
-h1 { font-size: 20px; } h2 { font-size: 16px; color: var(--muted); font-weight: 600; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-@media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; cursor: pointer; }
-.card h3 { margin: 6px 0 4px; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card p { margin: 0; font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; color: #fff; margin-right: 4px; }
+
+body {
+  margin: 0;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Noto Sans KR", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------------
+   Navigation — a clearer identity/nav hierarchy than a single thin bar:
+   brand gets real weight, nav items get more breathing room and a
+   visible current-page affordance via hover/focus, without adding a new
+   active-route mechanism to the app logic.
+------------------------------------------------------------------------ */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 28px; background: var(--card); border-bottom: 1px solid var(--border-soft);
+  position: sticky; top: 0; z-index: 10;
+}
+.brand { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
+.topbar nav { display: flex; gap: 4px; }
+.topbar nav a {
+  padding: 8px 14px; border-radius: var(--radius-sm); color: var(--muted); text-decoration: none;
+  font-size: 14px; font-weight: 600; transition: background .15s var(--ease), color .15s var(--ease);
+}
+.topbar nav a:hover { color: var(--text); background: var(--bg); }
+.topbar nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+#app { max-width: 1120px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) var(--sp-8); }
+
+/* ---------------------------------------------------------------------
+   Type scale — one coherent ladder instead of ad hoc sizes:
+   page title > section title > card title > body > meta/label.
+------------------------------------------------------------------------ */
+h1 { font-size: 26px; font-weight: 800; letter-spacing: -.01em; margin: 0 0 var(--sp-1); color: var(--text); }
+h2 { font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 var(--sp-3); }
+h3 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; }
+
+.page-lede { font-size: 14px; color: var(--muted); margin: 0 0 var(--sp-5); max-width: 60ch; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+/* Cards: shadow + generous internal spacing instead of a hard border, so
+   the title/summary read as the dominant content, not a bordered panel. */
+.card {
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  padding: var(--sp-4); cursor: pointer; box-shadow: var(--shadow-card);
+  transition: transform .15s var(--ease), box-shadow .15s var(--ease);
+}
+.card:hover, .card:focus-visible { box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
+.card h3 {
+  margin: var(--sp-2) 0 6px; font-size: 16px; font-weight: 700; line-height: 1.45; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card p {
+  font-size: 13.5px; line-height: 1.6; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; color: #fff; margin-right: 4px; }
 .tag.news { background: var(--news); } .tag.report { background: var(--report); } .tag.stat { background: var(--stat); } .tag.reg { background: var(--reg); }
-.pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2f7; color: var(--muted); margin: 2px 4px 2px 0; }
-.meta { font-size: 12px; color: var(--muted); margin-top: 8px; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-.filters select, .filters input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
-.count { font-size: 13px; color: var(--muted); margin: 8px 0; }
-.detail { display: grid; grid-template-columns: 1fr; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
-.detail .section { border-top: 1px solid var(--border); padding-top: 12px; }
-.btn { display: inline-block; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 13px; transition: background .15s ease, border-color .15s ease; }
-.btn:hover { background: var(--bg); border-color: #c9d3e0; }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #eef1f6; color: var(--muted); margin: 2px 4px 2px 0; }
+/* Metadata is deliberately the quietest tier — smaller, lighter color, so
+   title/summary win the eye first. */
+.meta { font-size: 12px; color: var(--subtle); margin-top: var(--sp-2); }
+
+.section { margin-top: var(--sp-6); }
+.section-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--sp-3); }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: var(--sp-4) 0; align-items: center; }
+.filters select, .filters input { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; background: #fff; }
+.count { font-size: 13px; color: var(--muted); margin: var(--sp-2) 0; }
+
+.detail {
+  display: grid; grid-template-columns: 1fr; gap: var(--sp-3);
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+  padding: var(--sp-6); box-shadow: var(--shadow-card); max-width: 760px; margin: 0 auto;
+}
+.detail h1 { font-size: 22px; margin: var(--sp-2) 0 var(--sp-1); line-height: 1.4; }
+.detail .section { border-top: 1px solid var(--border-soft); padding-top: var(--sp-3); margin-top: var(--sp-4); }
+.detail .section p { font-size: 14px; line-height: 1.7; color: var(--text); }
+
+.btn {
+  display: inline-block; padding: 9px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--card); cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
+  transition: background .15s var(--ease), border-color .15s var(--ease), transform .1s var(--ease);
+}
+.btn:hover { background: var(--bg); border-color: #ccd3de; }
+.btn:active { transform: scale(.98); }
 .btn:disabled { cursor: not-allowed; opacity: .5; }
 .btn:disabled:hover { background: var(--card); border-color: var(--border); }
-.btn:focus-visible { outline: 2px solid var(--news); outline-offset: 2px; }
-.btn.primary { background: var(--text); color: #fff; border-color: var(--text); }
-.btn.primary:hover { background: #1e293b; border-color: #1e293b; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-/* Progressive disclosure: the same look wherever a section is collapsed by
-   default (Review's AI/reviewer comparison, Sources' trust-grade note). */
-details.section { border-top: 1px solid var(--border); padding-top: 12px; }
-details.section summary { list-style: none; }
-details.section summary::-webkit-details-marker { display: none; }
-details.section[open] summary { margin-bottom: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.stale { color: var(--reg); font-weight: 600; }
-.review-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700; color: var(--subtle); text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--border); }
+td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border-soft); }
+.stale { color: var(--reg); font-weight: 700; }
+
+.review-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
 @media (max-width: 900px) { .review-layout { grid-template-columns: 1fr; } }
-.review-layout iframe, .review-layout .orig { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--card); min-height: 300px; }
-.form-row { margin-bottom: 10px; }
-.form-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.form-row textarea, .form-row input, .form-row select { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.review-layout iframe, .review-layout .orig {
+  border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: var(--sp-4);
+  background: var(--card); min-height: 300px; box-shadow: var(--shadow-card);
+}
+.form-row { margin-bottom: var(--sp-3); }
+.form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+.form-row textarea, .form-row input, .form-row select { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; }
 .chiplist { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; }
+.chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; cursor: pointer; background: #fff; transition: background .15s var(--ease), border-color .15s var(--ease); }
 .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
-.chip.ai-suggested { background: #eef2ff; border: 1px dashed var(--news); color: var(--news); }
+.chip.ai-suggested { background: var(--accent-soft); border: 1px dashed var(--news); color: var(--news); }
 .chip.ai-suggested:hover { background: #dfe6ff; }
 
-.ai-box { border: 1px solid var(--border); border-left: 3px solid var(--news); border-radius: 8px; padding: 12px; background: #f8fafc; margin-top: 12px; }
-.ai-box h3 { margin: 0 0 8px; font-size: 13px; color: var(--news); display: flex; align-items: center; }
-.ai-box .form-row { margin-bottom: 8px; }
-.ai-box .form-row p { margin: 0; font-size: 13px; }
+.ai-box { border: 1px solid var(--border-soft); border-left: 3px solid var(--news); border-radius: var(--radius-md); padding: var(--sp-4); background: #fafbfd; margin-top: var(--sp-3); }
+.ai-box h3 { margin: 0 0 var(--sp-2); font-size: 13px; font-weight: 700; color: var(--news); display: flex; align-items: center; }
+.ai-box .form-row { margin-bottom: var(--sp-2); }
+.ai-box .form-row p { margin: 0; font-size: 13.5px; line-height: 1.6; }
 
-/* Archive filter module — scoped local tokens (60:30:10 calm blue), so the
-   rest of the app (Home/Sources/Review/Detail) keeps its existing look. */
+/* Progressive disclosure: one shared look for every collapsed-by-default
+   block (Archive filters, Review's AI/reviewer comparison, Sources' trust
+   note and source-add form). Height/opacity settle quickly on open so the
+   motion reads as "revealing", not decoration. */
+details.section { border-top: 1px solid var(--border-soft); padding-top: var(--sp-3); }
+details.section summary {
+  list-style: none; cursor: pointer; font-weight: 700; font-size: 14px; color: var(--text);
+  display: flex; align-items: center; gap: 8px; user-select: none;
+}
+details.section summary::-webkit-details-marker { display: none; }
+details.section summary::after { content: '▾'; color: var(--subtle); font-size: 12px; transition: transform .15s var(--ease); }
+details.section[open] summary::after { transform: rotate(180deg); }
+details.section[open] summary { margin-bottom: var(--sp-3); }
+details.section > *:not(summary) { animation: reveal .18s var(--ease); }
+@keyframes reveal { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .card, .btn, details.section summary::after, details.section > *:not(summary) { transition: none; animation: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Archive filter module — compact by default (collapsed <details>),
+   expanding into the full sector tree + filter controls. Local tokens
+   keep it visually a "tool", subordinate to the research content above.
+------------------------------------------------------------------------ */
 .archive {
-  --a-bg: #f4f8fc;        /* 60% primary background */
-  --a-surface: #e8f0fa;   /* 30% secondary surface */
+  --a-bg: #f4f8fc;
+  --a-surface: #e8f0fa;
   --a-surface-hover: #dbe7f6;
   --a-border: #d6e2f0;
-  --a-accent: #2b5ea8;    /* 10% accent */
-  --a-accent-hover: #204a87;
-  --a-accent-soft: #e1ebf9;
+  --a-accent: var(--accent);
+  --a-accent-hover: var(--accent-hover);
+  --a-accent-soft: var(--accent-soft);
   --a-text: #1b2a44;
   --a-muted: #5c6d85;
   --a-radius-sm: 8px;
@@ -79,9 +206,18 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
   background: var(--a-bg);
   border: 1px solid var(--a-border);
   border-radius: var(--a-radius-lg);
-  padding: 18px;
-  margin: 16px 0 20px;
+  padding: 14px 18px;
+  margin: 0 0 var(--sp-6);
 }
+.archive-filter-panel summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 14px; color: var(--a-text); user-select: none; padding: 4px 0;
+}
+.archive-filter-panel summary::-webkit-details-marker { display: none; }
+.archive-filter-panel summary::after { content: '▾'; color: var(--a-muted); font-size: 12px; margin-left: auto; transition: transform .15s var(--ease); }
+.archive-filter-panel[open] summary::after { transform: rotate(180deg); }
+.archive-filter-panel[open] summary { margin-bottom: var(--sp-4); }
+.archive-filter-panel > *:not(summary) { animation: reveal .18s var(--ease); }
 
 .archive .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; align-items: center; }
 .archive .filters input, .archive .filters select {
@@ -115,7 +251,7 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
   border-radius: var(--a-radius-lg);
   padding: 14px;
 }
-.archive-hierarchy-title { font-size: 12px; font-weight: 600; color: var(--a-muted); margin-bottom: 10px; letter-spacing: .01em; }
+.archive-hierarchy-title { font-size: 12px; font-weight: 700; color: var(--a-muted); margin-bottom: 10px; letter-spacing: .01em; }
 
 .sector-tree { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .sector-col {
@@ -153,5 +289,8 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 
 @media (max-width: 640px) {
   .sector-col { flex: 1 1 170px; min-width: 160px; }
-  .archive-filter-panel { padding: 14px; }
+  .archive-filter-panel { padding: 12px 14px; }
+  .topbar { padding: 12px 16px; }
+  #app { padding: var(--sp-5) var(--sp-3) var(--sp-7); }
+  .detail { padding: var(--sp-4); border-radius: var(--radius-md); }
 }
