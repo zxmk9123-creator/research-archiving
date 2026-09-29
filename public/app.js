@@ -309,15 +309,27 @@ async function renderSources() {
   };
 }
 
+// AI eligibility=false is a reviewer signal, not a filter — every Draft item
+// stays in the dropdown and reviewable, just reordered so items the AI
+// flagged as questionable surface first. eligible === null means "no AI
+// recommendation yet" (draft/failed/not requested), sorted after false but
+// before true so it's still seen ahead of items the AI is fine with.
+function reviewPriority(d) {
+  if (d.ai_eligible === false) return 0;
+  if (d.ai_eligible === null || d.ai_eligible === undefined) return 1;
+  return 2;
+}
+
 async function renderReview() {
-  const [drafts, sectors, usages, sources] = await Promise.all([
+  const [draftsRaw, sectors, usages, sources] = await Promise.all([
     api('/items?status=Draft'), api('/sectors'), api('/usages'), api('/sources'),
   ]);
+  const drafts = [...draftsRaw].sort((a, b) => reviewPriority(a) - reviewPriority(b));
   app.innerHTML = `
     <h1>Review</h1>
     <div class="filters">
       <select id="draft-select">
-        ${drafts.map((d) => `<option value="${d.id}">${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
+        ${drafts.map((d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
       </select>
       <button class="btn" id="new-draft">새 자료 수동 등록</button>
     </div>
@@ -432,10 +444,19 @@ async function renderReview() {
           .filter(Boolean)
           .map((u) => `<span class="chip ai-suggested" data-apply-usage="${u.id}">${u.name}</span>`)
           .join('') || '<span class="meta">제안 없음</span>';
+        const eligibilityBadge = item.ai_eligible === false
+          ? '<span class="pill" style="background:#fef2f2;color:#b91c1c">⚠ 아카이빙 비적합 추정</span>'
+          : item.ai_eligible === true
+            ? '<span class="pill" style="background:#f0fdf4;color:#15803d">아카이빙 적합 추정</span>'
+            : '<span class="pill">AI 판단 없음</span>';
         return `<div class="ai-box">
           <h3>AI 초안 <button class="btn" id="ai-retry-btn" type="button" style="margin-left:8px">다시 생성</button></h3>
           <p class="meta">AI는 제목/원문 요약만을 근거로 초안을 작성했습니다. 전체 본문을 검토한 것은 아니니 반드시 확인 후 사용하세요.</p>
-          <div class="form-row"><label>요약</label><p>${item.ai_summary || ''}</p></div>
+          <div class="form-row"><label>아카이빙 적합성 (AI 추천, 최종 판단은 리뷰어)</label>
+            ${eligibilityBadge}
+            <p class="meta">${item.ai_eligibility_reason || ''}</p>
+          </div>
+          <div class="form-row"><label>요약 (사실 확인)</label><p style="white-space:pre-line">${item.ai_summary || ''}</p></div>
           <div class="form-row"><label>핵심 내용</label><p>${item.ai_key_takeaway || ''}</p></div>
           <div class="form-row"><label>추천 섹터 (클릭하여 적용)</label><div class="chiplist">${sectorChipsAi}</div></div>
           <div class="form-row"><label>추천 활용처 (클릭하여 적용)</label><div class="chiplist">${usageChipsAi}</div></div>

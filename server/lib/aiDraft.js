@@ -25,10 +25,12 @@ const SYSTEM_PROMPT = `You are a research-archiving assistant for an oils & fats
 Given a title and (if available) a short description of a collected article, respond with STRICT JSON ONLY — no markdown fences, no commentary, nothing before or after the JSON object.
 
 The JSON object must have exactly this shape:
-{"summary": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
+{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
 
 Rules:
-- summary: 2-3 concise Korean sentences summarizing the article for a research archive.
+- eligible: true if this article is substantive enough to be worth archiving for a market-intelligence team (has concrete facts, not just a headline teaser or unrelated content); false otherwise.
+- eligibility_reason: one concise Korean sentence explaining the eligible verdict.
+- who / what / amount / when / where / why / impact: extract each fact ONLY if it is explicitly stated in the given title/description. If a fact is not stated, respond with the exact Korean string "미확보" for that field — do NOT guess, infer, estimate, or fill in a plausible-sounding value.
 - key_takeaway: one concise Korean sentence stating the single most useful insight for a reviewer.
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
@@ -54,6 +56,39 @@ function buildUserPrompt(item, taxonomy) {
   return `${material}\n\n${buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages)}`;
 }
 
+const UNCONFIRMED = '미확보';
+// Some models produce these instead of the requested Korean placeholder when
+// a fact is missing — normalize them too rather than storing an invented
+// value or a stray "null"/"none" string.
+const UNCONFIRMED_ALIASES = /^(없음|none|null|n\/a|unknown|not stated|not available)$/i;
+
+// Never invents a fact: anything that isn't a genuine non-empty string from
+// the model becomes the explicit "미확보" placeholder.
+function factOrUnconfirmed(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed && !UNCONFIRMED_ALIASES.test(trimmed)) return trimmed;
+  }
+  return UNCONFIRMED;
+}
+
+const FACT_LABELS = [
+  ['who', '누가'],
+  ['what', '무엇을'],
+  ['amount', '규모/금액'],
+  ['when', '시점'],
+  ['where', '장소'],
+  ['why', '이유'],
+  ['impact', '영향'],
+];
+
+// Deterministic formatting so every summary has the same concrete shape
+// regardless of how the model phrases things — the model only supplies the
+// facts, this function is what actually "presents them clearly".
+function buildFactualSummary(facts) {
+  return FACT_LABELS.map(([key, label]) => `${label}: ${facts[key]}`).join('\n');
+}
+
 // Pure validation: parses the model's raw text, enforces the contract, and
 // discards any sector/usage id not present in the taxonomy passed in. Never
 // touches the DB — fully unit-testable without a provider or a database.
@@ -73,9 +108,19 @@ function parseDraftResponse(raw, taxonomy) {
     throw new Error('AI response was not a JSON object');
   }
 
-  const summary = typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
-  const keyTakeaway = typeof parsed.key_takeaway === 'string' ? parsed.key_takeaway.trim() : '';
-  if (!summary) throw new Error('AI response missing a usable summary');
+  const facts = Object.fromEntries(FACT_LABELS.map(([key]) => [key, factOrUnconfirmed(parsed[key])]));
+  const summary = buildFactualSummary(facts);
+  const keyTakeaway = typeof parsed.key_takeaway === 'string' && parsed.key_takeaway.trim()
+    ? parsed.key_takeaway.trim()
+    : UNCONFIRMED;
+
+  // Advisory only — a non-boolean verdict means "no recommendation" (null),
+  // never a silent false, so Review can tell "AI said no" apart from
+  // "AI draft is incomplete/failed to opine".
+  const eligible = typeof parsed.eligible === 'boolean' ? parsed.eligible : null;
+  const eligibilityReason = typeof parsed.eligibility_reason === 'string' && parsed.eligibility_reason.trim()
+    ? parsed.eligibility_reason.trim()
+    : UNCONFIRMED;
 
   const sectorIds = new Set((taxonomy.sectors || []).map((s) => s.id));
   const usageIds = new Set((taxonomy.usages || []).map((u) => u.id));
@@ -86,7 +131,7 @@ function parseDraftResponse(raw, taxonomy) {
     ? [...new Set(parsed.suggested_usages.map(Number))].filter((id) => usageIds.has(id))
     : [];
 
-  return { summary, keyTakeaway, suggestedSectors, suggestedUsages };
+  return { summary, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages };
 }
 
 async function getTaxonomy() {
@@ -130,10 +175,12 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
          ai_key_takeaway = $2,
          ai_suggested_sectors = $3,
          ai_suggested_usages = $4,
+         ai_eligible = $5,
+         ai_eligibility_reason = $6,
          ai_error = NULL,
          ai_generated_at = now()
-       WHERE id = $5`,
-      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, itemId]
+       WHERE id = $7`,
+      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, itemId]
     );
     return { ok: true };
   } catch (err) {
@@ -146,8 +193,11 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
 
 module.exports = {
   SYSTEM_PROMPT,
+  UNCONFIRMED,
   buildTaxonomyBlock,
   buildUserPrompt,
+  buildFactualSummary,
+  factOrUnconfirmed,
   parseDraftResponse,
   getTaxonomy,
   sanitizeError,

@@ -68,6 +68,12 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_suggested_usages INTEGER[] DEFAULT
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_error TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_generated_at TIMESTAMPTZ;
 
+-- Archive-eligibility recommendation: advisory only, same suggestion-layer
+-- convention as the rest of ai_* — never auto-applied to status. NULL means
+-- no recommendation yet (e.g. ai_status is not 'completed').
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_eligible BOOLEAN;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_eligibility_reason TEXT;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,

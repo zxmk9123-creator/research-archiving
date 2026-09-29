@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseDraftResponse, buildUserPrompt, buildTaxonomyBlock } = require('../server/lib/aiDraft');
+const {
+  parseDraftResponse,
+  buildUserPrompt,
+  buildTaxonomyBlock,
+  buildFactualSummary,
+  factOrUnconfirmed,
+  UNCONFIRMED,
+} = require('../server/lib/aiDraft');
 
 const taxonomy = {
   sectors: [
@@ -14,24 +21,40 @@ const taxonomy = {
   ],
 };
 
-test('parseDraftResponse: accepts a valid structured response', () => {
-  const raw = JSON.stringify({
-    summary: '팜유 가격이 상승했다.',
-    key_takeaway: '공급 차질이 원인이다.',
+function fullResponse(overrides = {}) {
+  return JSON.stringify({
+    eligible: true,
+    eligibility_reason: '구체적 수치와 시점이 포함된 시장 뉴스다.',
+    who: '인도네시아 정부',
+    what: '팜유 수출세를 인상했다',
+    amount: '톤당 50달러',
+    when: '2026-09-01',
+    where: '인도네시아',
+    why: '국내 공급 안정을 위해',
+    impact: '아시아 팜유 가격 상승 압력',
+    key_takeaway: '수출세 인상이 단기 가격 상승 요인이다.',
     suggested_sectors: [3],
     suggested_usages: [3],
+    ...overrides,
   });
-  const draft = parseDraftResponse(raw, taxonomy);
-  assert.equal(draft.summary, '팜유 가격이 상승했다.');
-  assert.equal(draft.keyTakeaway, '공급 차질이 원인이다.');
+}
+
+test('parseDraftResponse: accepts a valid structured response and builds a factual summary from it', () => {
+  const draft = parseDraftResponse(fullResponse(), taxonomy);
+  assert.equal(draft.eligible, true);
+  assert.equal(draft.eligibilityReason, '구체적 수치와 시점이 포함된 시장 뉴스다.');
+  assert.equal(draft.keyTakeaway, '수출세 인상이 단기 가격 상승 요인이다.');
   assert.deepEqual(draft.suggestedSectors, [3]);
   assert.deepEqual(draft.suggestedUsages, [3]);
+  assert.match(draft.summary, /누가: 인도네시아 정부/);
+  assert.match(draft.summary, /규모\/금액: 톤당 50달러/);
+  assert.match(draft.summary, /영향: 아시아 팜유 가격 상승 압력/);
 });
 
 test('parseDraftResponse: strips a ```json code fence before parsing', () => {
-  const raw = '```json\n{"summary":"요약","key_takeaway":"핵심","suggested_sectors":[],"suggested_usages":[]}\n```';
+  const raw = '```json\n' + fullResponse() + '\n```';
   const draft = parseDraftResponse(raw, taxonomy);
-  assert.equal(draft.summary, '요약');
+  assert.match(draft.summary, /인도네시아 정부/);
 });
 
 test('parseDraftResponse: rejects malformed JSON safely (no throw escapes as a crash, just a clear Error)', () => {
@@ -42,44 +65,72 @@ test('parseDraftResponse: rejects a JSON array (not an object)', () => {
   assert.throws(() => parseDraftResponse('[1,2,3]', taxonomy), /not a JSON object/);
 });
 
-test('parseDraftResponse: rejects a response with no usable summary', () => {
-  const raw = JSON.stringify({ summary: '', key_takeaway: 'x', suggested_sectors: [], suggested_usages: [] });
-  assert.throws(() => parseDraftResponse(raw, taxonomy), /missing a usable summary/);
+test('parseDraftResponse: never throws on a missing fact — it becomes 미확보 instead', () => {
+  const draft = parseDraftResponse(fullResponse({ amount: undefined, when: '' }), taxonomy);
+  assert.match(draft.summary, new RegExp(`규모/금액: ${UNCONFIRMED}`));
+  assert.match(draft.summary, new RegExp(`시점: ${UNCONFIRMED}`));
+});
+
+test('parseDraftResponse: normalizes model-invented "none/null/없음" style fillers to 미확보 (never a fabricated fact)', () => {
+  const draft = parseDraftResponse(fullResponse({ amount: '없음', where: 'null', why: 'N/A' }), taxonomy);
+  assert.match(draft.summary, new RegExp(`규모/금액: ${UNCONFIRMED}`));
+  assert.match(draft.summary, new RegExp(`장소: ${UNCONFIRMED}`));
+  assert.match(draft.summary, new RegExp(`이유: ${UNCONFIRMED}`));
+});
+
+test('parseDraftResponse: eligible defaults to null (no recommendation) when the model omits a boolean verdict', () => {
+  const draft = parseDraftResponse(fullResponse({ eligible: 'yes' }), taxonomy);
+  assert.equal(draft.eligible, null);
+});
+
+test('parseDraftResponse: eligible=false is preserved as an explicit recommendation, not treated as "missing"', () => {
+  const draft = parseDraftResponse(fullResponse({ eligible: false, eligibility_reason: '단순 헤드라인, 구체적 사실 없음' }), taxonomy);
+  assert.equal(draft.eligible, false);
+  assert.equal(draft.eligibilityReason, '단순 헤드라인, 구체적 사실 없음');
+});
+
+test('parseDraftResponse: missing eligibility_reason falls back to 미확보 rather than an empty string', () => {
+  const draft = parseDraftResponse(fullResponse({ eligibility_reason: '' }), taxonomy);
+  assert.equal(draft.eligibilityReason, UNCONFIRMED);
 });
 
 test('parseDraftResponse: discards unknown sector ids instead of persisting them', () => {
-  const raw = JSON.stringify({
-    summary: '요약',
-    key_takeaway: '핵심',
-    suggested_sectors: [3, 999], // 999 does not exist in taxonomy
-    suggested_usages: [],
-  });
-  const draft = parseDraftResponse(raw, taxonomy);
+  const draft = parseDraftResponse(fullResponse({ suggested_sectors: [3, 999] }), taxonomy);
   assert.deepEqual(draft.suggestedSectors, [3]);
 });
 
 test('parseDraftResponse: discards unknown usage ids instead of persisting them', () => {
-  const raw = JSON.stringify({
-    summary: '요약',
-    key_takeaway: '핵심',
-    suggested_sectors: [],
-    suggested_usages: [3, 42], // 42 does not exist in taxonomy
-  });
-  const draft = parseDraftResponse(raw, taxonomy);
+  const draft = parseDraftResponse(fullResponse({ suggested_usages: [3, 42] }), taxonomy);
   assert.deepEqual(draft.suggestedUsages, [3]);
 });
 
 test('parseDraftResponse: deduplicates repeated ids from the model', () => {
-  const raw = JSON.stringify({ summary: 's', key_takeaway: 'k', suggested_sectors: [3, 3, 1], suggested_usages: [] });
-  const draft = parseDraftResponse(raw, taxonomy);
+  const draft = parseDraftResponse(fullResponse({ suggested_sectors: [3, 3, 1] }), taxonomy);
   assert.deepEqual(draft.suggestedSectors, [3, 1]);
 });
 
 test('parseDraftResponse: non-array suggestion fields degrade to empty arrays, not a crash', () => {
-  const raw = JSON.stringify({ summary: 's', key_takeaway: 'k', suggested_sectors: 'not-an-array', suggested_usages: null });
-  const draft = parseDraftResponse(raw, taxonomy);
+  const draft = parseDraftResponse(fullResponse({ suggested_sectors: 'not-an-array', suggested_usages: null }), taxonomy);
   assert.deepEqual(draft.suggestedSectors, []);
   assert.deepEqual(draft.suggestedUsages, []);
+});
+
+test('factOrUnconfirmed: returns the trimmed value when present', () => {
+  assert.equal(factOrUnconfirmed('  톤당 50달러  '), '톤당 50달러');
+});
+
+test('factOrUnconfirmed: returns 미확보 for missing, empty, or non-string values', () => {
+  assert.equal(factOrUnconfirmed(undefined), UNCONFIRMED);
+  assert.equal(factOrUnconfirmed(''), UNCONFIRMED);
+  assert.equal(factOrUnconfirmed(null), UNCONFIRMED);
+  assert.equal(factOrUnconfirmed(42), UNCONFIRMED);
+});
+
+test('buildFactualSummary: renders all 7 facts in a fixed, labeled order', () => {
+  const summary = buildFactualSummary({
+    who: 'A', what: 'B', amount: 'C', when: 'D', where: 'E', why: 'F', impact: 'G',
+  });
+  assert.equal(summary, '누가: A\n무엇을: B\n규모/금액: C\n시점: D\n장소: E\n이유: F\n영향: G');
 });
 
 test('buildUserPrompt: uses title + description, never claims to have read a full article', () => {
