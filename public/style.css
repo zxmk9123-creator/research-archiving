@@ -10,25 +10,26 @@
 :root {
   --news: #2563eb; --report: #16a34a; --stat: #7c3aed; --reg: #dc2626;
 
-  /* Warm neutral surface, not cool gray */
-  --bg: #faf9f6;
+  /* Editorial-workspace surface: white base, one subtle gray backdrop. */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-sunken: #f4f2ee;
+  --surface-sunken: #f7f8fa;
 
-  --text: #1c1b1a;          /* charcoal, primary */
-  --text-secondary: #6b6a67; /* muted gray, secondary */
-  --text-tertiary: #9c9a96;  /* metadata tier */
+  --text: #191f28;          /* primary */
+  --text-secondary: #6b7684; /* secondary */
+  --text-tertiary: #8b95a1;  /* metadata tier */
 
-  --border: #ece9e3;         /* used sparingly */
-  --border-strong: #ddd9d1;
+  --border: #e5e8eb;
+  --border-strong: #d1d6db;
 
   /* Blue: reserved for actions/interactive states only */
-  --action: #2b5ea8;
-  --action-hover: #204a87;
-  --action-soft: #eaf1fb;
+  --action: #3182f6;
+  --action-hover: #1b64da;
+  --action-soft: #eaf2fe;
 
-  /* Amber: editorial importance only, never decorative */
+  /* Restrained yellow: editorial priority only, never decorative */
   --importance: #b8860b;
+  --importance-accent: #f6c344;
   --importance-soft: #fdf6e3;
   --importance-border: #f0dfa8;
 
@@ -37,13 +38,16 @@
 
   --radius-control: 8px;   /* inputs, buttons, small chips */
   --radius-card: 12px;     /* research cards */
-  --radius-surface: 16px;  /* large containers (filter bar, detail panel) */
+  --radius-surface: 12px;  /* large containers (filter bar, detail panel) */
+  --radius-sm: 6px;
 
-  --shadow-card: 0 1px 2px rgba(28, 27, 26, .03), 0 6px 20px -10px rgba(28, 27, 26, .10);
-  --shadow-card-hover: 0 2px 4px rgba(28, 27, 26, .04), 0 14px 28px -12px rgba(28, 27, 26, .16);
+  --ctrl-sm: 32px; --ctrl-md: 36px; --ctrl-lg: 40px;
 
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
-  --ease: cubic-bezier(.2, .7, .3, 1);
+  --shadow-card: 0 1px 2px rgba(25, 31, 40, .03), 0 6px 20px -10px rgba(25, 31, 40, .10);
+  --shadow-card-hover: 0 2px 4px rgba(25, 31, 40, .04), 0 14px 28px -12px rgba(25, 31, 40, .16);
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-4h: 20px; --sp-5: 24px; --sp-6: 32px; --sp-7: 40px; --sp-8: 48px;
+  --ease: ease-out;
 }
 
 * { box-sizing: border-box; }
@@ -79,7 +83,7 @@ body {
 /* ---------------------------------------------------------------------
    Typography — target scale exactly as specified.
 ------------------------------------------------------------------------ */
-h1 { font-size: 32px; font-weight: 700; letter-spacing: -.015em; margin: 0 0 6px; color: var(--text); line-height: 1.3; }
+h1 { font-size: 30px; font-weight: 700; line-height: 40px; letter-spacing: -.02em; margin: 0 0 6px; color: var(--text); }
 h2 { font-size: 20px; font-weight: 700; color: var(--text); margin: 0 0 var(--sp-3); line-height: 1.4; }
 h3 { font-size: 17px; font-weight: 700; margin: 0; line-height: 1.5; }
 p { margin: 0; }
@@ -95,16 +99,17 @@ p { margin: 0; }
    borders/pills. A minimal border-soft only, shadow for depth on hover.
 ------------------------------------------------------------------------ */
 .card {
-  background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-card);
-  padding: var(--sp-4) var(--sp-4) var(--sp-3); cursor: pointer; box-shadow: var(--shadow-card);
-  transition: transform .15s var(--ease), box-shadow .15s var(--ease);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3); cursor: pointer; box-shadow: none;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
   position: relative;
 }
-.card:hover, .card:focus-visible { box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
-.card.is-important { box-shadow: var(--shadow-card), 0 0 0 1px var(--importance-border); }
+.card:hover, .card:focus-visible { border-color: var(--text-tertiary); box-shadow: var(--shadow-card); }
+.card.is-important { border-color: var(--importance-border); }
 .card.is-important:hover { box-shadow: var(--shadow-card-hover), 0 0 0 1px var(--importance-border); }
 
 .card-importance { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--importance); margin-bottom: 6px; }
+.card-importance svg { color: var(--importance-accent); }
 .card-importance svg { width: 12px; height: 12px; }
 
 .card-eyebrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -140,54 +145,89 @@ p { margin: 0; }
 .detail .section p { font-size: 14px; line-height: 1.7; color: var(--text); }
 
 .btn {
-  display: inline-block; padding: 9px 16px; border-radius: var(--radius-control); border: 1px solid var(--border-strong);
+  display: inline-flex; align-items: center; justify-content: center; height: var(--ctrl-md); padding: 0 16px;
+  border-radius: var(--radius-control); border: 1px solid var(--border-strong);
   background: var(--surface); cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text);
   transition: background .15s var(--ease), border-color .15s var(--ease), transform .1s var(--ease);
 }
 .btn:hover { background: var(--surface-sunken); border-color: var(--text-tertiary); }
-.btn:active { transform: scale(.98); }
 .btn:disabled { cursor: not-allowed; opacity: .5; }
 .btn:disabled:hover { background: var(--surface); border-color: var(--border-strong); }
 .btn:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 .btn.primary { background: var(--action); color: #fff; border-color: var(--action); }
 .btn.primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
 
+/* Single primary CTA at the end of the editing flow (자료 발행). */
+.btn-publish { height: var(--ctrl-lg); padding: 0 24px; font-size: 14px; font-weight: 600; border-radius: var(--radius-control); width: 100%; margin-top: var(--sp-4); }
+
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--border); }
 td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); color: var(--text); }
 .stale { color: var(--danger); font-weight: 700; }
 
-/* Review workspace: two panes that size to their own content — never
-   forced to equal height, never nested cards. A single hairline column
+/* Review header toolbar: draft select + prev/next + new-item, one compact
+   36px row — not a filter bar, a navigation strip. */
+.review-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-4) 0 var(--sp-5); }
+.review-toolbar select, .review-toolbar .btn {
+  height: var(--ctrl-md); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  font-size: 14px; font-weight: 500; background: var(--surface); color: var(--text);
+}
+.review-toolbar select { min-width: 220px; flex: 1 1 220px; }
+.review-toolbar .btn { font-weight: 600; }
+
+/* Source strip: editorial metadata line, no card, one divider beneath. */
+.review-source { padding-bottom: var(--sp-5); margin-bottom: var(--sp-6); border-bottom: 1px solid var(--border); }
+.review-meta-row { font-size: 13px; font-weight: 400; color: var(--text-tertiary); margin-bottom: 4px; }
+.review-article-title { font-size: 20px; font-weight: 700; line-height: 28px; letter-spacing: -.02em; margin: 0 0 var(--sp-2); }
+.review-source-url { font-size: 13px; color: var(--text-secondary); }
+
+/* Review workspace: ~42/58 columns sized to their own content — never
+   forced to equal height, no nested cards. A single hairline column
    divider (desktop only) is the only border; hierarchy comes from
    typography, whitespace and the review-divider between sections. */
-.review-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); align-items: start; }
+.review-layout { display: grid; grid-template-columns: 42fr 58fr; gap: var(--sp-6); align-items: start; }
 @media (max-width: 900px) { .review-layout { grid-template-columns: 1fr; } }
 .review-pane { min-width: 0; }
 .review-pane:first-child { padding-right: var(--sp-6); border-right: 1px solid var(--border); }
 @media (max-width: 900px) { .review-pane:first-child { padding-right: 0; border-right: none; padding-bottom: var(--sp-5); border-bottom: 1px solid var(--border); } }
 
-.review-meta-row { font-size: 13px; font-weight: 400; color: var(--text-tertiary); margin-bottom: 4px; }
-.review-article-title { font-size: 24px; font-weight: 700; line-height: 1.4; margin: 0 0 var(--sp-2); }
-
 .review-divider { border-top: 1px solid var(--border); margin: var(--sp-5) 0; }
 .review-section + .review-divider { margin-top: var(--sp-5); }
 .review-section { margin-bottom: var(--sp-3); }
-.review-section-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: var(--sp-2); }
+.review-section-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: var(--sp-2); line-height: 24px; }
 .review-section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); }
 .review-section-title-row .review-section-title { margin-bottom: 0; }
-.review-body-text { font-size: 15px; font-weight: 400; line-height: 1.7; color: var(--text); }
+.review-body-text { font-size: 15px; font-weight: 400; line-height: 23px; color: var(--text); }
 .review-insight-text { color: var(--text-secondary); }
 .review-status-text { font-size: 13px; font-weight: 400; color: var(--text-tertiary); }
 
-.review-section textarea { width: 100%; padding: 0; border: none; background: transparent; font-size: 15px; font-family: inherit; line-height: 1.7; color: var(--text); resize: vertical; }
-.review-section textarea:focus { outline: none; }
+.review-section textarea {
+  width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+  background: var(--surface); font-size: 15px; font-family: inherit; line-height: 23px; color: var(--text); resize: vertical;
+  transition: border-color .15s var(--ease);
+}
+#d-summary { min-height: 92px; }
+#d-insight { min-height: 72px; }
+.review-section textarea:focus { outline: none; border-color: var(--action); }
 
-.verdict-badge { display: inline-block; font-size: 16px; font-weight: 700; margin-bottom: 6px; }
-.verdict-badge.is-eligible { color: var(--success); }
-.verdict-badge.is-ineligible { color: var(--danger); }
+/* AI 판단 vs 내 판단: two distinct labeled blocks, not one merged card. */
+.review-subhead { font-size: 12px; font-weight: 500; letter-spacing: .02em; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: var(--sp-2); }
+.verdict-badge {
+  display: inline-block; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-sm);
+  margin-bottom: var(--sp-2); background: var(--surface-sunken); color: var(--text-secondary);
+}
+.verdict-badge.is-eligible { color: var(--success); background: #f0fdf4; }
+.verdict-badge.is-ineligible { color: var(--danger); background: #fef2f2; }
 .verdict-badge.is-unknown { color: var(--text-tertiary); font-weight: 500; }
+.review-my-decision { margin-top: var(--sp-4); }
 .review-verdict-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); flex-wrap: wrap; }
+.decision-btn {
+  height: var(--ctrl-sm); padding: 0 var(--sp-3); border-radius: var(--radius-control); border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
+.decision-btn:hover { border-color: var(--text-tertiary); color: var(--text); }
+.decision-btn.is-selected { background: var(--action); border-color: var(--action); color: #fff; }
 
 /* Text-styled action: for secondary/tertiary actions that shouldn't
    compete visually with a page's one primary button (발행, 필터 적용 등). */
@@ -201,15 +241,23 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
 .form-row { margin-bottom: var(--sp-3); }
 .form-row label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
 .form-row textarea, .form-row input, .form-row select { width: 100%; padding: 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 14px; font-family: inherit; }
+/* Taxonomy chips — pill radius reserved for these only, never for buttons. */
 .chiplist { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 13px; font-weight: 500; cursor: pointer; background: var(--surface); transition: background .15s var(--ease), border-color .15s var(--ease); }
+.chip {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border-strong); font-size: 12px; font-weight: 500; cursor: pointer; background: var(--surface);
+  color: var(--text-secondary); transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
 .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
-.chip.ai-suggested { background: var(--action-soft); border: 1px dashed var(--news); color: var(--news); }
+.chip.ai-suggested { background: var(--action-soft); border: 1px dashed var(--action); color: var(--action-hover); }
 .chip.ai-suggested:hover { background: #dfe6ff; }
 
 /* Progressive disclosure: one shared look for every collapsed-by-default
    block. Motion communicates "revealing," not decoration. */
 details.section { border-top: 1px solid var(--border); padding-top: var(--sp-3); margin-top: var(--sp-6); }
+/* Comparison section: secondary information, deliberately quiet — smaller
+   summary text than a primary section heading, sits below the workspace. */
+.review-comparison summary { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
 details.section summary {
   list-style: none; cursor: pointer; font-weight: 700; font-size: 15px; color: var(--text);
   display: flex; align-items: center; gap: 8px; user-select: none;

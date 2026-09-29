@@ -423,7 +423,7 @@ async function renderReview() {
   // Collapsed by default via the native <details> element — no extra JS
   // state or event wiring needed, and it degrades to a plain toggle.
   const comparisonSection = reviewed.length
-    ? `<details class="section">
+    ? `<details class="section review-comparison">
         <summary>AI vs 리뷰어 적합성 비교</summary>
         <table>
           <tr><th>제목</th><th>AI 판단</th><th>리뷰어 판단</th><th>결과</th></tr>
@@ -440,8 +440,7 @@ async function renderReview() {
   app.innerHTML = `
     <h1>Review</h1>
     <p class="page-lede">AI 초안을 확인하고 발행 여부를 결정합니다.</p>
-    ${comparisonSection}
-    <div class="filters">
+    <div class="review-toolbar">
       <select id="draft-select">
         ${drafts.map((d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
       </select>
@@ -450,6 +449,7 @@ async function renderReview() {
       <button class="btn" id="new-draft">새 자료 수동 등록</button>
     </div>
     <div id="review-body"></div>
+    ${comparisonSection}
   `;
   const sourceOpts = sources.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
   const sectorChips = sectors.map((s) => `<span class="chip" data-sector="${s.id}">${s.name}</span>`).join('');
@@ -540,11 +540,11 @@ async function renderReview() {
 
     function renderAiBox() {
       if (item.ai_status === 'pending') {
-        return `<div class="review-section"><div class="review-section-title">AI 판단</div><p class="review-status-text">생성 중...</p></div>`;
+        return `<div class="review-section"><div class="review-subhead">AI 판단</div><p class="review-status-text">생성 중...</p></div>`;
       }
       if (item.ai_status === 'failed') {
         return `<div class="review-section">
-          <div class="review-section-title">AI 판단</div>
+          <div class="review-subhead">AI 판단</div>
           <p class="review-status-text">초안을 생성하지 못했습니다. 원문을 확인해 직접 작성할 수 있습니다.</p>
           <button class="btn-text" id="ai-retry-btn" type="button">다시 시도</button>
         </div>`;
@@ -563,21 +563,24 @@ async function renderReview() {
         const verdictClass = item.ai_eligible === false ? 'is-ineligible' : item.ai_eligible === true ? 'is-eligible' : 'is-unknown';
         const verdictLabel = item.ai_eligible === false ? '비적합' : item.ai_eligible === true ? '적합' : '판단 없음';
         const reviewerStatus = item.reviewer_eligible === true
-          ? '리뷰어 확인 완료 · 적합'
+          ? '확인 완료'
           : item.reviewer_eligible === false
-            ? '리뷰어 확인 완료 · 비적합'
-            : '리뷰어 미확인';
+            ? '확인 완료'
+            : '미확인';
         return `
           <div class="review-section">
             <div class="review-section-title-row">
-              <span class="review-section-title">AI 판단</span>
+              <span class="review-subhead">AI 판단</span>
               <button class="btn-text" id="ai-retry-btn" type="button">다시 생성</button>
             </div>
             <div class="verdict-badge ${verdictClass}">${verdictLabel}</div>
             <p class="review-body-text">${item.ai_eligibility_reason || ''}</p>
+          </div>
+          <div class="review-my-decision">
+            <div class="review-subhead">내 판단</div>
             <div class="review-verdict-actions">
-              <button class="btn-text" id="reviewer-eligible-confirm-btn" type="button">적합으로 확정</button>
-              <button class="btn-text" id="reviewer-eligible-override-btn" type="button">비적합으로 확정</button>
+              <button class="decision-btn ${item.reviewer_eligible === true ? 'is-selected' : ''}" id="reviewer-eligible-confirm-btn" type="button">적합으로 확정</button>
+              <button class="decision-btn ${item.reviewer_eligible === false ? 'is-selected' : ''}" id="reviewer-eligible-override-btn" type="button">비적합으로 확정</button>
               <span class="review-status-text">${reviewerStatus}</span>
             </div>
           </div>
@@ -601,19 +604,20 @@ async function renderReview() {
       }
       // not_requested
       return `<div class="review-section">
-        <div class="review-section-title">AI 판단</div>
+        <div class="review-subhead">AI 판단</div>
         <p class="review-status-text">아직 AI 초안이 생성되지 않았습니다.</p>
         <button class="btn-text" id="ai-retry-btn" type="button">AI 초안 생성</button>
       </div>`;
     }
 
     document.getElementById('review-body').innerHTML = `
+      <div class="review-source">
+        <div class="review-meta-row">${item.source_name || ''} · ${item.published_at || ''}${item.trust_grade ? ` · ${item.trust_grade}` : ''}</div>
+        <h2 class="review-article-title">${item.title}</h2>
+        <a class="btn-text review-source-url" href="${item.source_url}" target="_blank">${item.source_url} ↗</a>
+      </div>
       <div class="review-layout">
         <div class="review-pane">
-          <div class="review-meta-row">${item.source_name || ''} · ${item.published_at || ''}${item.trust_grade ? ` · ${item.trust_grade}` : ''}</div>
-          <h2 class="review-article-title">${item.title}</h2>
-          <a class="btn-text" href="${item.source_url}" target="_blank">원문 보기 ↗</a>
-          <div class="review-divider" style="margin-top:16px"></div>
           ${renderAiBox()}
         </div>
         <div class="review-pane">
@@ -623,7 +627,7 @@ async function renderReview() {
           </div>
           <div class="review-section">
             <div class="review-section-title">인사이트</div>
-            <textarea id="d-insight" rows="4">${item.insight || ''}</textarea>
+            <textarea id="d-insight" rows="3">${item.insight || ''}</textarea>
           </div>
           <div class="review-section">
             <div class="review-section-title">섹터</div>
@@ -633,7 +637,7 @@ async function renderReview() {
             <div class="review-section-title">활용처</div>
             <div class="chiplist" id="d-usages">${usageChips}</div>
           </div>
-          <button class="btn primary" id="d-publish">발행</button>
+          <button class="btn primary btn-publish" id="d-publish">자료 발행</button>
         </div>
       </div>
     `;
