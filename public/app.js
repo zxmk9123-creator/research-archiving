@@ -20,6 +20,7 @@ const { classifyEligibilityMatch } = EligibilityMatch;
 const { normalizeImportantIds } = CardHelpers;
 const { translateSourceError } = SourceErrors;
 const { parseSavedIds, serializeSavedIds, toggleSavedId } = PersonalSaves;
+const { formatDateOnly } = DateFormat;
 
 const STAR_ICON = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1.5l2.6 5.5 6 .7-4.4 4.1 1.2 6-5.4-3-5.4 3 1.2-6L1.4 7.7l6-.7z"/></svg>';
 
@@ -81,7 +82,7 @@ function itemCard(item, importantIds, savedIds) {
         <button type="button" class="card-save-btn ${isSaved ? 'is-saved' : ''}" onclick="toggleSaveFromCard(event, ${item.id})">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
       </div>
       <h3>${item.title}</h3>
-      <div class="meta">${item.source_name || ''} · ${item.published_at || ''}${sectors ? ` · ${sectors}` : ''}</div>
+      <div class="meta">${item.source_name || ''} · ${formatDateOnly(item.published_at)}${sectors ? ` · ${sectors}` : ''}</div>
       ${summaryText ? `<p class="card-summary-mobile">${summaryText}</p>` : ''}
     </div>
   </div>`;
@@ -342,8 +343,11 @@ async function renderDetail(id) {
 
   app.innerHTML = `
     <div class="detail">
-      ${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
-      <span class="meta">${item.published_at || ''} · ${item.source_name || ''}</span>
+      <div class="detail-meta-row">
+        ${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
+        <span class="detail-meta-sep">·</span>
+        <span class="meta">${formatDateOnly(item.published_at)} · ${item.source_name || ''}</span>
+      </div>
       <h1>${item.title}</h1>
       <div><a href="${item.source_url}" target="_blank">원문 링크</a>${item.pdf_url ? ` · <a href="${item.pdf_url}" target="_blank">PDF</a>` : ''}</div>
       <div class="section"><h2>핵심 요약</h2><p>${item.summary || '(미작성)'}</p></div>
@@ -392,18 +396,11 @@ async function renderDetail(id) {
 
 async function renderSources() {
   const sources = await api('/sources');
-  const failedSources = sources.filter((s) => s.last_error);
-  // Same content/wording as before — only moved here (from Research
-  // Archive) and to the bottom of this page, since source health is a
-  // Sources-page concern, not something every Archive visitor needs to see.
-  const failureWarning = failedSources.length
-    ? `<div class="section" style="border:1px solid var(--reg);border-radius:8px;padding:12px;margin-top:24px;background:#fef2f2">
-        <strong class="stale">수집 실패 경고</strong>
-        <ul style="margin:8px 0 0;padding-left:18px">
-          ${failedSources.map((s) => `<li>${s.name}: ${s.last_error} (${new Date(s.last_error_at).toLocaleString()})</li>`).join('')}
-        </ul>
-      </div>`
-    : '';
+  // The compact collection-failure summary/detail module now lives on
+  // Research Archive (see collectionWarning in renderArchive) — the
+  // canonical place for it, since it's what every visitor sees, not just
+  // whoever manages Sources. Per-row status ("상태" column below) stays
+  // here as part of ordinary source management.
   app.innerHTML = `
     <h1>Sources</h1>
     <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
@@ -437,8 +434,6 @@ async function renderSources() {
         수집 성공/실패 이력(위 "상태" 열)은 신뢰등급과 별개로 기록되며, 등급에 영향을 주지 않습니다.
       </p>
     </details>
-
-    ${failureWarning}
   `;
   document.querySelectorAll('[data-collect]').forEach((btn) => {
     btn.onclick = async () => {
@@ -695,7 +690,7 @@ async function renderReview() {
 
     document.getElementById('review-body').innerHTML = `
       <div class="review-source">
-        <div class="review-meta-row">${item.source_name || ''} · ${item.published_at || ''}${item.trust_grade ? ` · ${item.trust_grade}` : ''}</div>
+        <div class="review-meta-row">${item.source_name || ''} · ${formatDateOnly(item.published_at)}${item.trust_grade ? ` · ${item.trust_grade}` : ''}</div>
         <h2 class="review-article-title">${item.title}</h2>
         <a class="btn-text review-source-url" href="${item.source_url}" target="_blank">${item.source_url} ↗</a>
       </div>

@@ -175,6 +175,10 @@ p { margin: 0; }
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-surface);
   padding: var(--sp-6); box-shadow: var(--shadow-card); max-width: 760px; margin: 0 auto;
 }
+/* Compact metadata row: type + trust grade + date + source all inline,
+   secondary to the title below it — no full-width bars/cards. */
+.detail-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.detail-meta-sep { color: var(--text-tertiary); font-size: 13px; }
 .detail h1 { font-size: 24px; margin: var(--sp-2) 0 var(--sp-1); line-height: 1.4; }
 .detail .section { border-top: 1px solid var(--border); padding-top: var(--sp-3); margin-top: var(--sp-4); }
 .detail .section p { font-size: 14px; line-height: 1.7; color: var(--text); }
