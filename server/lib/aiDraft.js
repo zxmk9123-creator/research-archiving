@@ -7,8 +7,16 @@ const { createLimiter } = require('./ai/concurrencyLimiter');
 // actual outbound provider calls here (not in collector.js) throttles every
 // caller (collection AND manual retry) from one place, with no change to
 // the fire-and-forget/failure-isolated call sites.
+//
+// Concurrency alone (2 at once) wasn't enough: production saw a 20-item
+// burst still exhaust the Groq 8000 TPM budget, because bounding how many
+// calls run *simultaneously* doesn't bound how many start per minute — with
+// fast calls, 2-at-a-time still drains the whole queue in a few seconds,
+// landing all the tokens in one rate window. AI_MIN_CALL_INTERVAL_MS spaces
+// out call *starts* so a burst is spread across the window instead.
 const AI_MAX_CONCURRENT_CALLS = 2;
-const limitAiCall = createLimiter(AI_MAX_CONCURRENT_CALLS);
+const AI_MIN_CALL_INTERVAL_MS = 3000;
+const limitAiCall = createLimiter(AI_MAX_CONCURRENT_CALLS, AI_MIN_CALL_INTERVAL_MS);
 
 // Strict JSON-only contract — no free prose parsing. The model is given the
 // full allowed vocabulary and told to return existing ids only, never invent

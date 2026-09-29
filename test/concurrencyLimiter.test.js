@@ -68,3 +68,36 @@ test('createLimiter: a slot frees up immediately after a task finishes, not afte
   // With concurrency 1, task 2 must not start until task 1 has fully ended.
   assert.deepEqual(order, ['start-1', 'end-1', 'start-2', 'end-2']);
 });
+
+test('createLimiter: minIntervalMs spaces out task starts even when concurrency slots are free', async () => {
+  const run = createLimiter(2, 30);
+  const starts = [];
+
+  const task = () => run(async () => {
+    starts.push(Date.now());
+    await delay(1, null); // near-instant call, like a fast provider response
+  });
+
+  await Promise.all([1, 2, 3, 4].map(task));
+
+  for (let i = 1; i < starts.length; i++) {
+    const gap = starts[i] - starts[i - 1];
+    assert.ok(gap >= 25, `expected >=~30ms between starts, saw ${gap}ms (starts: ${starts.map((s) => s - starts[0])})`);
+  }
+});
+
+test('createLimiter: minIntervalMs=0 (default) does not space out starts (back-compat)', async () => {
+  const run = createLimiter(3, 0);
+  let concurrentAtStart = 0;
+  let maxConcurrentAtStart = 0;
+
+  const task = () => run(async () => {
+    concurrentAtStart++;
+    maxConcurrentAtStart = Math.max(maxConcurrentAtStart, concurrentAtStart);
+    await delay(5, null);
+    concurrentAtStart--;
+  });
+
+  await Promise.all([1, 2, 3].map(task));
+  assert.equal(maxConcurrentAtStart, 3);
+});
