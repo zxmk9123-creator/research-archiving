@@ -18,6 +18,10 @@ router.post('/:id/collect', async (req, res) => {
     return res.status(400).json({ error: 'source must have method=rss and a url' });
   }
   const result = await collectSource(rows[0]);
+  // Minimal observability: the HTTP response body isn't visible in platform
+  // request logs, only the status code — log the actual outcome so
+  // collection results (fetched/new/failure) can be verified from logs.
+  console.log(`collect source ${rows[0].id} (${rows[0].name}): ${JSON.stringify(result)}`);
   res.json(result);
 });
 
