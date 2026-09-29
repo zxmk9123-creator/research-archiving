@@ -45,4 +45,13 @@ router.post('/', async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+// items.source_id is ON DELETE SET NULL (see schema.sql) — deleting a
+// source never cascades to or removes previously collected items, it only
+// detaches them from this source.
+router.delete('/:id', async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM sources WHERE id = $1', [req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  res.status(204).end();
+});
+
 module.exports = router;

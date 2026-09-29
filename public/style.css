@@ -206,6 +206,13 @@ th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700; col
 td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); color: var(--text); }
 .stale { color: var(--danger); font-weight: 700; }
 
+/* Compact table-row actions (지금 수집 / 삭제) — smaller than the default
+   .btn so they fit naturally inside a table row. 삭제 uses restrained
+   red text only, no filled button, to stay visually secondary. */
+.btn-table-action { height: var(--ctrl-sm); padding: 0 10px; font-size: 13px; }
+.btn-table-action-danger { color: var(--danger); border-color: var(--border-strong); background: var(--surface); }
+.btn-table-action-danger:hover { background: #fef2f2; border-color: var(--danger); }
+
 /* Review header toolbar: draft select + prev/next + new-item, one compact
    36px row — not a filter bar, a navigation strip. */
 .review-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-4) 0 var(--sp-5); }

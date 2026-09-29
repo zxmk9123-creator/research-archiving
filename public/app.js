@@ -417,12 +417,13 @@ async function renderSources() {
     <h1>Sources</h1>
     <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
     <table>
-      <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
+      <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th><th></th></tr>
       ${sources.map((s) => `<tr>
         <td>${s.name}</td><td>${s.method}</td><td>${s.owner || '-'}</td><td>${s.frequency_days}</td>
         <td>${s.trust_grade}</td><td>${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
         <td>${s.last_error ? `<span class="stale" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="stale">Stale</span>' : 'OK')}</td>
-        <td>${s.method === 'rss' ? `<button class="btn" data-collect="${s.id}">지금 수집</button>` : ''}</td>
+        <td>${s.method === 'rss' ? `<button class="btn btn-table-action" data-collect="${s.id}">지금 수집</button>` : ''}</td>
+        <td><button class="btn btn-table-action btn-table-action-danger" data-delete-source="${s.id}">삭제</button></td>
       </tr>`).join('')}
     </table>
 
@@ -448,6 +449,18 @@ async function renderSources() {
         await api(`/sources/${btn.dataset.collect}/collect`, { method: 'POST' });
       } catch (err) {
         alert(`수집 실패: ${err.message}`);
+      }
+      renderSources();
+    };
+  });
+  document.querySelectorAll('[data-delete-source]').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm('이 소스를 삭제하시겠습니까? 기존에 수집된 자료는 유지됩니다.')) return;
+      try {
+        await api(`/sources/${btn.dataset.deleteSource}`, { method: 'DELETE' });
+      } catch (err) {
+        alert(`삭제 실패: ${err.message}`);
+        return;
       }
       renderSources();
     };
