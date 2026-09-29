@@ -548,8 +548,15 @@ function parseHash() {
   return { path: parts[0] || 'home', param: parts[1], query };
 }
 
+function updateActiveNav(path) {
+  document.querySelectorAll('.topbar nav a').forEach((a) => {
+    a.classList.toggle('active', a.getAttribute('href') === `#/${path}`);
+  });
+}
+
 async function router() {
   const { path, param, query } = parseHash();
+  updateActiveNav(path);
   try {
     if (path === 'home' || path === '') await renderHome();
     else if (path === 'archive') await renderArchive(query);
