@@ -374,6 +374,8 @@ async function renderReview() {
       <select id="draft-select">
         ${drafts.map((d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
       </select>
+      <button class="btn" id="prev-draft-btn" type="button">← 이전</button>
+      <button class="btn" id="next-draft-btn" type="button">다음 →</button>
       <button class="btn" id="new-draft">새 자료 수동 등록</button>
     </div>
     <div id="review-body"></div>
@@ -619,8 +621,33 @@ async function renderReview() {
   }
 
   const select = document.getElementById('draft-select');
-  select.onchange = () => loadDraft(select.value);
+  const prevBtn = document.getElementById('prev-draft-btn');
+  const nextBtn = document.getElementById('next-draft-btn');
+  let currentIndex = drafts.length ? 0 : -1;
+
+  function syncNavButtons() {
+    prevBtn.disabled = currentIndex <= 0;
+    nextBtn.disabled = currentIndex < 0 || currentIndex >= drafts.length - 1;
+  }
+
+  function selectDraftAt(index) {
+    if (index < 0 || index >= drafts.length) return;
+    currentIndex = index;
+    select.value = String(drafts[index].id);
+    syncNavButtons();
+    loadDraft(drafts[index].id);
+  }
+
+  select.onchange = () => {
+    currentIndex = drafts.findIndex((d) => String(d.id) === select.value);
+    syncNavButtons();
+    loadDraft(select.value);
+  };
+  prevBtn.onclick = () => selectDraftAt(currentIndex - 1);
+  nextBtn.onclick = () => selectDraftAt(currentIndex + 1);
   document.getElementById('new-draft').onclick = () => loadDraft(null);
+
+  syncNavButtons();
   if (drafts[0]) loadDraft(drafts[0].id);
 }
 
