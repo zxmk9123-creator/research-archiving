@@ -257,7 +257,7 @@ async function callLlama({ system, user }) {
 async function callNvidia({ system, user }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY is not configured');
-  const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-70b-instruct';
+  const model = process.env.NVIDIA_MODEL || 'meta/llama-3.3-70b-instruct';
 
   const res = await fetchProvider('nvidia', 'https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',

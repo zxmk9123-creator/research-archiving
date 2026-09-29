@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback } = require('../server/lib/ai/provider');
+const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callNvidia } = require('../server/lib/ai/provider');
 
 function transientError(message) {
   const err = new Error(message);
@@ -363,6 +363,26 @@ test('runProviderChain: an application/JSON/Zod-style error (no .transient flag)
   ];
   await assert.rejects(() => runProviderChain(chain), /not valid JSON/);
   assert.equal(nvidiaCalled, false);
+});
+
+test('callNvidia: sends the currently supported model, not the EOL meta/llama-3.1-70b-instruct', async () => {
+  let sentBody;
+  const restore = mockFetchByUrl([
+    ['integrate.api.nvidia.com', async (url, init) => {
+      sentBody = JSON.parse(init.body);
+      return jsonResponse(200, { choices: [{ message: { content: 'nvidia response' } }] });
+    }],
+  ]);
+  try {
+    process.env.NVIDIA_API_KEY = 'test';
+    delete process.env.NVIDIA_MODEL;
+    await callNvidia({ system: 's', user: 'u' });
+    assert.notEqual(sentBody.model, 'meta/llama-3.1-70b-instruct');
+    assert.equal(sentBody.model, 'meta/llama-3.3-70b-instruct');
+  } finally {
+    restore();
+    delete process.env.NVIDIA_API_KEY;
+  }
 });
 
 // --- The most important regression from this task: the exact reported
