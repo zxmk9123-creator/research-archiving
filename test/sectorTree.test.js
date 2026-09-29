@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSectorMaps, sectorAncestryPath, buildColumns } = require('../public/sectorTree');
+const {
+  buildSectorMaps,
+  sectorAncestryPath,
+  buildColumns,
+  collectSubtreeIds,
+  getSectorCheckState,
+  setSectorSelection,
+} = require('../public/sectorTree');
 
 // Mirrors the shape of GET /api/sectors: 2-level MECE tree, but the helpers
 // must not assume any fixed depth.
@@ -107,4 +114,46 @@ test('buildSectorMaps: dedupes an exact-id duplicate row instead of double-count
   const { byParent, byId } = buildSectorMaps(withRepeatedRow);
   assert.equal(byId.size, 2);
   assert.equal(byParent.get(null).length, 1);
+});
+
+test('collectSubtreeIds: includes the node itself plus every descendant at every depth', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  assert.deepEqual(collectSubtreeIds(byParent, 1).sort(), [1, 3, 4, 5]);
+  assert.deepEqual(collectSubtreeIds(byParent, 3), [3]); // leaf: just itself
+});
+
+test('setSectorSelection: selecting a parent (식용유지) cascades to all its children', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  const selected = new Set();
+  setSectorSelection(byParent, selected, 1, true);
+  assert.deepEqual([...selected].sort((a, b) => a - b), [1, 3, 4, 5]);
+});
+
+test('setSectorSelection: deselecting a parent cascades removal to all its children', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  const selected = new Set([1, 3, 4, 5, 6]); // 6 (UCO) belongs to a different branch
+  setSectorSelection(byParent, selected, 1, false);
+  assert.deepEqual([...selected], [6]);
+});
+
+test('getSectorCheckState: unchecked when nothing in the subtree is selected', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  assert.equal(getSectorCheckState(byParent, 1, new Set()), 'unchecked');
+});
+
+test('getSectorCheckState: checked when the node and every descendant are selected', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  assert.equal(getSectorCheckState(byParent, 1, new Set([1, 3, 4, 5])), 'checked');
+});
+
+test('getSectorCheckState: indeterminate when only some descendants are selected', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  assert.equal(getSectorCheckState(byParent, 1, new Set([3])), 'indeterminate');
+  assert.equal(getSectorCheckState(byParent, 1, new Set([3, 4])), 'indeterminate');
+});
+
+test('getSectorCheckState: a leaf node is checked/unchecked based only on itself, never indeterminate', () => {
+  const { byParent } = buildSectorMaps(sectors);
+  assert.equal(getSectorCheckState(byParent, 3, new Set([3])), 'checked');
+  assert.equal(getSectorCheckState(byParent, 3, new Set()), 'unchecked');
 });

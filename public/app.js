@@ -15,7 +15,7 @@ function typeTag(t) {
   return `<span class="tag ${TYPE_CLASS[t] || ''}">${t}</span>`;
 }
 
-const { buildSectorMaps, sectorAncestryPath, buildColumns } = SectorTree;
+const { buildSectorMaps, sectorAncestryPath, buildColumns, getSectorCheckState, setSectorSelection } = SectorTree;
 
 function itemCard(item) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
@@ -126,10 +126,10 @@ async function renderArchive(query = {}) {
         ${col.nodes.map((s) => {
           const hasChildren = (byParent.get(s.id) || []).length > 0;
           const isActiveBranch = activePath[col.level] === s.id;
-          const isChecked = selectedSectorIds.has(s.id);
+          const checkState = getSectorCheckState(byParent, s.id, selectedSectorIds);
           return `<div class="sector-node ${isActiveBranch ? 'active' : ''}">
             <label class="sector-node-check">
-              <input type="checkbox" data-check="${s.id}" ${isChecked ? 'checked' : ''} aria-label="${s.name} 필터로 선택">
+              <input type="checkbox" data-check="${s.id}" data-check-state="${checkState}" ${checkState === 'checked' ? 'checked' : ''} aria-label="${s.name} 필터로 선택 (하위 항목 포함)">
             </label>
             <button type="button" class="sector-node-label" data-nav="${s.id}" data-level="${col.level}">${s.name}</button>
             <span class="sector-node-arrow" aria-hidden="true">${hasChildren ? '›' : ''}</span>
@@ -148,9 +148,13 @@ async function renderArchive(query = {}) {
       };
     });
     treeEl.querySelectorAll('[data-check]').forEach((el) => {
+      // checkbox.indeterminate is a DOM property, not an HTML attribute —
+      // must be set imperatively after the element exists.
+      el.indeterminate = el.dataset.checkState === 'indeterminate';
       el.onchange = () => {
         const id = Number(el.dataset.check);
-        if (el.checked) selectedSectorIds.add(id); else selectedSectorIds.delete(id);
+        setSectorSelection(byParent, selectedSectorIds, id, el.checked);
+        renderTree();
         renderChips();
       };
     });

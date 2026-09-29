@@ -57,5 +57,41 @@
     return columns;
   }
 
-  return { buildSectorMaps, sectorAncestryPath, buildColumns };
+  // All ids in the subtree rooted at `id`, including `id` itself.
+  function collectSubtreeIds(byParent, id) {
+    const ids = [id];
+    for (const child of byParent.get(id) || []) {
+      ids.push(...collectSubtreeIds(byParent, child.id));
+    }
+    return ids;
+  }
+
+  // Cascading checkbox state for a node, derived purely from which ids in
+  // its subtree (itself + all descendants) are in selectedSectorIds — no
+  // separate "parent selected" flag to keep in sync.
+  function getSectorCheckState(byParent, id, selectedSectorIds) {
+    const ids = collectSubtreeIds(byParent, id);
+    const selectedCount = ids.filter((i) => selectedSectorIds.has(i)).length;
+    if (selectedCount === 0) return 'unchecked';
+    if (selectedCount === ids.length) return 'checked';
+    return 'indeterminate';
+  }
+
+  // Selects/deselects a node and its entire subtree in one go (mutates the
+  // Set in place, same identity the caller already holds).
+  function setSectorSelection(byParent, selectedSectorIds, id, selected) {
+    for (const i of collectSubtreeIds(byParent, id)) {
+      if (selected) selectedSectorIds.add(i);
+      else selectedSectorIds.delete(i);
+    }
+  }
+
+  return {
+    buildSectorMaps,
+    sectorAncestryPath,
+    buildColumns,
+    collectSubtreeIds,
+    getSectorCheckState,
+    setSectorSelection,
+  };
 });
