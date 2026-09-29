@@ -227,6 +227,7 @@ async function renderDetail(id) {
         <button class="btn ${myPersonalPick ? 'primary' : ''}" id="personal-pick-btn">${myPersonalPick ? '개인 저장됨 (취소)' : '개인 저장'}</button>
         <button class="btn ${myTeamPick ? 'primary' : ''}" id="team-pick-btn">${myTeamPick ? '팀 Pick 취소' : '팀 Pick 저장'}</button>
         <span class="meta">팀 Pick ${teamPickCount}명</span>
+        <button class="btn" id="delete-item-btn" style="margin-left:auto;color:#b91c1c">삭제</button>
       </div>
       ${related.length ? `
         <div class="section">
@@ -256,6 +257,11 @@ async function renderDetail(id) {
       await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'team', user_email: email }) });
     }
     renderDetail(id);
+  };
+  document.getElementById('delete-item-btn').onclick = async () => {
+    if (!confirm('이 자료를 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+    await api(`/items/${id}`, { method: 'DELETE' });
+    location.hash = '#/archive';
   };
 }
 

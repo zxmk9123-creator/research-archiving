@@ -176,4 +176,10 @@ router.patch('/:id', async (req, res) => {
   res.json(full[0]);
 });
 
+router.delete('/:id', async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM items WHERE id = $1 RETURNING id', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  res.status(204).end();
+});
+
 module.exports = router;
