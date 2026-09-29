@@ -839,8 +839,19 @@ function parseHash() {
   return { path: parts[0] || 'home', param: parts[1], query };
 }
 
+// Active tab is derived straight from the existing hash-route state (no
+// separate UI state to keep in sync) — 'detail' has no top-level tab of
+// its own, so it maps back to the Archive tab it was reached from.
+function updateActiveNavTab(path) {
+  const activeRoute = path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'archive';
+  document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
+    el.classList.toggle('active', el.dataset.route === activeRoute);
+  });
+}
+
 async function router() {
   const { path, param, query } = parseHash();
+  updateActiveNavTab(path);
   try {
     if (path === 'home' || path === '' || path === 'archive') await renderArchive(query);
     else if (path === 'detail') {

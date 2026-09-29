@@ -77,6 +77,8 @@ body {
 }
 .topbar nav a:hover { color: var(--text); background: var(--surface-sunken); }
 .topbar nav a:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+/* Active tab: text color only, per spec — no background/border/underline. */
+.topbar nav a.active { color: var(--action); }
 
 #app { max-width: 1120px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) var(--sp-8); }
 
