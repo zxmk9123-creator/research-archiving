@@ -25,12 +25,13 @@ const SYSTEM_PROMPT = `You are a research-archiving assistant for an oils & fats
 Given a title and (if available) a short description of a collected article, respond with STRICT JSON ONLY — no markdown fences, no commentary, nothing before or after the JSON object.
 
 The JSON object must have exactly this shape:
-{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
+{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
 
 Rules:
 - eligible: true if this article is substantive enough to be worth archiving for a market-intelligence team (has concrete facts, not just a headline teaser or unrelated content); false otherwise.
 - eligibility_reason: one concise Korean sentence explaining the eligible verdict.
-- who / what / amount / when / where / why / impact: extract each fact ONLY if it is explicitly stated in the given title/description. If a fact is not stated, respond with the exact Korean string "미확보" for that field — do NOT guess, infer, estimate, or fill in a plausible-sounding value.
+- who / what / amount / when / where / why / impact: internal extraction fields, used only as your reasoning criteria for identifying the article's core facts — NOT the final output shown to a person. Fill each ONLY if it is explicitly stated in the given title/description. If a fact is not stated, respond with the exact Korean string "미확보" for that field — do NOT guess, infer, estimate, or fill in a plausible-sounding value.
+- summary: a natural, flowing 1-3 sentence Korean summary of the article's core facts — NOT a labeled list (do not write "누가:", "무엇을:", etc.). Use the who/what/amount/when/where/why/impact facts above as your reasoning criteria for what matters (prioritize concrete, decision-relevant facts: companies, transactions, amounts, volumes, dates, locations, material impacts, when present), but write it as ordinary prose a person would read. Simply omit any fact that is "미확보" or otherwise unavailable — never mention it, never write "미확보" or a placeholder inside the sentence, and never invent or infer a cause, amount, date, company, or impact that isn't explicitly stated.
 - key_takeaway: one concise Korean sentence stating the single most useful insight for a reviewer.
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
@@ -72,21 +73,21 @@ function factOrUnconfirmed(value) {
   return UNCONFIRMED;
 }
 
-const FACT_LABELS = [
-  ['who', '누가'],
-  ['what', '무엇을'],
-  ['amount', '규모/금액'],
-  ['when', '시점'],
-  ['where', '장소'],
-  ['why', '이유'],
-  ['impact', '영향'],
-];
+const FACT_KEYS = ['who', 'what', 'amount', 'when', 'where', 'why', 'impact'];
 
-// Deterministic formatting so every summary has the same concrete shape
-// regardless of how the model phrases things — the model only supplies the
-// facts, this function is what actually "presents them clearly".
-function buildFactualSummary(facts) {
-  return FACT_LABELS.map(([key, label]) => `${label}: ${facts[key]}`).join('\n');
+// who/what/amount/when/where/why/impact are extraction criteria only — they
+// ground what the model should consider, but the user-facing ai_summary is
+// the model's own natural-language sentence(s), not a labeled dump of these
+// fields. This function's job is just to pick a safe value: the model's
+// prose when it gave one, otherwise a minimal fallback built ONLY from facts
+// that are actually confirmed (never a "미확보" placeholder inside prose,
+// never an invented fact).
+function buildFactualSummary(facts, modelSummary) {
+  const summary = typeof modelSummary === 'string' ? modelSummary.trim() : '';
+  if (summary) return summary;
+
+  const what = facts.what !== UNCONFIRMED ? facts.what : '';
+  return what || '핵심 사실이 확인되지 않았습니다.';
 }
 
 // Pure validation: parses the model's raw text, enforces the contract, and
@@ -108,8 +109,8 @@ function parseDraftResponse(raw, taxonomy) {
     throw new Error('AI response was not a JSON object');
   }
 
-  const facts = Object.fromEntries(FACT_LABELS.map(([key]) => [key, factOrUnconfirmed(parsed[key])]));
-  const summary = buildFactualSummary(facts);
+  const facts = Object.fromEntries(FACT_KEYS.map((key) => [key, factOrUnconfirmed(parsed[key])]));
+  const summary = buildFactualSummary(facts, parsed.summary);
   const keyTakeaway = typeof parsed.key_takeaway === 'string' && parsed.key_takeaway.trim()
     ? parsed.key_takeaway.trim()
     : UNCONFIRMED;

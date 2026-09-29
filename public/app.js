@@ -456,7 +456,7 @@ async function renderReview() {
             ${eligibilityBadge}
             <p class="meta">${item.ai_eligibility_reason || ''}</p>
           </div>
-          <div class="form-row"><label>요약 (사실 확인)</label><p style="white-space:pre-line">${item.ai_summary || ''}</p></div>
+          <div class="form-row"><label>AI 요약 (사실 확인 필요)</label><p>${item.ai_summary || ''}</p></div>
           <div class="form-row"><label>핵심 내용</label><p>${item.ai_key_takeaway || ''}</p></div>
           <div class="form-row"><label>추천 섹터 (클릭하여 적용)</label><div class="chiplist">${sectorChipsAi}</div></div>
           <div class="form-row"><label>추천 활용처 (클릭하여 적용)</label><div class="chiplist">${usageChipsAi}</div></div>
