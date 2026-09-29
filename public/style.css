@@ -24,8 +24,20 @@ h1 { font-size: 20px; } h2 { font-size: 16px; color: var(--muted); font-weight: 
 .count { font-size: 13px; color: var(--muted); margin: 8px 0; }
 .detail { display: grid; grid-template-columns: 1fr; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
 .detail .section { border-top: 1px solid var(--border); padding-top: 12px; }
-.btn { display: inline-block; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 13px; }
+.btn { display: inline-block; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 13px; transition: background .15s ease, border-color .15s ease; }
+.btn:hover { background: var(--bg); border-color: #c9d3e0; }
+.btn:disabled { cursor: not-allowed; opacity: .5; }
+.btn:disabled:hover { background: var(--card); border-color: var(--border); }
+.btn:focus-visible { outline: 2px solid var(--news); outline-offset: 2px; }
 .btn.primary { background: var(--text); color: #fff; border-color: var(--text); }
+.btn.primary:hover { background: #1e293b; border-color: #1e293b; }
+
+/* Progressive disclosure: the same look wherever a section is collapsed by
+   default (Review's AI/reviewer comparison, Sources' trust-grade note). */
+details.section { border-top: 1px solid var(--border); padding-top: 12px; }
+details.section summary { list-style: none; }
+details.section summary::-webkit-details-marker { display: none; }
+details.section[open] summary { margin-bottom: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .stale { color: var(--reg); font-weight: 600; }

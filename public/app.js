@@ -34,15 +34,6 @@ async function renderArchive(query = {}) {
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
     api('/picks/ranking').catch(() => []),
   ]);
-  const failedSources = sources.filter((s) => s.last_error);
-  const warning = failedSources.length
-    ? `<div class="section" style="border:1px solid var(--reg);border-radius:8px;padding:12px;margin-bottom:16px;background:#fef2f2">
-        <strong class="stale">수집 실패 경고</strong>
-        <ul style="margin:8px 0 0;padding-left:18px">
-          ${failedSources.map((s) => `<li>${s.name}: ${s.last_error} (${new Date(s.last_error_at).toLocaleString()})</li>`).join('')}
-        </ul>
-      </div>`
-    : '';
   const latest = items.slice(0, 9);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
   const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
@@ -68,7 +59,6 @@ async function renderArchive(query = {}) {
 
   app.innerHTML = `
     <h1>Research Archive</h1>
-    ${warning}
     <div class="archive">
       <div class="archive-filter-panel">
         <div class="filters">
@@ -268,6 +258,18 @@ async function renderDetail(id) {
 
 async function renderSources() {
   const sources = await api('/sources');
+  const failedSources = sources.filter((s) => s.last_error);
+  // Same content/wording as before — only moved here (from Research
+  // Archive) and to the bottom of this page, since source health is a
+  // Sources-page concern, not something every Archive visitor needs to see.
+  const failureWarning = failedSources.length
+    ? `<div class="section" style="border:1px solid var(--reg);border-radius:8px;padding:12px;margin-top:24px;background:#fef2f2">
+        <strong class="stale">수집 실패 경고</strong>
+        <ul style="margin:8px 0 0;padding-left:18px">
+          ${failedSources.map((s) => `<li>${s.name}: ${s.last_error} (${new Date(s.last_error_at).toLocaleString()})</li>`).join('')}
+        </ul>
+      </div>`
+    : '';
   app.innerHTML = `
     <h1>Sources</h1>
     <table>
@@ -288,6 +290,15 @@ async function renderSources() {
     <div class="form-row"><label>오너</label><input id="s-owner"></div>
     <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
     <button class="btn primary" id="s-add">추가</button>
+    <details class="section" style="margin-top:24px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--muted)">신뢰등급(A/B/C)이란? ▾</summary>
+      <p class="meta" style="margin-top:8px">
+        신뢰등급은 별도의 자동 산정 로직 없이, 소스 등록 시 담당자가 발행처의 공신력·정확성 이력을 근거로
+        직접 A(가장 신뢰)·B·C 중 하나로 지정합니다. 기본값은 A이며, 이후 자동으로 재계산되지 않습니다.
+        수집 성공/실패 이력(위 "상태" 열)은 신뢰등급과 별개로 기록되며, 등급에 영향을 주지 않습니다.
+      </p>
+    </details>
+    ${failureWarning}
   `;
   document.querySelectorAll('[data-collect]').forEach((btn) => {
     btn.onclick = async () => {
@@ -665,7 +676,14 @@ async function router() {
   const { path, param, query } = parseHash();
   try {
     if (path === 'home' || path === '' || path === 'archive') await renderArchive(query);
-    else if (path === 'detail') await renderDetail(param);
+    else if (path === 'detail') {
+      await renderDetail(param);
+      // The browser can otherwise preserve the previous page's scroll
+      // position across a hash change; a Detail view should always open
+      // at its own top regardless of where the visitor scrolled to on
+      // Archive.
+      window.scrollTo(0, 0);
+    }
     else if (path === 'sources') await renderSources();
     else if (path === 'review') await renderReview();
     else app.innerHTML = '<p>페이지를 찾을 수 없습니다.</p>';
