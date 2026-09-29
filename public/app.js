@@ -17,23 +17,53 @@ function typeTag(t) {
 
 const { buildSectorMaps, sectorAncestryPath, buildColumns, getSectorCheckState, setSectorSelection } = SectorTree;
 const { classifyEligibilityMatch } = EligibilityMatch;
+const { normalizeImportantIds } = CardHelpers;
+const { translateSourceError } = SourceErrors;
+const { parseSavedIds, serializeSavedIds, toggleSavedId } = PersonalSaves;
 
 const STAR_ICON = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1.5l2.6 5.5 6 .7-4.4 4.1 1.2 6-5.4-3-5.4 3 1.2-6L1.4 7.7l6-.7z"/></svg>';
+
+// Personal Save ("나중에 다시 볼 자료") lives only in this browser's
+// localStorage — no auth exists yet, so it is never tied to an email or
+// written to the server (contrast with Team Pick, which stays server-side
+// via the existing picks API/kind='team').
+const PERSONAL_SAVE_STORAGE_KEY = 'ra_personal_saves';
+function getPersonalSaveIds() {
+  return parseSavedIds(localStorage.getItem(PERSONAL_SAVE_STORAGE_KEY));
+}
+function setPersonalSaveIds(ids) {
+  localStorage.setItem(PERSONAL_SAVE_STORAGE_KEY, serializeSavedIds(ids));
+}
+window.toggleSaveFromCard = function toggleSaveFromCard(ev, id) {
+  ev.stopPropagation();
+  const next = toggleSavedId(getPersonalSaveIds(), id);
+  setPersonalSaveIds(next);
+  const btn = ev.currentTarget;
+  const nowSaved = next.has(id);
+  btn.classList.toggle('is-saved', nowSaved);
+  btn.textContent = nowSaved ? '★ 저장됨' : '☆ 저장';
+};
 
 // "Important" reuses the existing team-pick signal (picks.kind='team',
 // surfaced today via GET /api/picks/ranking) rather than any new field or
 // an invented scoring algorithm — a team pick is already an explicit human
-// judgment that an item matters. importantIds is optional; callers that
-// don't have that context (e.g. Detail's related-items grid) simply get no
-// importance treatment rather than a wrong guess.
+// judgment that an item matters. importantIds/savedIds are optional and
+// always normalized to a Set here at the render boundary — this is what
+// fixes "importantIds.has is not a function": one call site passed
+// itemCard directly as an Array.map() callback, so map's numeric index
+// arrived as importantIds instead of a Set. normalizeImportantIds() makes
+// every caller safe regardless of what it actually passed.
 //
 // Editorial grid module: image (existing thumbnail_url) or, when absent, a
 // text-based source-identity module at the same aspect ratio — never a
 // generated image. The hover/mobile summary reuses existing ai_summary
 // first, then summary, exactly as already stored; no new field.
-function itemCard(item, importantIds) {
+function itemCard(item, importantIds, savedIds) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
-  const isImportant = Boolean(importantIds && importantIds.has(item.id));
+  const important = normalizeImportantIds(importantIds);
+  const saved = normalizeImportantIds(savedIds);
+  const isImportant = important.has(item.id);
+  const isSaved = saved.has(item.id);
   const summaryText = item.ai_summary || item.summary || '';
 
   const media = item.thumbnail_url
@@ -47,7 +77,9 @@ function itemCard(item, importantIds) {
       ${summaryText ? `<div class="card-hover-summary"><p>${summaryText}</p></div>` : ''}
     </div>
     <div class="card-body">
-      <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span></div>
+      <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
+        <button type="button" class="card-save-btn ${isSaved ? 'is-saved' : ''}" onclick="toggleSaveFromCard(event, ${item.id})">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
+      </div>
       <h3>${item.title}</h3>
       <div class="meta">${item.source_name || ''} · ${item.published_at || ''}${sectors ? ` · ${sectors}` : ''}</div>
       ${summaryText ? `<p class="card-summary-mobile">${summaryText}</p>` : ''}
@@ -60,7 +92,6 @@ async function renderArchive(query = {}) {
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
     api('/picks/ranking').catch(() => []),
   ]);
-  const latest = items.slice(0, 9);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
   const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
 
@@ -87,17 +118,59 @@ async function renderArchive(query = {}) {
   const activeChipsHtml = activeChips.map((c) => `<span class="pill">${c}</span>`).join('');
 
   const importantIds = new Set(ranking.map((r) => r.id));
+  const savedIds = getPersonalSaveIds();
 
-  const emptyState = items.length
+  // Archive view tabs — a separate axis from the sector taxonomy filters,
+  // never mixed into the same query params those use. Purely a client-side
+  // filter over the already-fetched Published items: "내 저장" intersects
+  // with this browser's localStorage save set, "팀 Pick" intersects with
+  // the existing server-side team-pick ranking (importantIds).
+  const view = query.view === 'saved' || query.view === 'team' ? query.view : 'all';
+  const visibleItems = view === 'saved' ? items.filter((it) => savedIds.has(it.id))
+    : view === 'team' ? items.filter((it) => importantIds.has(it.id))
+    : items;
+  const latest = visibleItems.slice(0, 9);
+
+  const viewTabs = [
+    { key: 'all', label: '전체' },
+    { key: 'saved', label: '내 저장' },
+    { key: 'team', label: '팀 Pick' },
+  ];
+  const tabQuery = (key) => toQuery({ ...query, view: key === 'all' ? '' : key }).slice(1);
+  const viewTabsHtml = viewTabs.map((t) =>
+    `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(t.key)}">${t.label}</a>`
+  ).join('');
+
+  const failedSources = sources.filter((s) => s.last_error);
+  const collectionWarning = failedSources.length
+    ? `<details class="archive-collection-warning">
+        <summary>⚠ ${failedSources.length}개 수집 소스에서 확인이 필요합니다</summary>
+        <ul class="collection-warning-list">
+          ${failedSources.map((s) => {
+            const { message, detail } = translateSourceError(s.last_error);
+            const checked = s.last_error_at ? new Date(s.last_error_at).toLocaleString() : '-';
+            return `<li>
+              <span class="collection-warning-source">${s.name}</span>
+              <span class="collection-warning-message">${message}</span>
+              <span class="collection-warning-meta">마지막 확인 ${checked}${detail ? ` · ${detail}` : ''}</span>
+            </li>`;
+          }).join('')}
+        </ul>
+      </details>`
+    : '';
+
+  const emptyState = visibleItems.length
     ? ''
     : `<div class="archive-empty">
         <strong>결과가 없습니다</strong>
-        ${hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
+        ${view === 'saved' ? '아직 저장한 자료가 없습니다.' : view === 'team' ? '아직 팀 Pick이 없습니다.' : hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
       </div>`;
 
   app.innerHTML = `
     <h1>Research Archive</h1>
     <p class="page-lede">오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.</p>
+    ${collectionWarning}
+    <div class="archive-tabs">${viewTabsHtml}</div>
     <div class="archive">
       <div class="archive-search-bar">
         <input id="f-q" placeholder="검색" value="${query.q || ''}">
@@ -128,7 +201,7 @@ async function renderArchive(query = {}) {
 
       <div class="section" style="margin-top:0">
         <h2>최신 자료</h2>
-        <div class="grid">${latest.map((it) => itemCard(it, importantIds)).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
+        <div class="grid">${latest.map((it) => itemCard(it, importantIds, savedIds)).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
       </div>
 
       <details class="section">
@@ -139,9 +212,9 @@ async function renderArchive(query = {}) {
       </details>
 
       <div class="section">
-        <div class="section-header"><h2>전체 결과</h2><span class="count">${items.length}개</span></div>
+        <div class="section-header"><h2>전체 결과</h2><span class="count">${visibleItems.length}개</span></div>
         ${emptyState}
-        <div class="grid">${items.map((it) => itemCard(it, importantIds)).join('')}</div>
+        <div class="grid">${visibleItems.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
       </div>
     </div>
   `;
@@ -246,7 +319,7 @@ function toQuery(obj) {
 function getUserEmail(promptIfMissing) {
   let email = localStorage.getItem('ra_user_email');
   if (!email && promptIfMissing) {
-    email = (prompt('개인 저장 / 팀 Pick은 이메일로 구분됩니다. 이메일을 입력해주세요:') || '').trim();
+    email = (prompt('팀 Pick은 이메일로 구분됩니다. 이메일을 입력해주세요:') || '').trim();
     if (email) localStorage.setItem('ra_user_email', email);
   }
   return email || null;
@@ -263,7 +336,7 @@ async function renderDetail(id) {
   const companyTags = (item.companies || []).map((c) => `<span class="pill">🏢 ${c.name}</span>`).join('');
 
   const myEmail = getUserEmail(false);
-  const myPersonalPick = myEmail ? picks.find((p) => p.kind === 'personal' && p.user_email === myEmail) : null;
+  const isSaved = getPersonalSaveIds().has(item.id);
   const myTeamPick = myEmail ? picks.find((p) => p.kind === 'team' && p.user_email === myEmail) : null;
   const teamPickCount = picks.filter((p) => p.kind === 'team').length;
 
@@ -282,7 +355,7 @@ async function renderDetail(id) {
         <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('attr').textContent)">복사</button>
       </div>
       <div class="section" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button class="btn ${myPersonalPick ? 'primary' : ''}" id="personal-pick-btn">${myPersonalPick ? '개인 저장됨 (취소)' : '개인 저장'}</button>
+        <button class="btn compact-save-btn ${isSaved ? 'is-saved' : ''}" id="personal-pick-btn">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
         <button class="btn ${myTeamPick ? 'primary' : ''}" id="team-pick-btn">${myTeamPick ? '팀 Pick 취소' : '팀 Pick 저장'}</button>
         <span class="meta">팀 Pick ${teamPickCount}명</span>
         <button class="btn" id="delete-item-btn" style="margin-left:auto;color:#b91c1c">삭제</button>
@@ -290,20 +363,14 @@ async function renderDetail(id) {
       ${related.length ? `
         <div class="section">
           <h2>관련 자료</h2>
-          <div class="grid">${related.map(itemCard).join('')}</div>
+          <div class="grid">${related.map((it) => itemCard(it)).join('')}</div>
         </div>
       ` : ''}
     </div>
   `;
 
-  document.getElementById('personal-pick-btn').onclick = async () => {
-    if (myPersonalPick) {
-      await api(`/picks/${myPersonalPick.id}`, { method: 'DELETE' });
-    } else {
-      const email = getUserEmail(true);
-      if (!email) return;
-      await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'personal', user_email: email }) });
-    }
+  document.getElementById('personal-pick-btn').onclick = () => {
+    setPersonalSaveIds(toggleSavedId(getPersonalSaveIds(), item.id));
     renderDetail(id);
   };
   document.getElementById('team-pick-btn').onclick = async () => {
