@@ -290,9 +290,9 @@ function buildProviderChain(promptMessages) {
   const chain = [];
   if (process.env.GROQ_API_KEY) chain.push({ name: 'groq', run: () => callGroq(promptMessages) });
   if (process.env.GEMINI_API_KEY) chain.push({ name: 'gemini', run: () => callGemini(promptMessages) });
-  if (process.env.OPENROUTER_API_KEY) chain.push({ name: 'openrouter', run: () => callOpenRouter(promptMessages) });
   if (process.env.LLAMA_API_KEY) chain.push({ name: 'llama', run: () => callLlama(promptMessages) });
   if (process.env.NVIDIA_API_KEY) chain.push({ name: 'nvidia', run: () => callNvidia(promptMessages) });
+  if (process.env.OPENROUTER_API_KEY) chain.push({ name: 'openrouter', run: () => callOpenRouter(promptMessages) });
   return chain;
 }
 

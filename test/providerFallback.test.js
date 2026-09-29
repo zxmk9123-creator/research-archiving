@@ -126,10 +126,10 @@ test('buildProviderChain: only includes providers whose API key env var is set',
   });
 });
 
-test('buildProviderChain: builds the full Groq -> Gemini -> OpenRouter -> Llama -> NVIDIA order when all keys are set', () => {
+test('buildProviderChain: builds the full Groq -> Gemini -> Llama -> NVIDIA -> OpenRouter order when all keys are set', () => {
   withProviderEnv(PROVIDER_ENV_VARS, () => {
     const chain = buildProviderChain({ system: 's', user: 'u' });
-    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'openrouter', 'llama', 'nvidia']);
+    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'llama', 'nvidia', 'openrouter']);
   });
 });
 
