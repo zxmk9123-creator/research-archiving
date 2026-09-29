@@ -208,3 +208,22 @@ ON CONFLICT DO NOTHING;
 INSERT INTO usages (name) VALUES
   ('NBO 작성'), ('업체 프로파일'), ('시장 전망'), ('가격·물류'), ('규제 대응')
 ON CONFLICT DO NOTHING;
+
+-- Seed: minimal E2E test source registry (3 sources) for verifying the
+-- production RSS ingestion pipeline end-to-end. This is deliberately NOT
+-- the full 10-20 source registry — just enough to prove Source -> collect
+-- -> dedup -> Item -> AI draft -> Review works in the real deployment.
+-- These feed URLs were NOT pre-verified outside production (the dev
+-- sandbox's outbound network is blocked); production's own fetch during
+-- collection is the actual verification.
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'FAO News', 'Food and Agriculture Organization (UN)', 'https://www.fao.org/news/rss-feed/en/', 'rss', 1, 'e2e-test', 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.fao.org/news/rss-feed/en/');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'Hellenic Shipping News', 'Hellenic Shipping News', 'https://www.hellenicshippingnews.com/feed/', 'rss', 1, 'e2e-test', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.hellenicshippingnews.com/feed/');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'OilPrice.com', 'OilPrice.com', 'https://oilprice.com/rss/main', 'rss', 1, 'e2e-test', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://oilprice.com/rss/main');
