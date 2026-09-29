@@ -9,6 +9,7 @@ const {
   factOrUnconfirmed,
   parseEligible,
   UNCONFIRMED,
+  INSIGHT_FALLBACK,
 } = require('../server/lib/aiDraft');
 
 const taxonomy = {
@@ -69,14 +70,49 @@ test('parseDraftResponse: summary and insight are kept as two distinct fields �
   assert.notEqual(draft.summary, draft.insight);
 });
 
-test('resolveInsight: passes through the model\'s trimmed inference when present', () => {
-  assert.equal(resolveInsight('  향후 가격 변동성이 커질 수 있다.  '), '향후 가격 변동성이 커질 수 있다.');
+const WELL_GROUNDED_FACTS = {
+  who: '인도네시아 정부', what: '팜유 수출세를 인상했다', amount: '톤당 50달러',
+  when: '2026-09-01', where: '인도네시아', why: '국내 공급 안정을 위해', impact: '아시아 팜유 가격 상승 압력',
+};
+// Mirrors production item 65: eligible=false because the article had almost
+// no concrete facts — only a bare topic, everything else 미확보.
+const THIN_FACTS = {
+  who: UNCONFIRMED, what: 'UK 식물성 장 건강 제품 트렌드', amount: UNCONFIRMED,
+  when: UNCONFIRMED, where: UNCONFIRMED, why: UNCONFIRMED, impact: UNCONFIRMED,
+};
+
+test('resolveInsight: passes through the model\'s trimmed inference when the facts support it', () => {
+  assert.equal(
+    resolveInsight('  향후 가격 변동성이 커질 수 있다.  ', WELL_GROUNDED_FACTS),
+    '향후 가격 변동성이 커질 수 있다.'
+  );
 });
 
-test('resolveInsight: falls back to an honest "no notable implication" statement rather than inventing one', () => {
-  assert.equal(resolveInsight(''), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
-  assert.equal(resolveInsight(undefined), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
-  assert.equal(resolveInsight(null), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
+test('resolveInsight: falls back to an honest "no notable implication" statement when the model gives none', () => {
+  assert.equal(resolveInsight('', WELL_GROUNDED_FACTS), INSIGHT_FALLBACK);
+  assert.equal(resolveInsight(undefined, WELL_GROUNDED_FACTS), INSIGHT_FALLBACK);
+  assert.equal(resolveInsight(null, WELL_GROUNDED_FACTS), INSIGHT_FALLBACK);
+});
+
+// Regression: production item 65 — eligible=false, almost no concrete facts,
+// but the model still wrote a generic, ungrounded market prediction ("UK
+// 식물성 장 건강 시장이 향후 성장할 가능성이 있다."). Too few confirmed facts
+// must override the model's insight regardless of what it says, since there
+// isn't enough evidence in the article to support any inference from it.
+test('resolveInsight: overrides a generic/ungrounded market prediction when too few facts were actually confirmed (item 65 pattern)', () => {
+  const genericPrediction = 'UK 식물성 장 건강 시장이 향후 성장할 가능성이 있다.';
+  assert.equal(resolveInsight(genericPrediction, THIN_FACTS), INSIGHT_FALLBACK);
+});
+
+test('resolveInsight: a single confirmed fact is still not enough grounding for an inference', () => {
+  const oneFact = { ...THIN_FACTS, what: '식물성 장 건강 보충제 신제품 출시' };
+  assert.equal(resolveInsight('시장 경쟁이 심화될 것이다.', oneFact), INSIGHT_FALLBACK);
+});
+
+test('resolveInsight: exactly the minimum number of confirmed facts is enough to keep the model\'s inference', () => {
+  const twoFacts = { ...THIN_FACTS, what: '회사 A가 신제품을 출시했다', when: '2026-09-15' };
+  const insight = '이는 관련 시장의 경쟁이 심화되는 신호로 해석될 수 있다.';
+  assert.equal(resolveInsight(insight, twoFacts), insight);
 });
 
 test('parseDraftResponse: strips a ```json code fence before parsing', () => {
