@@ -25,13 +25,14 @@ const SYSTEM_PROMPT = `You are a research-archiving assistant for an oils & fats
 Given a title and (if available) a short description of a collected article, respond with STRICT JSON ONLY — no markdown fences, no commentary, nothing before or after the JSON object.
 
 The JSON object must have exactly this shape:
-{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
+{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "insight": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
 
 Rules:
 - eligible: true if this article is substantive enough to be worth archiving for a market-intelligence team (has concrete facts, not just a headline teaser or unrelated content); false otherwise.
 - eligibility_reason: one concise Korean sentence explaining the eligible verdict.
 - who / what / amount / when / where / why / impact: internal extraction fields, used only as your reasoning criteria for identifying the article's core facts — NOT the final output shown to a person. Fill each ONLY if it is explicitly stated in the given title/description. If a fact is not stated, respond with the exact Korean string "미확보" for that field — do NOT guess, infer, estimate, or fill in a plausible-sounding value.
-- summary: a natural, flowing 1-3 sentence Korean summary of the article's core facts — NOT a labeled list (do not write "누가:", "무엇을:", etc.). Use the who/what/amount/when/where/why/impact facts above as your reasoning criteria for what matters (prioritize concrete, decision-relevant facts: companies, transactions, amounts, volumes, dates, locations, material impacts, when present), but write it as ordinary prose a person would read. Simply omit any fact that is "미확보" or otherwise unavailable — never mention it, never write "미확보" or a placeholder inside the sentence, and never invent or infer a cause, amount, date, company, or impact that isn't explicitly stated.
+- summary: a natural, flowing 1-3 sentence Korean summary containing ONLY the article's directly-stated facts (who/what/amount/when/where/why) — NOT a labeled list (do not write "누가:", "무엇을:", etc.), and NOT the place for inference, prediction, evaluation, or impact statements (those belong in "insight" instead). Prioritize concrete, decision-relevant facts (companies, transactions, amounts, volumes, dates, locations) when present. Simply omit any fact that is "미확보" or otherwise unavailable — never mention it, never write "미확보" or a placeholder inside the sentence, and never invent or infer a cause, amount, date, or company that isn't explicitly stated.
+- insight: a separate 1-2 sentence Korean field for what goes BEYOND the plain facts — implications, an observable or emerging trend, or a concrete point worth monitoring, reasoned from the "impact"/"why" facts and general market knowledge. This is explicitly your inference, and must read as such (e.g. "~할 가능성이 있다", "~로 이어질 수 있다") rather than being stated as a confirmed fact — never phrase an inference as if it were reported in the article. If the article's facts don't support any meaningful implication beyond themselves, say plainly that no notable implication is evident rather than inventing one.
 - key_takeaway: one concise Korean sentence stating the single most useful insight for a reviewer.
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
@@ -90,6 +91,16 @@ function buildFactualSummary(facts, modelSummary) {
   return what || '핵심 사실이 확인되지 않았습니다.';
 }
 
+// Insight is deliberately the model's own inference (implications, an
+// emerging trend, a point worth monitoring) — unlike buildFactualSummary,
+// there is no fact-only fallback to construct here, since a bare fact is
+// not an insight. Missing/empty just means "the model didn't have one",
+// stated plainly rather than fabricating a trend.
+function resolveInsight(modelInsight) {
+  const trimmed = typeof modelInsight === 'string' ? modelInsight.trim() : '';
+  return trimmed || '확인된 사실 외에 특이 동향이나 시사점은 없습니다.';
+}
+
 // Groq's chat completion API has no JSON-schema enforcement (see
 // callGroq in provider.js) — the "strict JSON contract" above is prompt
 // text only, so the model frequently emits booleans as quoted strings
@@ -129,6 +140,7 @@ function parseDraftResponse(raw, taxonomy) {
 
   const facts = Object.fromEntries(FACT_KEYS.map((key) => [key, factOrUnconfirmed(parsed[key])]));
   const summary = buildFactualSummary(facts, parsed.summary);
+  const insight = resolveInsight(parsed.insight);
   const keyTakeaway = typeof parsed.key_takeaway === 'string' && parsed.key_takeaway.trim()
     ? parsed.key_takeaway.trim()
     : UNCONFIRMED;
@@ -150,7 +162,7 @@ function parseDraftResponse(raw, taxonomy) {
     ? [...new Set(parsed.suggested_usages.map(Number))].filter((id) => usageIds.has(id))
     : [];
 
-  return { summary, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages };
+  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages };
 }
 
 async function getTaxonomy() {
@@ -196,10 +208,11 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
          ai_suggested_usages = $4,
          ai_eligible = $5,
          ai_eligibility_reason = $6,
+         ai_insight = $7,
          ai_error = NULL,
          ai_generated_at = now()
-       WHERE id = $7`,
-      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, itemId]
+       WHERE id = $8`,
+      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, itemId]
     );
     return { ok: true };
   } catch (err) {
@@ -216,6 +229,7 @@ module.exports = {
   buildTaxonomyBlock,
   buildUserPrompt,
   buildFactualSummary,
+  resolveInsight,
   factOrUnconfirmed,
   parseEligible,
   parseDraftResponse,

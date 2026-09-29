@@ -5,6 +5,7 @@ const {
   buildUserPrompt,
   buildTaxonomyBlock,
   buildFactualSummary,
+  resolveInsight,
   factOrUnconfirmed,
   parseEligible,
   UNCONFIRMED,
@@ -33,7 +34,8 @@ function fullResponse(overrides = {}) {
     where: '인도네시아',
     why: '국내 공급 안정을 위해',
     impact: '아시아 팜유 가격 상승 압력',
-    summary: '인도네시아 정부가 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상하면서 아시아 팜유 가격에 상승 압력이 커지고 있다.',
+    summary: '인도네시아 정부가 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상했다.',
+    insight: '이번 조치는 다른 팜유 수출국의 유사 정책으로 이어질 가능성이 있다.',
     key_takeaway: '수출세 인상이 단기 가격 상승 요인이다.',
     suggested_sectors: [3],
     suggested_usages: [3],
@@ -48,15 +50,33 @@ test('parseDraftResponse: accepts a valid structured response and passes through
   assert.equal(draft.keyTakeaway, '수출세 인상이 단기 가격 상승 요인이다.');
   assert.deepEqual(draft.suggestedSectors, [3]);
   assert.deepEqual(draft.suggestedUsages, [3]);
-  assert.equal(
-    draft.summary,
-    '인도네시아 정부가 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상하면서 아시아 팜유 가격에 상승 압력이 커지고 있다.'
-  );
+  assert.equal(draft.summary, '인도네시아 정부가 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상했다.');
+  assert.equal(draft.insight, '이번 조치는 다른 팜유 수출국의 유사 정책으로 이어질 가능성이 있다.');
   // The 5W1H facts are reasoning criteria only — never a labeled dump in the summary.
   assert.doesNotMatch(draft.summary, /누가:|무엇을:|규모\/금액:|시점:|장소:|이유:|영향:/);
   // Still extracted internally (used for eligibility/reasoning, not shown as-is).
   assert.equal(draft.facts.who, '인도네시아 정부');
   assert.equal(draft.facts.amount, '톤당 50달러');
+});
+
+test('parseDraftResponse: summary and insight are kept as two distinct fields — fact vs. inference', () => {
+  const draft = parseDraftResponse(fullResponse({
+    summary: '회사 A가 공장을 확장한다고 발표했다.',
+    insight: '이는 지역 내 생산 능력 경쟁이 심화될 조짐으로 해석될 수 있다.',
+  }), taxonomy);
+  assert.equal(draft.summary, '회사 A가 공장을 확장한다고 발표했다.');
+  assert.equal(draft.insight, '이는 지역 내 생산 능력 경쟁이 심화될 조짐으로 해석될 수 있다.');
+  assert.notEqual(draft.summary, draft.insight);
+});
+
+test('resolveInsight: passes through the model\'s trimmed inference when present', () => {
+  assert.equal(resolveInsight('  향후 가격 변동성이 커질 수 있다.  '), '향후 가격 변동성이 커질 수 있다.');
+});
+
+test('resolveInsight: falls back to an honest "no notable implication" statement rather than inventing one', () => {
+  assert.equal(resolveInsight(''), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
+  assert.equal(resolveInsight(undefined), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
+  assert.equal(resolveInsight(null), '확인된 사실 외에 특이 동향이나 시사점은 없습니다.');
 });
 
 test('parseDraftResponse: strips a ```json code fence before parsing', () => {

@@ -74,6 +74,13 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_generated_at TIMESTAMPTZ;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_eligible BOOLEAN;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_eligibility_reason TEXT;
 
+-- ai_summary stays strictly factual (see aiDraft.js); ai_insight is a
+-- separate, explicitly-inferential field (implications/trends/points to
+-- monitor) so a reader never has to guess which sentences are stated fact
+-- vs. the model's reasoning. Advisory only, same suggestion-layer
+-- convention as the rest of ai_*.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_insight TEXT;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,
