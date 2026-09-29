@@ -81,6 +81,13 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_eligibility_reason TEXT;
 -- convention as the rest of ai_*.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_insight TEXT;
 
+-- Reviewer's own eligibility call — deliberately a separate column from
+-- ai_eligible, never overwritten by AI generation/regeneration, so it
+-- survives across "다시 생성" retries and lets us compare AI vs. human
+-- judgment later (e.g. to decide if auto-archiving is ever safe). NULL
+-- means the reviewer hasn't confirmed or overridden a verdict yet.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS reviewer_eligible BOOLEAN;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,

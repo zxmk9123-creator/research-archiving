@@ -149,7 +149,7 @@ router.post('/', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const id = req.params.id;
-  const fields = ['title', 'source_url', 'pdf_url', 'published_at', 'source_id', 'type', 'summary', 'insight', 'attribution', 'thumbnail_url', 'status'];
+  const fields = ['title', 'source_url', 'pdf_url', 'published_at', 'source_id', 'type', 'summary', 'insight', 'attribution', 'thumbnail_url', 'status', 'reviewer_eligible'];
   const sets = [];
   const params = [];
   for (const f of fields) {
