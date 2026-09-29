@@ -6,6 +6,7 @@ const {
   buildTaxonomyBlock,
   buildFactualSummary,
   resolveInsight,
+  isUngroundedGeneralization,
   factOrUnconfirmed,
   parseEligible,
   UNCONFIRMED,
@@ -113,6 +114,56 @@ test('resolveInsight: exactly the minimum number of confirmed facts is enough to
   const twoFacts = { ...THIN_FACTS, what: '회사 A가 신제품을 출시했다', when: '2026-09-15' };
   const insight = '이는 관련 시장의 경쟁이 심화되는 신호로 해석될 수 있다.';
   assert.equal(resolveInsight(insight, twoFacts), insight);
+});
+
+// --- Ungrounded generalization: enough facts to pass the count check, but
+// the model still overreaches beyond what those facts actually support. ---
+
+test('isUngroundedGeneralization: flags scope words like 업계/산업/시장 전반·전체', () => {
+  assert.equal(isUngroundedGeneralization('업계 전반의 확장 추세를 보여준다.'), true);
+  assert.equal(isUngroundedGeneralization('산업 전체가 성장할 것으로 보인다.'), true);
+});
+
+test('isUngroundedGeneralization: flags an unsupported macro-slowdown conclusion', () => {
+  assert.equal(isUngroundedGeneralization('이는 업계 전반의 경기 둔화를 시사한다.'), true);
+  assert.equal(isUngroundedGeneralization('산업 침체로 이어질 수 있다.'), true);
+});
+
+test('isUngroundedGeneralization: does not flag a specific, article-scoped monitoring point', () => {
+  assert.equal(isUngroundedGeneralization('해당 기업의 다음 분기 실적을 지켜볼 필요가 있다.'), false);
+  assert.equal(isUngroundedGeneralization('경쟁사의 유사한 조치 여부가 관전 포인트다.'), false);
+});
+
+test('resolveInsight: concrete, well-grounded facts keep a specific article-scoped insight', () => {
+  const specificInsight = '경쟁사들이 유사한 수출세 인상에 나설지가 관전 포인트다.';
+  assert.equal(resolveInsight(specificInsight, WELL_GROUNDED_FACTS), specificInsight);
+});
+
+// Regression: a single company's news generalized into an industry-wide
+// expansion claim must fall back, even when enough facts were confirmed.
+test('resolveInsight: a single-company fact does not license a generic industry-wide expansion claim', () => {
+  const singleCompanyFacts = {
+    who: '회사 A', what: '신규 생산 라인을 가동했다', amount: '연산 10만톤',
+    when: '2026-09-20', where: UNCONFIRMED, why: UNCONFIRMED, impact: UNCONFIRMED,
+  };
+  const overreach = '이는 업계 전반의 생산 능력 확대로 이어질 것이다.';
+  assert.equal(resolveInsight(overreach, singleCompanyFacts), INSIGHT_FALLBACK);
+});
+
+// Regression: one company's job-cut figure is not evidence of an
+// industry-wide slowdown.
+test('resolveInsight: a single job-cut figure does not license an unsupported "industry slowdown" claim', () => {
+  const jobCutFacts = {
+    who: '회사 B', what: '인력을 감축했다', amount: '200명',
+    when: '2026-09-10', where: UNCONFIRMED, why: '비용 절감을 위해', impact: UNCONFIRMED,
+  };
+  const overreach = '이는 업계 전반의 경기 둔화를 시사한다.';
+  assert.equal(resolveInsight(overreach, jobCutFacts), INSIGHT_FALLBACK);
+});
+
+// Regression: insufficient/non-relevant article facts still fall back, as before.
+test('resolveInsight: insufficient facts fall back even when the model attempts a specific-sounding claim', () => {
+  assert.equal(resolveInsight('해당 기업의 다음 행보를 지켜볼 필요가 있다.', THIN_FACTS), INSIGHT_FALLBACK);
 });
 
 test('parseDraftResponse: strips a ```json code fence before parsing', () => {

@@ -32,7 +32,7 @@ Rules:
 - eligibility_reason: one concise Korean sentence explaining the eligible verdict.
 - who / what / amount / when / where / why / impact: internal extraction fields, used only as your reasoning criteria for identifying the article's core facts — NOT the final output shown to a person. Fill each ONLY if it is explicitly stated in the given title/description. If a fact is not stated, respond with the exact Korean string "미확보" for that field — do NOT guess, infer, estimate, or fill in a plausible-sounding value.
 - summary: a natural, flowing 1-3 sentence Korean summary containing ONLY the article's directly-stated facts (who/what/amount/when/where/why) — NOT a labeled list (do not write "누가:", "무엇을:", etc.), and NOT the place for inference, prediction, evaluation, or impact statements (those belong in "insight" instead). Prioritize concrete, decision-relevant facts (companies, transactions, amounts, volumes, dates, locations) when present. Simply omit any fact that is "미확보" or otherwise unavailable — never mention it, never write "미확보" or a placeholder inside the sentence, and never invent or infer a cause, amount, date, or company that isn't explicitly stated.
-- insight: a separate 1-2 sentence Korean field for what goes BEYOND the plain facts — implications, an observable or emerging trend, or a concrete point worth monitoring. It MUST be grounded in and traceable to the specific who/what/amount/when/where/why/impact facts you extracted above from THIS article — never a generic industry/market prediction that could be written about any article in the sector regardless of its actual content. If most of those facts are "미확보" (i.e. this article gave you little concrete to reason from), do not stretch a generic prediction out of the little that's there — plainly say no notable implication is evident instead. This is explicitly your inference, and must read as such (e.g. "~할 가능성이 있다", "~로 이어질 수 있다") rather than being stated as a confirmed fact — never phrase an inference as if it were reported in the article.
+- insight: a separate 1-2 sentence Korean field for what goes BEYOND the plain facts — a specific monitoring point or movement implied by THIS article. It MUST be grounded in and traceable to the specific who/what/amount/when/where/why/impact facts you extracted above — never a generic industry/market prediction that could be written about any article in the sector regardless of its actual content. Do NOT generalize a single company's or single article's news into an industry-wide trend (e.g. do not turn one company's expansion into "업계 전반이 확대되고 있다"). Do NOT infer a macro slowdown, market expansion, future growth, or broad adoption trend unless the article itself gives evidence supporting that specific inference (e.g. a single job-cut figure at one company is NOT evidence of an industry-wide slowdown). If most of the extracted facts are "미확보" (i.e. this article gave you little concrete to reason from), or if you cannot identify a specific, article-grounded implication, do not stretch a generic claim out of the little that's there — plainly say no notable implication is evident instead. This is explicitly your inference, and must read as such (e.g. "~할 가능성이 있다", "~로 이어질 수 있다") rather than being stated as a confirmed fact — never phrase an inference as if it were reported in the article.
 - key_takeaway: one concise Korean sentence stating the single most useful insight for a reviewer.
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
@@ -109,16 +109,32 @@ function countConfirmedFacts(facts) {
   return FACT_KEYS.filter((key) => facts[key] !== UNCONFIRMED).length;
 }
 
+// Even with enough confirmed facts to reason from (passing
+// MIN_CONFIRMED_FACTS_FOR_INSIGHT), the model can still overreach: it
+// generalizes one company's news into an industry-wide trend, or reads a
+// single job-cut figure as evidence of a macro slowdown — neither of which
+// the article's facts actually support. These phrases are the recurring
+// tell for that overreach (scope words like "업계/산업/시장 전반·전체", or a
+// stated macro conclusion like "경기 둔화"/"업계 침체") regardless of how the
+// rest of the sentence is worded.
+const UNGROUNDED_GENERALIZATION_PATTERN = /(업계|산업|시장)\s*(전반|전체)|경기\s*둔화|(업계|산업)\s*(침체|둔화)/;
+
+function isUngroundedGeneralization(insightText) {
+  return UNGROUNDED_GENERALIZATION_PATTERN.test(insightText);
+}
+
 // Insight is deliberately the model's own inference (implications, an
 // emerging trend, a point worth monitoring) — unlike buildFactualSummary,
 // there is no fact-only fallback to construct here, since a bare fact is
-// not an insight. Missing/empty, or too few grounding facts to trust an
-// inference from, both resolve to the same honest fallback rather than
-// fabricating or keeping an unsupported trend statement.
+// not an insight. Missing/empty, too few grounding facts to trust an
+// inference from, or an inference that overreaches into an industry/macro
+// claim the article doesn't support, all resolve to the same honest
+// fallback rather than fabricating or keeping an unsupported statement.
 function resolveInsight(modelInsight, facts) {
   const trimmed = typeof modelInsight === 'string' ? modelInsight.trim() : '';
   if (!trimmed) return INSIGHT_FALLBACK;
   if (countConfirmedFacts(facts) < MIN_CONFIRMED_FACTS_FOR_INSIGHT) return INSIGHT_FALLBACK;
+  if (isUngroundedGeneralization(trimmed)) return INSIGHT_FALLBACK;
   return trimmed;
 }
 
@@ -252,6 +268,7 @@ module.exports = {
   buildUserPrompt,
   buildFactualSummary,
   resolveInsight,
+  isUngroundedGeneralization,
   factOrUnconfirmed,
   parseEligible,
   parseDraftResponse,
