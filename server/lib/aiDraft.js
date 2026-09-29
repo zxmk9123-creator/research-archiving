@@ -1,5 +1,14 @@
 const pool = require('../db/pool');
 const { callProvider } = require('./ai/provider');
+const { createLimiter } = require('./ai/concurrencyLimiter');
+
+// Collector fires generateAiDraftForItem once per new item, unawaited — a
+// single collection run can create dozens of items at once. Bounding the
+// actual outbound provider calls here (not in collector.js) throttles every
+// caller (collection AND manual retry) from one place, with no change to
+// the fire-and-forget/failure-isolated call sites.
+const AI_MAX_CONCURRENT_CALLS = 2;
+const limitAiCall = createLimiter(AI_MAX_CONCURRENT_CALLS);
 
 // Strict JSON-only contract — no free prose parsing. The model is given the
 // full allowed vocabulary and told to return existing ids only, never invent
@@ -103,7 +112,7 @@ async function generateAiDraftForItem(itemId, providerFn = callProvider) {
   try {
     const taxonomy = await getTaxonomy();
     const userPrompt = buildUserPrompt(item, taxonomy);
-    const raw = await providerFn({ system: SYSTEM_PROMPT, user: userPrompt });
+    const raw = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
     const draft = parseDraftResponse(raw, taxonomy);
 
     await pool.query(
