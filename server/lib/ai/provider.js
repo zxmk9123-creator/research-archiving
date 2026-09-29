@@ -254,6 +254,9 @@ async function callLlama({ system, user }) {
 }
 
 // NVIDIA's hosted NIM endpoint (build.nvidia.com), also OpenAI-compatible.
+// meta/llama-3.3-70b-instruct confirmed current/supported (not EOL) via
+// NVIDIA's official NIM API reference (docs.api.nvidia.com) and NGC
+// catalog listing; meta/llama-3.1-70b-instruct reached EOL 2026-08-26.
 async function callNvidia({ system, user }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY is not configured');
