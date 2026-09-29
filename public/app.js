@@ -28,13 +28,11 @@ function itemCard(item) {
   </div>`;
 }
 
-async function renderHome() {
-  const [published, ranking, sources] = await Promise.all([
-    api('/items?status=Published'),
+async function renderArchive(query = {}) {
+  const [sectors, usages, sources, items, ranking] = await Promise.all([
+    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
     api('/picks/ranking').catch(() => []),
-    api('/sources').catch(() => []),
   ]);
-  const recent = published.slice(0, 9);
   const failedSources = sources.filter((s) => s.last_error);
   const warning = failedSources.length
     ? `<div class="section" style="border:1px solid var(--reg);border-radius:8px;padding:12px;margin-bottom:16px;background:#fef2f2">
@@ -44,22 +42,7 @@ async function renderHome() {
         </ul>
       </div>`
     : '';
-  app.innerHTML = `
-    <h1>Home</h1>
-    ${warning}
-    <h2>이번 주 최신 이슈</h2>
-    <div class="grid">${recent.map(itemCard).join('') || '<p>발행된 자료가 없습니다.</p>'}</div>
-    <h2 style="margin-top:28px">팀 Pick · 많이 본 자료</h2>
-    <table><tr><th>제목</th><th>유형</th><th>Pick 수</th></tr>
-      ${ranking.map((r) => `<tr><td><a href="#/detail/${r.id}">${r.title}</a></td><td>${r.type}</td><td>${r.pick_count}</td></tr>`).join('') || '<tr><td colspan="3">아직 팀 Pick이 없습니다.</td></tr>'}
-    </table>
-  `;
-}
-
-async function renderArchive(query = {}) {
-  const [sectors, usages, sources, items] = await Promise.all([
-    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
-  ]);
+  const latest = items.slice(0, 9);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
   const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
 
@@ -83,7 +66,8 @@ async function renderArchive(query = {}) {
       </div>`;
 
   app.innerHTML = `
-    <h1>Archive</h1>
+    <h1>Research Archive</h1>
+    ${warning}
     <div class="archive">
       <div class="archive-filter-panel">
         <div class="filters">
@@ -105,7 +89,13 @@ async function renderArchive(query = {}) {
           <div class="archive-chip-row" id="sector-chips"></div>
         </div>
       </div>
-      <div class="archive-results-count">${items.length}개 결과</div>
+      <h2>최신 자료</h2>
+      <div class="grid">${latest.map(itemCard).join('') || '<p>발행된 자료가 없습니다.</p>'}</div>
+      <h2 style="margin-top:28px">팀 Pick · 많이 본 자료</h2>
+      <table><tr><th>제목</th><th>유형</th><th>Pick 수</th></tr>
+        ${ranking.map((r) => `<tr><td><a href="#/detail/${r.id}">${r.title}</a></td><td>${r.type}</td><td>${r.pick_count}</td></tr>`).join('') || '<tr><td colspan="3">아직 팀 Pick이 없습니다.</td></tr>'}
+      </table>
+      <h2 style="margin-top:28px">전체 결과 (${items.length}개)</h2>
       ${emptyState}
       <div class="grid">${items.map(itemCard).join('')}</div>
     </div>
@@ -551,8 +541,7 @@ function parseHash() {
 async function router() {
   const { path, param, query } = parseHash();
   try {
-    if (path === 'home' || path === '') await renderHome();
-    else if (path === 'archive') await renderArchive(query);
+    if (path === 'home' || path === '' || path === 'archive') await renderArchive(query);
     else if (path === 'detail') await renderDetail(param);
     else if (path === 'sources') await renderSources();
     else if (path === 'review') await renderReview();
@@ -564,6 +553,6 @@ async function router() {
 
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
-  if (!location.hash) location.hash = '#/home';
+  if (!location.hash) location.hash = '#/archive';
   router();
 });
