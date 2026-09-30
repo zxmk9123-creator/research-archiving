@@ -145,29 +145,22 @@ p { margin: 0; }
 .home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }
 .home-carousel-track { display: flex; transition: transform 0.4s ease; }
 .home-carousel-slide {
-  /* minmax(0, 1fr), not plain 1fr: a bare `1fr` track computes as
-     `minmax(auto, 1fr)`, whose minimum is the column's content
-     min-content size. Inside the carousel viewport — narrower than the
-     full-width .grid by the two 32px arrow buttons + gaps — that
-     min-content width (card title text, eyebrow badges) exceeded the
-     equal-share width for a 3rd column, so it overflowed past the
-     viewport's overflow:hidden edge and was invisible: only 2 of 3 cards
-     ever rendered inside the visible area. minmax(0, 1fr) lets a track
-     shrink below its content's min-content size instead. */
-  /* Fixed 3-column template at every width down to the mobile
-     breakpoint below — deliberately NOT inheriting .grid's 900px
-     "reduce to 2 columns" tier. A slide is one 3-card group that must
-     move together; letting it reflow to 2 columns mid-cycle made a
-     3-item slide wrap onto a second row, and since .home-carousel-track
-     is a flex row (cross-axis size = the TALLEST slide among ALL
-     slides, not just the visible one), that one taller wrapped slide
-     inflated the whole module's height — showing as a large empty gap
-     between the visible single-row slide and the pagination dots below
-     it. Keeping 3 columns uninterrupted until the true mobile tier
-     keeps every slide's row count (and thus the module's height)
-     consistent. */
-  min-width: 100%; flex-shrink: 0;
+  /* flex: 0 0 100% (flex-basis:100%), NOT min-width:100%+flex-shrink:0.
+     A flex item's used main-size comes from its `width` property when
+     flex-basis is auto and width is set; with neither `width` nor an
+     explicit flex-basis, flex-basis:auto falls back to the item's
+     content-based (max-content) hypothetical size instead — min-width
+     only sets a floor, it never caps that growth, and flex-shrink:0
+     then prevented shrinking it back down. Every slide's 3 cards (grid,
+     minmax(0,1fr) tracks) have their own max-content width, and that
+     content-based size — not 100% of the track — is what the slide
+     actually rendered at, growing arbitrarily wide (measured ~1575px
+     against a ~1000px viewport in production) and pushing the 3rd card
+     off past the viewport's visible/clipped edge — only 2 of 3 cards
+     ever appeared on screen. flex-basis:100% makes the used size
+     exactly 100% of the track's width, unconditionally. */
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;
+  flex: 0 0 100%;
 }
 @media (max-width: 640px) { .home-carousel-slide { grid-template-columns: minmax(0, 1fr); } }
 
