@@ -152,6 +152,18 @@ p { margin: 0; }
 .home-carousel-nav:hover { color: var(--text); border-color: var(--border-strong); }
 .home-carousel-nav:disabled { opacity: .35; cursor: default; }
 
+/* Pagination dots — one per 3-card slide group. Deliberately tiny and
+   unobtrusive: outlined/light by default, filled only for the active
+   group, no surrounding chrome. */
+.home-carousel-dots { display: flex; justify-content: center; gap: 8px; margin-top: var(--sp-3); }
+.home-carousel-dot {
+  width: 7px; height: 7px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: none; border: 1.5px solid var(--border-strong);
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
+}
+.home-carousel-dot:hover { border-color: var(--action); }
+.home-carousel-dot.is-active { background: var(--action); border-color: var(--action); transform: scale(1.15); }
+
 /* ---------------------------------------------------------------------
    Editorial content module — image (or source-identity fallback) sits
    outside/above the text, not wrapped in a bordered/shadowed card.

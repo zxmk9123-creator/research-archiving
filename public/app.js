@@ -140,14 +140,18 @@ function clearHomeCarouselIntervals() {
   homeCarouselIntervals = [];
 }
 
-// Wires prev/next + 10s auto-advance for one Home carousel module. A
-// module with 0 or 1 slides (3 or fewer items) has nothing to advance
-// through, so its arrows are simply disabled rather than left to no-op.
+// Wires prev/next + 10s auto-advance + (when present) pagination dots for
+// one Home carousel module. A module with 0 or 1 slides (3 or fewer
+// items) has nothing to advance through, so its arrows are simply
+// disabled rather than left to no-op, and no dots are rendered for it
+// (homeCarouselModule already skips rendering dots when there's only one
+// slide, same as the "10 or fewer" cap below).
 function initHomeCarousel(containerEl) {
   const track = containerEl.querySelector('.home-carousel-track');
   const slides = track.querySelectorAll('.home-carousel-slide');
   const prevBtn = containerEl.querySelector('.home-carousel-nav.prev');
   const nextBtn = containerEl.querySelector('.home-carousel-nav.next');
+  const dots = containerEl.parentElement.querySelectorAll('.home-carousel-dots .home-carousel-dot');
   const total = slides.length;
   if (total <= 1) {
     prevBtn.disabled = true;
@@ -157,6 +161,7 @@ function initHomeCarousel(containerEl) {
   let index = 0;
   function render() {
     track.style.transform = `translateX(-${index * 100}%)`;
+    dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
   }
   function startTimer() {
     const timer = setInterval(() => {
@@ -165,14 +170,25 @@ function initHomeCarousel(containerEl) {
     }, 10000);
     homeCarouselIntervals.push(timer);
   }
-  function go(dir) {
-    index = (index + dir + total) % total;
-    render();
+  function resetTimer() {
     clearHomeCarouselIntervals();
     startTimer();
   }
+  function go(dir) {
+    index = (index + dir + total) % total;
+    render();
+    resetTimer();
+  }
+  function goTo(targetIndex) {
+    if (targetIndex === index) return;
+    index = targetIndex;
+    render();
+    resetTimer();
+  }
   prevBtn.onclick = () => go(-1);
   nextBtn.onclick = () => go(1);
+  dots.forEach((dot, i) => { dot.onclick = () => goTo(i); });
+  render();
   startTimer();
 }
 
@@ -187,6 +203,16 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
   if (!slides.length) {
     return `<div class="home-module">${headerHtml}<p class="meta">표시할 자료가 없습니다.</p></div>`;
   }
+  // One dot per 3-card slide group, for direct navigation — only when
+  // there's more than one slide (nothing to paginate) and the group count
+  // stays small enough that dots remain a compact, scannable index rather
+  // than a second scrollable row; beyond that, the existing arrows remain
+  // the only navigation (still fully functional either way).
+  const showDots = slides.length > 1 && slides.length <= 10;
+  const dotsHtml = showDots
+    ? `<div class="home-carousel-dots">${slides.map((_, i) => `<button type="button" class="home-carousel-dot ${i === 0 ? 'is-active' : ''}" aria-label="${i + 1}번째 그룹으로 이동"></button>`).join('')}</div>`
+    : '';
+
   return `<div class="home-module">
     ${headerHtml}
     <div class="home-carousel">
@@ -198,6 +224,7 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
       </div>
       <button type="button" class="home-carousel-nav next" aria-label="다음 자료">›</button>
     </div>
+    ${dotsHtml}
   </div>`;
 }
 
