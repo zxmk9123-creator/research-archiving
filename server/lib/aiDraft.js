@@ -52,14 +52,25 @@ function buildTaxonomyBlock(sectors, usages) {
   return `Allowed sectors (id: name):\n${sectorLines}\n\nAllowed usages (id: name):\n${usageLines}`;
 }
 
-// Source material priority: this project has no full-article extraction, so
-// the only material ever sent is title + whatever short description/summary
-// was already collected (RSS description, or a manually entered summary).
-// The prompt above explicitly tells the model not to claim it read more.
-function buildUserPrompt(item, taxonomy) {
+// Source material priority: title + whatever short description/summary was
+// already collected (RSS description, or a manually entered summary) —
+// UNLESS extractedText is given (e.g. text pulled from an acquired PDF
+// report), in which case that becomes the material instead of item.summary,
+// since it is strictly more complete. Truncated to a generous but bounded
+// length to keep prompt/token cost predictable regardless of report length;
+// the system prompt already tells the model to work only from what it's
+// given, so a truncated document is handled the same way a short RSS
+// description already is — no new instruction needed for this case.
+const MAX_EXTRACTED_TEXT_CHARS = 8000;
+
+function buildUserPrompt(item, taxonomy, extractedText) {
   const material = [
     `Title: ${item.title}`,
-    item.summary ? `Description: ${item.summary}` : 'Description: (none available)',
+    extractedText
+      ? `Description: ${extractedText.slice(0, MAX_EXTRACTED_TEXT_CHARS)}`
+      : item.summary
+        ? `Description: ${item.summary}`
+        : 'Description: (none available)',
   ].join('\n');
   return `${material}\n\n${buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages)}`;
 }
@@ -229,7 +240,7 @@ function sanitizeError(err) {
 // Safe to call repeatedly: it only ever updates the same row by id, so a
 // retry can never create a duplicate item. Never throws — always resolves
 // with { ok, error? } so a fire-and-forget caller can't crash on it.
-async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallback) {
+async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallback, extractedText) {
   const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
   const item = rows[0];
   if (!item) return { ok: false, error: 'item not found' };
@@ -238,7 +249,7 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 
   try {
     const taxonomy = await getTaxonomy();
-    const userPrompt = buildUserPrompt(item, taxonomy);
+    const userPrompt = buildUserPrompt(item, taxonomy, extractedText);
     const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
     // providerFn is callProviderWithFallback by default ({ text, provider }),
     // but a caller (e.g. a test, or an explicit single-provider override)
@@ -275,8 +286,51 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
   }
 }
 
+// Autonomous-ingestion-only step: applies an already-generated AI draft as
+// the item's canonical record and publishes it, with NO human "apply" in
+// between. This is the one place in the codebase that copies ai_summary/
+// ai_insight into summary/insight and flips status to 'Published' — every
+// other path (RSS collection, manual entry, Review) leaves that gap
+// deliberately open for a human to confirm (see the ai_* column comments
+// in schema.sql). Only called by the institutional-report ingestion path
+// (institutionalIngest.js); RSS collection never calls this, so its
+// existing human-review flow is completely unaffected.
+//
+// Reuses ai_eligible/ai_eligibility_reason as-is for the archive decision
+// and its recorded reason — no new "screening result" column, per the
+// instruction to reuse existing ai_* fields rather than add redundant ones.
+// ai_suggested_sectors/ai_suggested_usages become the item's actual tags
+// the same way a reviewer's "적용" action would, just without a human
+// clicking it.
+async function applyAiDraftIfEligible(itemId) {
+  const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+  const item = rows[0];
+  if (!item || item.ai_status !== 'completed' || item.ai_eligible !== true) {
+    return { archived: false };
+  }
+
+  await pool.query(
+    `UPDATE items SET summary = $1, insight = $2, status = 'Published' WHERE id = $3`,
+    [item.ai_summary, item.ai_insight, itemId]
+  );
+
+  await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
+  await pool.query('DELETE FROM item_usages WHERE item_id = $1', [itemId]);
+  if (item.ai_suggested_sectors && item.ai_suggested_sectors.length) {
+    const values = item.ai_suggested_sectors.map((sid) => `(${itemId}, ${Number(sid)})`).join(',');
+    await pool.query(`INSERT INTO item_sectors (item_id, sector_id) VALUES ${values}`);
+  }
+  if (item.ai_suggested_usages && item.ai_suggested_usages.length) {
+    const values = item.ai_suggested_usages.map((uid) => `(${itemId}, ${Number(uid)})`).join(',');
+    await pool.query(`INSERT INTO item_usages (item_id, usage_id) VALUES ${values}`);
+  }
+
+  return { archived: true };
+}
+
 module.exports = {
   SYSTEM_PROMPT,
+  applyAiDraftIfEligible,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
   buildTaxonomyBlock,

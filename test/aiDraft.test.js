@@ -9,10 +9,12 @@ const {
   isUngroundedGeneralization,
   factOrUnconfirmed,
   parseEligible,
+  applyAiDraftIfEligible,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
   SYSTEM_PROMPT,
 } = require('../server/lib/aiDraft');
+const pool = require('../server/db/pool');
 
 const taxonomy = {
   sectors: [
@@ -308,6 +310,19 @@ test('buildUserPrompt: falls back to "(none available)" when no description was 
   assert.match(prompt, /Description: \(none available\)/);
 });
 
+test('buildUserPrompt: an extractedText argument (e.g. PDF text) is used as the material instead of item.summary', () => {
+  const prompt = buildUserPrompt({ title: '보고서', summary: 'RSS 요약은 무시되어야 함' }, taxonomy, 'PDF에서 추출된 본문 내용');
+  assert.match(prompt, /Description: PDF에서 추출된 본문 내용/);
+  assert.doesNotMatch(prompt, /RSS 요약은 무시되어야 함/);
+});
+
+test('buildUserPrompt: extractedText is truncated so an arbitrarily long PDF cannot blow up prompt size', () => {
+  const longText = 'x'.repeat(20000);
+  const prompt = buildUserPrompt({ title: '보고서' }, taxonomy, longText);
+  const descriptionLine = prompt.split('\n').find((l) => l.startsWith('Description:'));
+  assert.ok(descriptionLine.length < 8100);
+});
+
 test('buildTaxonomyBlock: only lists the taxonomy actually passed in (grounding, not invented labels)', () => {
   const block = buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages);
   assert.match(block, /3: 팜유/);
@@ -409,4 +424,96 @@ test('eligibility scenario: relevant but vague commentary -> ineligible', () => 
     who: UNCONFIRMED, what: UNCONFIRMED, amount: UNCONFIRMED, when: UNCONFIRMED, where: UNCONFIRMED, why: UNCONFIRMED, impact: UNCONFIRMED,
   }), taxonomy);
   assert.equal(draft.eligible, false);
+});
+
+// --- applyAiDraftIfEligible: the autonomous auto-archive step ---
+
+function mockPool(handlers) {
+  const original = pool.query;
+  const calls = [];
+  pool.query = async (text, params) => {
+    calls.push({ text, params });
+    for (const [match, handler] of handlers) {
+      if (text.includes(match)) return handler(text, params);
+    }
+    return { rows: [] };
+  };
+  return { calls, restore: () => { pool.query = original; } };
+}
+
+test('applyAiDraftIfEligible: does nothing when ai_status is not completed', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 1, ai_status: 'pending', ai_eligible: true }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(1);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: does nothing when ai_eligible is false', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 1, ai_status: 'completed', ai_eligible: false }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(1);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: does nothing when ai_eligible is null (no recommendation)', async () => {
+  const { restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 1, ai_status: 'completed', ai_eligible: null }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(1);
+    assert.equal(result.archived, false);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields and publishes when eligible', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 42, ai_status: 'completed', ai_eligible: true,
+        ai_summary: '요약문', ai_insight: '인사이트',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(42);
+    assert.equal(result.archived, true);
+    const publishCall = calls.find((c) => c.text.includes('UPDATE items SET summary'));
+    assert.ok(publishCall);
+    assert.deepEqual(publishCall.params, ['요약문', '인사이트', 42]);
+    assert.match(publishCall.text, /status = 'Published'/);
+    assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_sectors') && c.text.includes('(42, 3)')));
+    assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_usages') && c.text.includes('(42, 7)')));
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: skips sector/usage inserts when none were suggested', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{ id: 5, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
+    })],
+  ]);
+  try {
+    await applyAiDraftIfEligible(5);
+    assert.equal(calls.filter((c) => c.text.includes('INSERT INTO item_sectors')).length, 0);
+    assert.equal(calls.filter((c) => c.text.includes('INSERT INTO item_usages')).length, 0);
+  } finally {
+    restore();
+  }
 });

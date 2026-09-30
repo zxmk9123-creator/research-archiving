@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sources (
   name TEXT NOT NULL,
   publisher TEXT,
   url TEXT,
-  method TEXT CHECK (method IN ('rss','crawl','manual')) DEFAULT 'manual',
+  method TEXT CHECK (method IN ('rss','crawl','manual','institution')) DEFAULT 'manual',
   frequency_days INTEGER DEFAULT 1,
   owner TEXT,
   trust_grade CHAR(1) CHECK (trust_grade IN ('A','B','C')) DEFAULT 'A',
@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS sources (
 
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+
+-- Widen method's CHECK to add 'institution' (institutional PDF-report
+-- adapter sources — see server/lib/institutionalIngest.js) for databases
+-- created before this method existed. CREATE TABLE IF NOT EXISTS above is
+-- a no-op on an existing table, so the constraint needs its own idempotent
+-- migration; DROP+ADD by Postgres's default constraint name is safe to
+-- rerun on every boot (no-op once already widened).
+ALTER TABLE sources DROP CONSTRAINT IF EXISTS sources_method_check;
+ALTER TABLE sources ADD CONSTRAINT sources_method_check CHECK (method IN ('rss','crawl','manual','institution'));
 
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
@@ -311,3 +320,16 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.eia.gov/rss/tod
 INSERT INTO sources (name, publisher, url, method, frequency_days, trust_grade)
 SELECT 'Food Business News — Edible Oils', 'Sosland Publishing', 'https://www.foodbusinessnews.net/rss/topic/79-edible-oils', 'rss', 1, 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.foodbusinessnews.net/rss/topic/79-edible-oils');
+
+-- Seed: institutional PDF report PoC source — World Bank Commodity Markets
+-- Outlook (method='institution'). Chosen because it directly covers
+-- edible/vegetable oil price and market trends (squarely inside the
+-- existing Research scope) and its listing page links its quarterly
+-- reports as direct downloadable PDFs/repository "download" links, which
+-- server/lib/adapters/institutionPdf.js discovers by regex. Verified
+-- reachable (HTTP 200) with real PDF links from this repo's own sandbox
+-- fetch during development; production's own fetch during collection is
+-- the ongoing check, same convention as the RSS sources above.
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'World Bank Commodity Markets Outlook', 'World Bank', 'https://www.worldbank.org/en/research/commodity-markets', 'institution', 90, 'poc-institutional', 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.worldbank.org/en/research/commodity-markets');

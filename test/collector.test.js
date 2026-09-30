@@ -87,7 +87,7 @@ test('getDueSources: query includes both the frequency_days due-check and the fa
 
 test('runDueCollections: logs run_started/run_completed with due-source count, even with zero due sources', async () => {
   const { restore } = mockPool([
-    ["FROM sources\n    WHERE method = 'rss'", () => ({ rows: [] })],
+    ["FROM sources\n    WHERE method IN ('rss', 'institution')", () => ({ rows: [] })],
   ]);
   const logs = [];
   const originalLog = console.log;
@@ -109,7 +109,7 @@ test('runDueCollections: healthy due source runs normally and is logged as a suc
     { title: 'Brent crude oil price surges on supply disruption', link: 'https://example.com/a1' },
   ]));
   const { calls, restore } = mockPool([
-    ["FROM sources\n    WHERE method = 'rss'", () => ({ rows: [source] })],
+    ["FROM sources\n    WHERE method IN ('rss', 'institution')", () => ({ rows: [source] })],
     ['INSERT INTO items', () => ({ rows: [{ id: 999 }] })],
   ]);
   const logs = [];
@@ -137,7 +137,7 @@ test('runDueCollections: a persistently failing source recently marked with last
   // predicate's job, not an app-level re-filter) — a source the SQL
   // layer would have excluded simply never appears in `rows`.
   const { restore } = mockPool([
-    ["FROM sources\n    WHERE method = 'rss'", () => ({ rows: [] })], // simulates Postgres excluding the backed-off row
+    ["FROM sources\n    WHERE method IN ('rss', 'institution')", () => ({ rows: [] })], // simulates Postgres excluding the backed-off row
   ]);
   const logs = [];
   const originalLog = console.log;
@@ -156,7 +156,7 @@ test('runDueCollections: a source that fails is logged as a failure and its sour
   const source = rssSource({ id: 7, name: 'Broken Source' });
   const restoreFetch = mockFetch(async () => ({ ok: false, status: 404, text: async () => '' }));
   const { calls, restore } = mockPool([
-    ["FROM sources\n    WHERE method = 'rss'", () => ({ rows: [source] })],
+    ["FROM sources\n    WHERE method IN ('rss', 'institution')", () => ({ rows: [source] })],
   ]);
   const logs = [];
   const originalLog = console.log;
@@ -181,7 +181,7 @@ test('runDueCollections: a successful collection clears last_error/last_error_at
   const source = rssSource({ id: 9, name: 'Recovering Source', last_error: 'fetch failed: 500', last_error_at: new Date().toISOString() });
   const restoreFetch = mockFetch(async () => feedResponse([]));
   const { calls, restore } = mockPool([
-    ["FROM sources\n    WHERE method = 'rss'", () => ({ rows: [source] })],
+    ["FROM sources\n    WHERE method IN ('rss', 'institution')", () => ({ rows: [source] })],
   ]);
   try {
     const results = await runDueCollections();

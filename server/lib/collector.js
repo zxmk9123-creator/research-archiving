@@ -4,6 +4,17 @@ const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
+const { collectInstitutionSource } = require('./institutionalIngest');
+
+// One acquisition-method dispatcher shared by the scheduler and manual
+// "지금 수집"/collect-all — the orchestration loop (due-source selection,
+// backoff, per-source result logging) stays a single shared loop; only
+// what happens *inside* one source's collection differs by method. Adding
+// a third acquisition method later means adding one more branch here, not
+// a second scheduler.
+function collectBySource(source) {
+  return source.method === 'institution' ? collectInstitutionSource(source) : collectSource(source);
+}
 
 const MAX_ITEMS_PER_RUN = 20;
 const TITLE_SIMILARITY_THRESHOLD = 0.82;
@@ -108,7 +119,7 @@ const FAILURE_BACKOFF_INTERVAL = '1 day';
 async function getDueSources() {
   const { rows } = await pool.query(`
     SELECT * FROM sources
-    WHERE method = 'rss' AND url IS NOT NULL
+    WHERE method IN ('rss', 'institution') AND url IS NOT NULL
       AND (last_collected_at IS NULL OR last_collected_at < now() - (frequency_days || ' days')::interval)
       AND (last_error_at IS NULL OR last_error_at < now() - $1::interval)
   `, [FAILURE_BACKOFF_INTERVAL]);
@@ -120,7 +131,7 @@ async function runDueCollections() {
   console.log(`scheduled_collection run_started due_sources=${sources.length}`);
   const results = [];
   for (const source of sources) {
-    const result = await collectSource(source);
+    const result = await collectBySource(source);
     results.push(result);
     console.log(
       `scheduled_collection source_result source=${source.name} id=${source.id} ` +
@@ -140,11 +151,11 @@ async function runDueCollections() {
 // stops the rest.
 async function collectAllSourcesNow() {
   const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'rss' AND url IS NOT NULL`
+    `SELECT * FROM sources WHERE method IN ('rss', 'institution') AND url IS NOT NULL`
   );
   const results = [];
   for (const source of sources) {
-    results.push(await collectSource(source));
+    results.push(await collectBySource(source));
   }
   const totals = results.reduce(
     (acc, r) => ({
@@ -159,4 +170,4 @@ async function collectAllSourcesNow() {
   return { totals, results };
 }
 
-module.exports = { collectSource, getDueSources, runDueCollections, collectAllSourcesNow };
+module.exports = { collectSource, collectBySource, getDueSources, runDueCollections, collectAllSourcesNow };
