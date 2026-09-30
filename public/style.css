@@ -64,19 +64,35 @@ body {
 /* ---------------------------------------------------------------------
    Navigation
 ------------------------------------------------------------------------ */
+/* Three-column grid (brand | nav | balancing spacer), not a fixed
+   left/right offset — the two 1fr side columns stay equal regardless of
+   brand text length or viewport width, so the middle column (nav) is
+   always the true visual center of the header, at any width. */
 .topbar {
-  display: flex; align-items: center; justify-content: space-between;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
   padding: 16px 28px; background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
 }
-.brand { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
-.topbar nav { display: flex; gap: 4px; }
+.brand { justify-self: start; font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
+.topbar nav { grid-column: 2; justify-self: center; display: flex; align-items: center; gap: 4px; }
 .topbar nav a {
   padding: 8px 14px; border-radius: var(--radius-control); color: var(--text-secondary); text-decoration: none;
   font-size: 14px; font-weight: 600; transition: background .15s var(--ease), color .15s var(--ease);
 }
 .topbar nav a:hover { color: var(--text); background: var(--surface-sunken); }
 .topbar nav a:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+
+/* At narrow widths the brand + full nav item padding no longer fit the
+   two equal 1fr side columns, which pushed the nav off-center and, below
+   ~360px, past the viewport edge. Tightening padding/gap/side padding
+   here (not a fixed nav position) keeps it centered and on-screen. */
+@media (max-width: 480px) {
+  .topbar { padding: 12px 12px; }
+  .brand { font-size: 14px; }
+  .topbar nav { gap: 0; }
+  .topbar nav a, .nav-dropdown > a { padding: 6px 8px; font-size: 13px; }
+}
+
 /* Active tab: text color only, per spec — no background/border/underline. */
 .topbar nav a.active { color: var(--action); }
 
