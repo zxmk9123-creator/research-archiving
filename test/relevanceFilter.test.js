@@ -61,6 +61,27 @@ test('Scope 1: negative — generic port technology', () => {
   );
 });
 
+test('Scope 1: negative — freight-cost story whose primary subject is a competing commodity (LNG) stays irrelevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('High Freight Costs Push More U.S. LNG Toward Europe', null),
+    false
+  );
+});
+
+test('Scope 1: oil/fuel freight-cost story is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('High Shipping Costs Push More U.S. Crude Oil Toward Europe', null),
+    true
+  );
+});
+
+test('Scope 1: existing non-competing freight-market case is unchanged', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('Tanker freight rates rise on tight vessel supply', null),
+    true
+  );
+});
+
 test('Scope 1: negative — tugboat order with no broader shipping-market significance', () => {
   assert.equal(
     isRelevantToOilFatsScope(

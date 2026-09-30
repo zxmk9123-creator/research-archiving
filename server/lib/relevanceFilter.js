@@ -184,7 +184,7 @@ function normalizeHyphens(text) {
 }
 
 function scope1LogisticsShipping(text) {
-  if (FREIGHT_MARKET_PATTERNS.some((p) => p.test(text))) return true;
+  if (FREIGHT_MARKET_PATTERNS.some((p) => p.test(text)) && !COMPETING_COMMODITY_CONTEXT.test(text)) return true;
   if (MARITIME_REGULATION_PATTERNS.some((p) => p.test(text))) return true;
   if (CHOKEPOINT_PATTERNS.some((p) => p.test(text)) && !COMPETING_COMMODITY_CONTEXT.test(text)) return true;
   return false;
