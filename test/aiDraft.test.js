@@ -11,6 +11,7 @@ const {
   parseEligible,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
+  SYSTEM_PROMPT,
 } = require('../server/lib/aiDraft');
 
 const taxonomy = {
@@ -311,4 +312,101 @@ test('buildTaxonomyBlock: only lists the taxonomy actually passed in (grounding,
   const block = buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages);
   assert.match(block, /3: 팜유/);
   assert.doesNotMatch(block, /어묵/); // sanity: nothing invented appears
+});
+
+// --- Eligibility prompt refinement (73-item human-review dataset) ---
+// The prompt must encode the ordered A-E criteria and must NOT fall back
+// to the old "has specific facts = eligible" heuristic.
+
+test('SYSTEM_PROMPT: encodes the ordered eligibility criteria and explicitly disavows the old heuristic', () => {
+  assert.match(SYSTEM_PROMPT, /Concrete development/);
+  assert.match(SYSTEM_PROMPT, /Research significance/);
+  assert.match(SYSTEM_PROMPT, /Evidence\/anchor/);
+  assert.match(SYSTEM_PROMPT, /Scope and framing/);
+  assert.match(SYSTEM_PROMPT, /Recurring content/);
+  assert.match(SYSTEM_PROMPT, /do NOT require numerical data when the development itself is materially significant/i);
+  assert.match(SYSTEM_PROMPT, /do not use "has specific facts\/figures" by itself as the test/i);
+});
+
+test('SYSTEM_PROMPT: summary and insight rules are unchanged from before this refinement', () => {
+  assert.match(SYSTEM_PROMPT, /a natural, flowing 1-3 sentence Korean summary containing ONLY the article's directly-stated facts/);
+  assert.match(SYSTEM_PROMPT, /a separate 1-2 sentence Korean field for what goes BEYOND the plain facts/);
+});
+
+// The eight scenarios below are pure parseDraftResponse pass-through
+// fixtures: parseDraftResponse never itself judges eligibility (that's the
+// model's job, per the refined prompt above) — these confirm the parser
+// preserves whatever verdict+reason the model returns for each scenario,
+// with no corruption/override, across the full range of cases the new
+// prompt is meant to produce.
+
+test('eligibility scenario: concrete market development -> eligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: true,
+    eligibility_reason: '팜유 수출세 인상이라는 구체적 정책 변화가 아시아 가격에 영향을 미친다.',
+  }), taxonomy);
+  assert.equal(draft.eligible, true);
+});
+
+test('eligibility scenario: single-company development with meaningful market/business implication -> eligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: true,
+    eligibility_reason: '단일 기업의 발표이지만 정제유 수출 물량이 크게 늘어 국제 시장 점유율에 영향을 준다.',
+    who: '단고테 정유', what: '정제유 수출 물량 확대', impact: '나이지리아의 국제 시장 점유율 확대',
+  }), taxonomy);
+  assert.equal(draft.eligible, true);
+});
+
+test('eligibility scenario: single-company operational news with no broader implication -> ineligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: false,
+    eligibility_reason: '단일 유정의 시추 방식 변경에 관한 기술적 운영 정보로, 시장 전반에 대한 시사점이 없다.',
+    who: '퍼미안 지역 운영사', what: '시추공 길이를 늘려 생산량을 늘림', impact: UNCONFIRMED,
+  }), taxonomy);
+  assert.equal(draft.eligible, false);
+});
+
+test('eligibility scenario: geopolitical/security incident without economic transmission -> ineligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: false,
+    eligibility_reason: '군사적 공격 사건이며 경제적 파급 효과가 명시되어 있지 않다.',
+    who: '이란', what: '호르무즈 해협에서 발생한 미사일 공격', impact: UNCONFIRMED,
+  }), taxonomy);
+  assert.equal(draft.eligible, false);
+});
+
+test('eligibility scenario: recurring roundup with no discrete development -> ineligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: false,
+    eligibility_reason: '매주 발행되는 정기 시장 동향 요약으로 이번 호에 새로운 구체적 사건이 없다.',
+    what: '주간 벙커유 시장 동향 요약', impact: UNCONFIRMED,
+  }), taxonomy);
+  assert.equal(draft.eligible, false);
+});
+
+test('eligibility scenario: recurring roundup containing a material new development -> eligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: true,
+    eligibility_reason: '정기 요약이지만 주요 기업들의 ZEMBA 이니셔티브 참여라는 새로운 구체적 사건을 포함한다.',
+    who: 'Google, Microsoft, DSV', what: 'ZEMBA 이니셔티브 참여 발표', impact: '해운 탈탄소 협력 확대',
+  }), taxonomy);
+  assert.equal(draft.eligible, true);
+});
+
+test('eligibility scenario: quantified market event -> eligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: true,
+    eligibility_reason: '미국 전략비축유가 1982년 이후 최저 수준으로 하락했다는 구체적 수치가 포함된 시장 사건이다.',
+    who: 'EIA', what: '전략비축유 재고 발표', amount: '2억 8,460만 배럴',
+  }), taxonomy);
+  assert.equal(draft.eligible, true);
+});
+
+test('eligibility scenario: relevant but vague commentary -> ineligible', () => {
+  const draft = parseDraftResponse(fullResponse({
+    eligible: false,
+    eligibility_reason: '유지 시장에 대한 막연한 논평으로 구체적 사건이나 수치가 없다.',
+    who: UNCONFIRMED, what: UNCONFIRMED, amount: UNCONFIRMED, when: UNCONFIRMED, where: UNCONFIRMED, why: UNCONFIRMED, impact: UNCONFIRMED,
+  }), taxonomy);
+  assert.equal(draft.eligible, false);
 });
