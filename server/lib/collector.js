@@ -90,22 +90,46 @@ async function collectSource(source) {
   }
 }
 
-// Sources due for collection: RSS sources past their frequency window.
+// A source that just failed is backed off for this long before the
+// scheduler will consider it "due" again — reuses the existing
+// last_error_at field rather than adding a failure-count column. Without
+// this, a source with a permanently broken feed (dead 404/403 URL) never
+// gets last_collected_at set on success, so the frequency_days due-check
+// alone would select it again on every single hourly tick forever.
+// collectSource() already clears last_error/last_error_at on success (see
+// its UPDATE above), so a recovered source's backoff resets automatically
+// — no separate reset logic needed here.
+const FAILURE_BACKOFF_INTERVAL = '1 day';
+
+// Sources due for collection: RSS sources past their frequency window,
+// excluding ones currently in their post-failure backoff window. Manual
+// collect-all (collectAllSourcesNow, below) intentionally does not apply
+// this — "지금 수집" always attempts every source regardless of backoff.
 async function getDueSources() {
   const { rows } = await pool.query(`
     SELECT * FROM sources
     WHERE method = 'rss' AND url IS NOT NULL
       AND (last_collected_at IS NULL OR last_collected_at < now() - (frequency_days || ' days')::interval)
-  `);
+      AND (last_error_at IS NULL OR last_error_at < now() - $1::interval)
+  `, [FAILURE_BACKOFF_INTERVAL]);
   return rows;
 }
 
 async function runDueCollections() {
   const sources = await getDueSources();
+  console.log(`scheduled_collection run_started due_sources=${sources.length}`);
   const results = [];
   for (const source of sources) {
-    results.push(await collectSource(source));
+    const result = await collectSource(source);
+    results.push(result);
+    console.log(
+      `scheduled_collection source_result source=${source.name} id=${source.id} ` +
+      (result.ok
+        ? `ok=true fetched=${result.fetched} filtered=${result.filtered} new=${result.count}`
+        : `ok=false error=${result.error}`)
+    );
   }
+  console.log(`scheduled_collection run_completed due_sources=${sources.length} succeeded=${results.filter((r) => r.ok).length} failed=${results.filter((r) => !r.ok).length}`);
   return results;
 }
 
