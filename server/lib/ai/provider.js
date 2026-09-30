@@ -225,6 +225,34 @@ async function callOpenRouter({ system, user }) {
   return text;
 }
 
+// DeepSeek: OpenAI-compatible chat completions API.
+async function callDeepSeek({ system, user }) {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured');
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-flash';
+
+  const res = await fetchProvider('deepseek', 'https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2000,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+
+  const data = await res.json();
+  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  requireNonEmptyText(text, 'deepseek');
+  return text;
+}
+
 // Meta's Llama API (OpenAI-compatible chat completions).
 async function callLlama({ system, user }) {
   const apiKey = process.env.LLAMA_API_KEY;
@@ -296,6 +324,7 @@ async function callProvider(promptMessages) {
   if (providerName === 'openrouter') return callOpenRouter(promptMessages);
   if (providerName === 'llama') return callLlama(promptMessages);
   if (providerName === 'nvidia') return callNvidia(promptMessages);
+  if (providerName === 'deepseek') return callDeepSeek(promptMessages);
   throw new Error(`Unsupported AI_PROVIDER: ${providerName}`);
 }
 
@@ -331,15 +360,16 @@ async function runProviderChain(providers) {
   throw lastErr;
 }
 
-// Builds the real fallback chain: Groq -> Gemini -> OpenRouter free model,
-// skipping any provider whose API key isn't configured (so an unconfigured
-// provider is simply absent from the chain, not a failure to work around).
+// Builds the real fallback chain: Groq -> Gemini -> NVIDIA -> DeepSeek ->
+// OpenRouter free model, skipping any provider whose API key isn't
+// configured (so an unconfigured provider is simply absent from the
+// chain, not a failure to work around).
 function buildProviderChain(promptMessages) {
   const chain = [];
   if (process.env.GROQ_API_KEY) chain.push({ name: 'groq', run: () => callGroq(promptMessages) });
   if (process.env.GEMINI_API_KEY) chain.push({ name: 'gemini', run: () => callGemini(promptMessages) });
-  if (process.env.LLAMA_API_KEY) chain.push({ name: 'llama', run: () => callLlama(promptMessages) });
   if (process.env.NVIDIA_API_KEY) chain.push({ name: 'nvidia', run: () => callNvidia(promptMessages) });
+  if (process.env.DEEPSEEK_API_KEY) chain.push({ name: 'deepseek', run: () => callDeepSeek(promptMessages) });
   if (process.env.OPENROUTER_API_KEY) chain.push({ name: 'openrouter', run: () => callOpenRouter(promptMessages) });
   return chain;
 }
@@ -361,6 +391,7 @@ module.exports = {
   callOpenRouter,
   callLlama,
   callNvidia,
+  callDeepSeek,
   runProviderChain,
   buildProviderChain,
   requireNonEmptyText,

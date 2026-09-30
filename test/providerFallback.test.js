@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callNvidia } = require('../server/lib/ai/provider');
+const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callNvidia, callDeepSeek } = require('../server/lib/ai/provider');
 
 function transientError(message) {
   const err = new Error(message);
@@ -122,7 +122,7 @@ test('runProviderChain: throws a clear error when no provider is configured', as
   await assert.rejects(() => runProviderChain([]), /No AI provider configured/);
 });
 
-const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'NVIDIA_API_KEY'];
+const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY'];
 
 function withProviderEnv(set, fn) {
   const prev = Object.fromEntries(PROVIDER_ENV_VARS.map((k) => [k, process.env[k]]));
@@ -146,17 +146,24 @@ test('buildProviderChain: only includes providers whose API key env var is set',
   });
 });
 
-test('buildProviderChain: builds the full Groq -> Gemini -> Llama -> NVIDIA -> OpenRouter order when all keys are set', () => {
+test('buildProviderChain: builds the full Groq -> Gemini -> NVIDIA -> DeepSeek -> OpenRouter order when all keys are set', () => {
   withProviderEnv(PROVIDER_ENV_VARS, () => {
     const chain = buildProviderChain({ system: 's', user: 'u' });
-    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'llama', 'nvidia', 'openrouter']);
+    assert.deepEqual(chain.map((p) => p.name), ['groq', 'gemini', 'nvidia', 'deepseek', 'openrouter']);
   });
 });
 
 test('buildProviderChain: falls through to Llama/NVIDIA when only those keys are set', () => {
   withProviderEnv(['LLAMA_API_KEY', 'NVIDIA_API_KEY'], () => {
     const chain = buildProviderChain({ system: 's', user: 'u' });
-    assert.deepEqual(chain.map((p) => p.name), ['llama', 'nvidia']);
+    assert.deepEqual(chain.map((p) => p.name), ['nvidia']);
+  });
+});
+
+test('buildProviderChain: DeepSeek is positioned between NVIDIA and OpenRouter', () => {
+  withProviderEnv(['NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY'], () => {
+    const chain = buildProviderChain({ system: 's', user: 'u' });
+    assert.deepEqual(chain.map((p) => p.name), ['nvidia', 'deepseek', 'openrouter']);
   });
 });
 
@@ -387,10 +394,11 @@ test('callNvidia: sends the currently supported model, not a retired one', async
 });
 
 // --- The most important regression from this task: the exact reported
-// production sequence must now end in success instead of stopping at
-// Llama's 401. Uses real HTTP mocking through the actual provider
-// functions (callGroq/callGemini/callLlama/callNvidia), not fakes. ---
-test('callProviderWithFallback: Groq 429 -> Gemini 503/429 -> Llama 401 -> NVIDIA succeeds (exact production regression)', async () => {
+// production sequence must now end in success rather than stopping mid-
+// chain. Uses real HTTP mocking through the actual provider functions
+// (callGroq/callGemini/callNvidia), not fakes. Llama is no longer part of
+// buildProviderChain's order (confirmed retired), so it's absent here. ---
+test('callProviderWithFallback: Groq 429 -> Gemini 503/429 -> NVIDIA succeeds (exact production regression)', async () => {
   let geminiCallCount = 0;
   const restore = mockFetchByUrl([
     ['api.groq.com', async () => jsonResponse(429, { error: { message: 'rate limited' } })],
@@ -400,15 +408,14 @@ test('callProviderWithFallback: Groq 429 -> Gemini 503/429 -> Llama 401 -> NVIDI
         ? jsonResponse(503, { error: { code: 503, message: 'overloaded' } })
         : jsonResponse(429, { error: { code: 429, message: 'quota exceeded' } });
     }],
-    ['api.llama.com', async () => jsonResponse(401, { title: 'Authentication Error', status: 401 })],
     ['integrate.api.nvidia.com', async () => jsonResponse(200, { choices: [{ message: { content: 'nvidia success' } }] })],
   ]);
   try {
     process.env.GROQ_API_KEY = 'test';
     process.env.GEMINI_API_KEY = 'test';
-    process.env.LLAMA_API_KEY = 'test';
     process.env.NVIDIA_API_KEY = 'test';
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
     const result = await callProviderWithFallback({ system: 's', user: 'u' });
     assert.equal(result.text, 'nvidia success');
     assert.equal(result.provider, 'nvidia');
@@ -418,5 +425,81 @@ test('callProviderWithFallback: Groq 429 -> Gemini 503/429 -> Llama 401 -> NVIDI
     delete process.env.GEMINI_API_KEY;
     delete process.env.LLAMA_API_KEY;
     delete process.env.NVIDIA_API_KEY;
+  }
+});
+
+// --- DeepSeek provider ---
+
+test('callDeepSeek: sends the configured model and returns the response text', async () => {
+  let sentBody;
+  const restore = mockFetchByUrl([
+    ['api.deepseek.com', async (url, init) => {
+      sentBody = JSON.parse(init.body);
+      return jsonResponse(200, { choices: [{ message: { content: 'deepseek response' } }] });
+    }],
+  ]);
+  try {
+    process.env.DEEPSEEK_API_KEY = 'test';
+    delete process.env.DEEPSEEK_MODEL;
+    const text = await callDeepSeek({ system: 's', user: 'u' });
+    assert.equal(text, 'deepseek response');
+    assert.equal(sentBody.model, 'deepseek-flash');
+  } finally {
+    restore();
+    delete process.env.DEEPSEEK_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: DeepSeek 429 falls back to OpenRouter', async () => {
+  const restore = mockFetchByUrl([
+    ['api.deepseek.com', async () => jsonResponse(429, { error: { message: 'rate limited' } })],
+    ['openrouter.ai', async () => jsonResponse(200, { choices: [{ message: { content: 'openrouter response' } }] })],
+  ]);
+  try {
+    process.env.DEEPSEEK_API_KEY = 'test';
+    process.env.OPENROUTER_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'openrouter response');
+    assert.equal(result.provider, 'openrouter');
+  } finally {
+    restore();
+    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: DeepSeek empty response falls back to OpenRouter', async () => {
+  const restore = mockFetchByUrl([
+    ['api.deepseek.com', async () => jsonResponse(200, { choices: [{ message: { content: '' } }] })],
+    ['openrouter.ai', async () => jsonResponse(200, { choices: [{ message: { content: 'openrouter filled in' } }] })],
+  ]);
+  try {
+    process.env.DEEPSEEK_API_KEY = 'test';
+    process.env.OPENROUTER_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'openrouter filled in');
+    assert.equal(result.provider, 'openrouter');
+  } finally {
+    restore();
+    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+});
+
+test('callProviderWithFallback: DeepSeek auth failure (401) is skipped, falls back to OpenRouter', async () => {
+  const restore = mockFetchByUrl([
+    ['api.deepseek.com', async () => jsonResponse(401, { error: { message: 'invalid api key' } })],
+    ['openrouter.ai', async () => jsonResponse(200, { choices: [{ message: { content: 'openrouter response' } }] })],
+  ]);
+  try {
+    process.env.DEEPSEEK_API_KEY = 'test';
+    process.env.OPENROUTER_API_KEY = 'test';
+    const result = await callProviderWithFallback({ system: 's', user: 'u' });
+    assert.equal(result.text, 'openrouter response');
+    assert.equal(result.provider, 'openrouter');
+  } finally {
+    restore();
+    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
   }
 });
