@@ -349,3 +349,15 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.worldbank.org/e
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'World Bank Commodity Markets Pink Sheet (Monthly)', 'World Bank', 'https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx', 'structured', 30, 'poc-structured', 'A'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx');
+
+-- Seed: second institutional PDF PoC source — IFPRI (International Food
+-- Policy Research Institute) publications, hosted on CGSpace (CGIAR's
+-- shared repository). Validates the institutional adapter against a real
+-- second publisher with a genuinely different listing-page shape (title
+-- and download link joined by a shared data-identifier, not both in one
+-- anchor) — see discoverFromCgspaceHtml() in
+-- server/lib/adapters/institutionPdf.js. World Bank's source above is
+-- untouched; this exercises the CGSpace-specific discovery branch only.
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'IFPRI Publications', 'International Food Policy Research Institute', 'https://www.ifpri.org/publications/', 'institution', 14, 'poc-institutional', 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.ifpri.org/publications/');
