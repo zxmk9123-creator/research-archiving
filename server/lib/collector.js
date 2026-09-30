@@ -109,4 +109,30 @@ async function runDueCollections() {
   return results;
 }
 
-module.exports = { collectSource, getDueSources, runDueCollections };
+// Collect every active RSS source now, regardless of frequency_days/
+// last_collected_at — used by the "전체 자료 지금 수집" bulk action.
+// collectSource() already catches its own errors and returns
+// { ok: false, ... } rather than throwing, so one source's failure never
+// stops the rest.
+async function collectAllSourcesNow() {
+  const { rows: sources } = await pool.query(
+    `SELECT * FROM sources WHERE method = 'rss' AND url IS NOT NULL`
+  );
+  const results = [];
+  for (const source of sources) {
+    results.push(await collectSource(source));
+  }
+  const totals = results.reduce(
+    (acc, r) => ({
+      fetched: acc.fetched + (r.fetched || 0),
+      duplicates: acc.duplicates + (r.ok ? (r.fetched || 0) - (r.count || 0) - (r.filtered || 0) : 0),
+      filtered: acc.filtered + (r.filtered || 0),
+      newItems: acc.newItems + (r.count || 0),
+      failedSources: acc.failedSources + (r.ok ? 0 : 1),
+    }),
+    { fetched: 0, duplicates: 0, filtered: 0, newItems: 0, failedSources: 0 }
+  );
+  return { totals, results };
+}
+
+module.exports = { collectSource, getDueSources, runDueCollections, collectAllSourcesNow };

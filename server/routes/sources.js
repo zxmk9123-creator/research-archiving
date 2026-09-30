@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db/pool');
-const { collectSource, runDueCollections } = require('../lib/collector');
+const { collectSource, runDueCollections, collectAllSourcesNow } = require('../lib/collector');
 
 const router = express.Router();
 
@@ -8,6 +8,15 @@ const router = express.Router();
 router.post('/collect', async (req, res) => {
   const results = await runDueCollections();
   res.json({ results });
+});
+
+// Manual trigger: collect every active RSS source right now, regardless of
+// schedule/frequency_days. Aggregates per-source results — one source
+// failing never stops the others.
+router.post('/collect-all', async (req, res) => {
+  const { totals, results } = await collectAllSourcesNow();
+  console.log(`collect-all: ${JSON.stringify(totals)}`);
+  res.json({ totals, results });
 });
 
 // Manual trigger: collect one source right now, regardless of schedule.
