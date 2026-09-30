@@ -958,7 +958,11 @@ function parseHash() {
 // separate UI state to keep in sync) — 'detail' has no top-level tab of
 // its own, so it maps back to the Archive tab it was reached from.
 function updateActiveNavTab(path) {
-  const activeRoute = path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'archive';
+  // 'home', 'latest', and 'archive' all live under the single "Home"
+  // dropdown nav item now — 'detail' has no top-level tab of its own
+  // either, so it also falls back to 'home' via the same reasoning as
+  // before ('detail' reached from Archive maps back to it).
+  const activeRoute = path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'home';
   document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === activeRoute);
   });

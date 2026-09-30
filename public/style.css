@@ -80,6 +80,24 @@ body {
 /* Active tab: text color only, per spec — no background/border/underline. */
 .topbar nav a.active { color: var(--action); }
 
+/* Home nav dropdown — hover reveals the two dedicated full-list pages
+   instead of giving them their own top-level nav items. Minimal styling
+   consistent with the rest of the topbar (no shadOw-heavy panel). */
+.nav-dropdown { position: relative; }
+.nav-dropdown-menu {
+  position: absolute; top: 100%; left: 0; margin-top: 2px; min-width: 132px;
+  display: none; flex-direction: column; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .08); padding: 4px; z-index: 20;
+}
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown:focus-within .nav-dropdown-menu { display: flex; }
+.nav-dropdown-menu a {
+  padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-secondary);
+  text-decoration: none; font-size: 14px; font-weight: 500;
+}
+.nav-dropdown-menu a:hover { background: var(--surface-sunken); color: var(--text); }
+
 #app { max-width: 1120px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) var(--sp-8); }
 
 /* ---------------------------------------------------------------------
@@ -111,11 +129,20 @@ p { margin: 0; }
 .home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }
 .home-carousel-track { display: flex; transition: transform 0.4s ease; }
 .home-carousel-slide {
+  /* minmax(0, 1fr), not plain 1fr: a bare `1fr` track computes as
+     `minmax(auto, 1fr)`, whose minimum is the column's content
+     min-content size. Inside the carousel viewport — narrower than the
+     full-width .grid by the two 32px arrow buttons + gaps — that
+     min-content width (card title text, eyebrow badges) exceeded the
+     equal-share width for a 3rd column, so it overflowed past the
+     viewport's overflow:hidden edge and was invisible: only 2 of 3 cards
+     ever rendered inside the visible area. minmax(0, 1fr) lets a track
+     shrink below its content's min-content size instead. */
   min-width: 100%; flex-shrink: 0;
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;
 }
-@media (max-width: 900px) { .home-carousel-slide { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 640px) { .home-carousel-slide { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .home-carousel-slide { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .home-carousel-slide { grid-template-columns: minmax(0, 1fr); } }
 
 .home-carousel-nav {
   flex-shrink: 0; width: 32px; height: 32px; margin-top: 60px;
