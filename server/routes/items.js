@@ -3,6 +3,7 @@ const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata } = require('../lib/extractMetadata');
 const { generateAiDraftForItem } = require('../lib/aiDraft');
+const { hasValidClassification } = require('../lib/classification');
 
 const router = express.Router();
 
@@ -149,6 +150,29 @@ router.post('/', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const id = req.params.id;
+  const { rows: existingRows } = await pool.query('SELECT id FROM items WHERE id = $1', [id]);
+  if (!existingRows[0]) return res.status(404).json({ error: 'not found' });
+
+  // Apply any tag changes from this same request first, so a reviewer
+  // classifying and publishing an item in one PATCH (sector_ids/usage_ids
+  // + status='Published' together) is evaluated against its new tags,
+  // not whatever existed before this request.
+  if (req.body.sector_ids !== undefined || req.body.usage_ids !== undefined) {
+    await setTags(
+      id,
+      req.body.sector_ids !== undefined ? req.body.sector_ids : [],
+      req.body.usage_ids !== undefined ? req.body.usage_ids : []
+    );
+  }
+
+  // Minimum classification invariant: the manual Review path can never
+  // publish an item with no sector/usage tags, same as the autonomous
+  // applyAiDraftIfEligible() path in aiDraft.js. An item already
+  // Published, or a PATCH that doesn't touch status, is unaffected.
+  if (req.body.status === 'Published' && !(await hasValidClassification(id))) {
+    return res.status(400).json({ error: '최소 1개 이상의 섹터와 용도 분류가 있어야 발행할 수 있습니다.' });
+  }
+
   const fields = ['title', 'source_url', 'pdf_url', 'published_at', 'source_id', 'type', 'summary', 'insight', 'attribution', 'thumbnail_url', 'status', 'reviewer_eligible'];
   const sets = [];
   const params = [];
@@ -162,17 +186,8 @@ router.patch('/:id', async (req, res) => {
     params.push(id);
     await pool.query(`UPDATE items SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
   }
-  if (req.body.sector_ids !== undefined || req.body.usage_ids !== undefined) {
-    const { rows: current } = await pool.query('SELECT * FROM items WHERE id = $1', [id]);
-    if (!current[0]) return res.status(404).json({ error: 'not found' });
-    await setTags(
-      id,
-      req.body.sector_ids !== undefined ? req.body.sector_ids : [],
-      req.body.usage_ids !== undefined ? req.body.usage_ids : []
-    );
-  }
+
   const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [id]);
-  if (!full[0]) return res.status(404).json({ error: 'not found' });
   res.json(full[0]);
 });
 

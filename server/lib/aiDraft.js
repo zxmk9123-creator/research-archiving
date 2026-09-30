@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
+const { hasValidClassification } = require('./classification');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
 // single collection run can create dozens of items at once. Bounding the
@@ -309,11 +310,6 @@ async function applyAiDraftIfEligible(itemId) {
     return { archived: false };
   }
 
-  await pool.query(
-    `UPDATE items SET summary = $1, insight = $2, status = 'Published' WHERE id = $3`,
-    [item.ai_summary, item.ai_insight, itemId]
-  );
-
   await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
   await pool.query('DELETE FROM item_usages WHERE item_id = $1', [itemId]);
   if (item.ai_suggested_sectors && item.ai_suggested_sectors.length) {
@@ -324,6 +320,22 @@ async function applyAiDraftIfEligible(itemId) {
     const values = item.ai_suggested_usages.map((uid) => `(${itemId}, ${Number(uid)})`).join(',');
     await pool.query(`INSERT INTO item_usages (item_id, usage_id) VALUES ${values}`);
   }
+
+  // Minimum classification invariant: even an AI-eligible item never
+  // auto-publishes without at least one real sector AND usage tag —
+  // tags are applied above (from ai_suggested_sectors/usages) before this
+  // check, so a normal eligible item with real suggestions is unaffected;
+  // this only withholds publication for the edge case where AI returned
+  // eligible=true but no (or only invalid) tag suggestions.
+  if (!(await hasValidClassification(itemId))) {
+    console.log(`applyAiDraftIfEligible: item ${itemId} is AI-eligible but has no sector/usage classification — not publishing`);
+    return { archived: false };
+  }
+
+  await pool.query(
+    `UPDATE items SET summary = $1, insight = $2, status = 'Published' WHERE id = $3`,
+    [item.ai_summary, item.ai_insight, itemId]
+  );
 
   return { archived: true };
 }

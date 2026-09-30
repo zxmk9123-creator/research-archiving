@@ -1,0 +1,158 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const express = require('express');
+const pool = require('../server/db/pool');
+const itemsRouter = require('../server/routes/items');
+
+// Minimal live-server harness (express + node's own fetch) rather than a
+// new test-framework dependency — the router's PATCH guard for the
+// minimum classification invariant needs to be exercised through the
+// actual HTTP route (where the guard lives), not just its inner helper.
+function withServer(fn) {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/items', itemsRouter);
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, async () => {
+      const { port } = server.address();
+      try {
+        await fn(`http://127.0.0.1:${port}/api/items`);
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        server.close();
+      }
+    });
+  });
+}
+
+// Same substring-matched pool.query dispatcher convention used across the
+// existing test suite (collector.test.js, aiDraft.test.js).
+function mockPool(handlers) {
+  const original = pool.query;
+  const calls = [];
+  pool.query = async (text, params) => {
+    calls.push({ text, params });
+    for (const [match, handler] of handlers) {
+      if (text.includes(match)) return handler(text, params);
+    }
+    return { rows: [] };
+  };
+  return { calls, restore: () => { pool.query = original; } };
+}
+
+function itemRow(overrides) {
+  return { id: 10, title: 'Test item', status: 'Draft', ...overrides };
+}
+
+test('PATCH /:id: rejects publishing an item with no sector/usage classification', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 10 }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/10`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published' }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.match(body.error, /섹터|usage|classification/i);
+      assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET') && c.text.includes('status')).length, 0);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: publishes an item that already has valid sector/usage tags', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 11 }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 11, status: 'Published' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/11`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published' }),
+      });
+      assert.equal(res.status, 200);
+      const updateCall = calls.find((c) => c.text.includes('UPDATE items SET') && c.text.includes('status'));
+      assert.ok(updateCall, 'expected the status UPDATE to run');
+      assert.ok(updateCall.params.includes('Published'));
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: classifying and publishing in the same request is evaluated against the new tags', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 12 }] })],
+    // setTags() issues DELETE then INSERT for sectors/usages — none of
+    // that needs real persistence here, only that hasValidClassification
+    // is checked with the "tags now exist" answer, proving the route
+    // evaluates classification after applying this request's own tags.
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 12, status: 'Published' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/12`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published', sector_ids: [3], usage_ids: [7] }),
+      });
+      assert.equal(res.status, 200);
+      assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_sectors') && c.text.includes('(12, 3)')));
+      assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_usages') && c.text.includes('(12, 7)')));
+      assert.ok(calls.some((c) => c.text.includes('UPDATE items SET') && c.text.includes('status')));
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: a non-publish update (e.g. editing the title) is never gated by the classification check', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 13 }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 13, title: 'New title' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/13`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'New title' }),
+      });
+      assert.equal(res.status, 200);
+      assert.ok(!calls.some((c) => c.text.includes('SELECT EXISTS')), 'classification check should not run when status is not being set to Published');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: returns 404 for a nonexistent item without running the classification check', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE id', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/999`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published' }),
+      });
+      assert.equal(res.status, 404);
+      assert.ok(!calls.some((c) => c.text.includes('SELECT EXISTS')));
+    });
+  } finally {
+    restore();
+  }
+});

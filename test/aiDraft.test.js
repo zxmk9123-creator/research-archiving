@@ -479,7 +479,7 @@ test('applyAiDraftIfEligible: does nothing when ai_eligible is null (no recommen
   }
 });
 
-test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields and publishes when eligible', async () => {
+test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields and publishes when eligible with valid classification', async () => {
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
@@ -488,6 +488,7 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
     })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
   ]);
   try {
     const result = await applyAiDraftIfEligible(42);
@@ -508,11 +509,47 @@ test('applyAiDraftIfEligible: skips sector/usage inserts when none were suggeste
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{ id: 5, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
     })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
   ]);
   try {
     await applyAiDraftIfEligible(5);
     assert.equal(calls.filter((c) => c.text.includes('INSERT INTO item_sectors')).length, 0);
     assert.equal(calls.filter((c) => c.text.includes('INSERT INTO item_usages')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+// --- minimum classification invariant: an AI-eligible item is never
+// auto-published without at least one real sector AND usage tag ---
+
+test('applyAiDraftIfEligible: does NOT publish an eligible item with no suggested sectors/usages (no classification)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{ id: 6, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(6);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: does NOT publish when only a sector (no usage) ends up classified', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{ id: 7, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [] }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: false }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(7);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
   } finally {
     restore();
   }
