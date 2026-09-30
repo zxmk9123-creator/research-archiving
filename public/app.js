@@ -416,15 +416,15 @@ async function renderSources() {
   app.innerHTML = `
     <h1>Sources</h1>
     <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
-    <button class="btn primary" id="collect-all-btn">전체 자료 지금 수집</button>
-    <div id="collect-all-result"></div>
-    <table>
+    <button class="btn primary btn-compact" id="collect-all-btn">전체 자료 지금 수집</button>
+    <div class="collect-all-result" id="collect-all-result"></div>
+    <table class="sources-table">
       <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
       ${sources.map((s) => `<tr>
-        <td>${s.name}</td><td>${s.method}</td><td>${s.owner || '-'}</td><td>${s.frequency_days}</td>
-        <td>${s.trust_grade}</td><td>${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
-        <td>${s.last_error ? `<span class="stale" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="stale">Stale</span>' : 'OK')}</td>
-        <td><button class="btn btn-table-action btn-table-action-danger" data-delete-source="${s.id}">삭제</button></td>
+        <td class="cell-strong">${s.name}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
+        <td class="cell-muted">${s.trust_grade}</td><td class="cell-muted">${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
+        <td>${s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>')}</td>
+        <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
       </tr>`).join('')}
     </table>
 

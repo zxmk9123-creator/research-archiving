@@ -213,6 +213,37 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
 .btn-table-action-danger { color: var(--danger); border-color: var(--border-strong); background: var(--surface); }
 .btn-table-action-danger:hover { background: #fef2f2; border-color: var(--danger); }
 
+/* Sources page: compact primary action — stays the page's one primary
+   button, but small enough not to dominate a mostly-metadata page. */
+.btn-compact { height: 28px; padding: 0 12px; font-size: 13px; font-weight: 500; margin-bottom: var(--sp-2); }
+
+/* Lightweight single-line collection result — no card, no border, just
+   muted status text sitting directly under the compact action button. */
+.collect-all-result { font-size: 12px; color: var(--text-tertiary); margin: 0 0 var(--sp-4); min-height: 1.4em; }
+
+/* Compact Sources table variant: tighter rows/padding, smaller type,
+   thin dividers instead of boxed cells, muted secondary metadata with
+   the source name left slightly stronger. */
+.sources-table { font-size: 13px; }
+.sources-table th { padding: 6px 8px; font-size: 11px; }
+.sources-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.sources-table .cell-strong { color: var(--text); font-weight: 500; }
+.sources-table .cell-muted { color: var(--text-tertiary); }
+
+/* Restrained status text — no filled badges, failure stays legible via
+   color alone rather than a colored module. */
+.status-ok { color: var(--text-tertiary); font-size: 12px; }
+.status-fail { color: var(--danger); font-size: 12px; }
+
+/* Small outline/text-style delete action — compact, visually secondary,
+   distinct from the table's default .btn-table-action treatment. */
+.btn-text-action {
+  height: auto; padding: 2px 8px; font-size: 12px; font-weight: 500;
+  color: var(--text-tertiary); background: none; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.btn-text-action:hover { color: var(--danger); border-color: var(--danger); background: #fef2f2; }
+
 /* Review header toolbar: draft select + prev/next + new-item, one compact
    36px row — not a filter bar, a navigation strip. */
 .review-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-4) 0 var(--sp-5); }
