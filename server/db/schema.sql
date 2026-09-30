@@ -32,13 +32,15 @@ ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 
 -- Widen method's CHECK to add 'institution' (institutional PDF-report
--- adapter sources — see server/lib/institutionalIngest.js) for databases
--- created before this method existed. CREATE TABLE IF NOT EXISTS above is
--- a no-op on an existing table, so the constraint needs its own idempotent
--- migration; DROP+ADD by Postgres's default constraint name is safe to
--- rerun on every boot (no-op once already widened).
+-- adapter — see server/lib/institutionalIngest.js) and 'structured'
+-- (structured statistical/data-series adapter — see
+-- server/lib/structuredDataIngest.js) for databases created before these
+-- methods existed. CREATE TABLE IF NOT EXISTS above is a no-op on an
+-- existing table, so the constraint needs its own idempotent migration;
+-- DROP+ADD by Postgres's default constraint name is safe to rerun on
+-- every boot (no-op once already widened).
 ALTER TABLE sources DROP CONSTRAINT IF EXISTS sources_method_check;
-ALTER TABLE sources ADD CONSTRAINT sources_method_check CHECK (method IN ('rss','crawl','manual','institution'));
+ALTER TABLE sources ADD CONSTRAINT sources_method_check CHECK (method IN ('rss','crawl','manual','institution','structured'));
 
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
@@ -333,3 +335,17 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.foodbusinessnew
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'World Bank Commodity Markets Outlook', 'World Bank', 'https://www.worldbank.org/en/research/commodity-markets', 'institution', 90, 'poc-institutional', 'A'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.worldbank.org/en/research/commodity-markets');
+
+-- Seed: structured statistical-data PoC source — World Bank Commodity
+-- Markets "Pink Sheet" monthly price data (method='structured'). Same
+-- publisher/trust tier as the institutional PoC source above, but a
+-- genuinely different ingestion shape: a single XLSX file with one row per
+-- month rather than a document to discover — see
+-- server/lib/adapters/structuredData.js and structuredDataIngest.js.
+-- Verified reachable (HTTP 200, correct XLSX content-type) during
+-- development; the file is periodically republished at the same URL by
+-- the World Bank, same as the RSS/institution sources' ongoing-fetch
+-- convention above.
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'World Bank Commodity Markets Pink Sheet (Monthly)', 'World Bank', 'https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx', 'structured', 30, 'poc-structured', 'A'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx');

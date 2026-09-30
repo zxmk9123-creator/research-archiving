@@ -557,7 +557,7 @@ async function renderSources() {
       <summary>소스 추가</summary>
       <div class="form-row"><label>이름</label><input id="s-name"></div>
       <div class="form-row"><label>수집방식</label>
-        <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="crawl">crawl</option></select>
+        <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="structured">structured (통계 데이터 자동 수집)</option><option value="crawl">crawl</option></select>
       </div>
       <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
       <div class="form-row"><label>오너</label><input id="s-owner"></div>

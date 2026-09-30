@@ -23,8 +23,8 @@ router.post('/collect-all', async (req, res) => {
 router.post('/:id/collect', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM sources WHERE id = $1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  if (!['rss', 'institution'].includes(rows[0].method) || !rows[0].url) {
-    return res.status(400).json({ error: 'source must have method=rss or method=institution and a url' });
+  if (!['rss', 'institution', 'structured'].includes(rows[0].method) || !rows[0].url) {
+    return res.status(400).json({ error: 'source must have method=rss, method=institution, or method=structured and a url' });
   }
   const result = await collectBySource(rows[0]);
   // Minimal observability: the HTTP response body isn't visible in platform

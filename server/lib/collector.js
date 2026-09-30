@@ -5,15 +5,18 @@ const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { collectInstitutionSource } = require('./institutionalIngest');
+const { collectStructuredSource } = require('./structuredDataIngest');
 
 // One acquisition-method dispatcher shared by the scheduler and manual
 // "지금 수집"/collect-all — the orchestration loop (due-source selection,
 // backoff, per-source result logging) stays a single shared loop; only
 // what happens *inside* one source's collection differs by method. Adding
-// a third acquisition method later means adding one more branch here, not
+// a fourth acquisition method later means adding one more branch here, not
 // a second scheduler.
 function collectBySource(source) {
-  return source.method === 'institution' ? collectInstitutionSource(source) : collectSource(source);
+  if (source.method === 'institution') return collectInstitutionSource(source);
+  if (source.method === 'structured') return collectStructuredSource(source);
+  return collectSource(source);
 }
 
 const MAX_ITEMS_PER_RUN = 20;
@@ -119,7 +122,7 @@ const FAILURE_BACKOFF_INTERVAL = '1 day';
 async function getDueSources() {
   const { rows } = await pool.query(`
     SELECT * FROM sources
-    WHERE method IN ('rss', 'institution') AND url IS NOT NULL
+    WHERE method IN ('rss', 'institution', 'structured') AND url IS NOT NULL
       AND (last_collected_at IS NULL OR last_collected_at < now() - (frequency_days || ' days')::interval)
       AND (last_error_at IS NULL OR last_error_at < now() - $1::interval)
   `, [FAILURE_BACKOFF_INTERVAL]);
@@ -151,7 +154,7 @@ async function runDueCollections() {
 // stops the rest.
 async function collectAllSourcesNow() {
   const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method IN ('rss', 'institution') AND url IS NOT NULL`
+    `SELECT * FROM sources WHERE method IN ('rss', 'institution', 'structured') AND url IS NOT NULL`
   );
   const results = [];
   for (const source of sources) {
