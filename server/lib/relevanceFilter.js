@@ -14,6 +14,8 @@
 //      reserves) — e.g. "$100 crude shock", Strategic Petroleum Reserve.
 //   2. Oil/fuel physical flows through a named chokepoint — e.g. Hormuz,
 //      Suez, Panama Canal — distinct from bare "shipping" or bare "Iran".
+//      (v2.1: relevant by default, excluded only when a competing
+//      commodity — LNG/coal/natural gas/electricity — is the subject.)
 //   3. Oil-linked maritime regulation — e.g. IMO/MARPOL emissions rules
 //      that change fuel-switching/compliance cost for oil cargo.
 //   4. Edible oils/fats (existing coverage, unchanged) and plant-based
@@ -95,13 +97,22 @@ const CRUDE_REFINED_PATTERNS = [
 const DIESEL_FUEL_TERM = /\b(diesel|bunker fuel)\b/i;
 const MARKET_IMPACT_CONTEXT = /\b(price|prices|expensive|cost|costs|shortage|record high|record low|soaring)\b/i;
 
-// Category 2: oil/fuel physical flows through a named chokepoint. The
-// chokepoint name alone is not enough — production data includes a
-// Hormuz-datelined story that reviewers rejected because its actual
-// subject was an LNG force-majeure, not oil ("Qatar Extends LNG Force
-// Majeure as Hormuz Crisis Drags On"). So the chokepoint must co-occur
-// with an oil/fuel-flow term (still never matching bare "oil" alone
-// elsewhere in this file — this is a narrow, paired check).
+// Category 2: oil/fuel physical flows through a named chokepoint.
+//
+// v2.1: requiring an explicit oil/crude/tanker word alongside the
+// chokepoint name (v2's original gate) turned out to reject most real
+// chokepoint stories reviewers accept — including the exact Hormuz
+// example the category was built around, whose actual production text
+// never says "oil" near "Hormuz". Retrospective validation against the
+// 73-item review dataset showed this gate caused 3 of 7 false negatives
+// (Suez, Panama Canal, and Hormuz itself).
+//
+// So the gate is inverted: a named chokepoint is relevant by default
+// UNLESS the article's primary subject is a competing, non-oil commodity
+// (LNG, coal, natural gas, electricity) — this still excludes the one
+// real false-positive case that motivated the original gate ("Qatar
+// Extends LNG Force Majeure as Hormuz Crisis Drags On"), without
+// requiring oil-specific wording for the common case.
 const CHOKEPOINT_PATTERNS = [
   /\bstrait of hormuz\b/i,
   /\bhormuz\b/i,
@@ -109,7 +120,7 @@ const CHOKEPOINT_PATTERNS = [
   /\bsuez\b/i,
   /\bpanama canal\b/i,
 ];
-const OIL_FLOW_CONTEXT = /\b(oil|crude|petroleum|tanker|barrels?)\b/i;
+const COMPETING_COMMODITY_CONTEXT = /\b(LNG|liquefied natural gas|coal|natural gas|electricity)\b/i;
 
 // Category 3: oil-linked maritime regulation with an explicit named
 // mechanism (IMO/MARPOL emissions frameworks affecting fuel-switching/
@@ -120,16 +131,23 @@ const MARITIME_REGULATION_PATTERNS = [
   /\bISWG-GHG\b/i,
 ];
 
+// Normalizes typographic hyphen variants (e.g. U+2011 non-breaking
+// hyphen, as seen in a real "plant‑based" production title) to a
+// plain ASCII hyphen, so every pattern below only has to spell "-" once.
+function normalizeHyphens(text) {
+  return text.replace(/[‐‑‒]/g, '-');
+}
+
 // title/description are matched together since RSS descriptions are often
 // where the specific oil/fat term appears even when the title is generic.
 function isRelevantToOilFatsScope(title, description) {
-  const text = `${title || ''} ${description || ''}`;
+  const text = normalizeHyphens(`${title || ''} ${description || ''}`);
 
   if (EDIBLE_FAT_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (PLANT_BASED_TERM.test(text) && PLANT_BASED_CONTEXT.test(text)) return true;
   if (CRUDE_REFINED_PATTERNS.some((pattern) => pattern.test(text))) return true;
   if (DIESEL_FUEL_TERM.test(text) && MARKET_IMPACT_CONTEXT.test(text)) return true;
-  if (CHOKEPOINT_PATTERNS.some((pattern) => pattern.test(text)) && OIL_FLOW_CONTEXT.test(text)) return true;
+  if (CHOKEPOINT_PATTERNS.some((pattern) => pattern.test(text)) && !COMPETING_COMMODITY_CONTEXT.test(text)) return true;
   if (MARITIME_REGULATION_PATTERNS.some((pattern) => pattern.test(text))) return true;
 
   return false;

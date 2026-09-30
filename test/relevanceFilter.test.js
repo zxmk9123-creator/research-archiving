@@ -209,3 +209,65 @@ test('isRelevantToOilFatsScope: matches Korean sector names directly', () => {
   assert.equal(isRelevantToOilFatsScope('팜유 가격 상승', null), true);
   assert.equal(isRelevantToOilFatsScope('중앙은행 금리 인상 발표', null), false);
 });
+
+// --- v2.1 chokepoint gate fix — regression fixtures from the 73-item
+// retrospective validation. The gate no longer requires an explicit oil/
+// crude/tanker word alongside the chokepoint name; it's relevant by
+// default unless a competing commodity (LNG/coal/natural gas/
+// electricity) is the article's subject. ---
+
+test('isRelevantToOilFatsScope: Hormuz article without explicit oil/crude/tanker wording is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope(
+      'Iran Says Won’t Soften Demands As Trump Rejects Hormuz Offer',
+      'Iran stuck to its seven-day proposal for reopening the crucial Strait of Hormuz, saying it won’t soften its conditions.'
+    ),
+    true
+  );
+});
+
+test('isRelevantToOilFatsScope: Suez article without explicit oil wording is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope(
+      'Suez return speeds up Savannah India service by 10-14 days',
+      'Two major liners are returning India-Savannah services to the Suez Canal, cutting transit times by up to 14 days.'
+    ),
+    true
+  );
+});
+
+test('isRelevantToOilFatsScope: Panama Canal article without explicit oil wording is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope(
+      'Panama Canal Adds Transit Capacity as Rainfall Brings Relief',
+      'The Panama Canal Authority announced it is easing draft and daily transit restrictions after increased rainfall.'
+    ),
+    true
+  );
+});
+
+test('isRelevantToOilFatsScope: Hormuz article with LNG as the primary subject stays irrelevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope(
+      'Qatar Extends LNG Force Majeure as Hormuz Crisis Drags On',
+      'QatarEnergy has extended the force majeure on LNG deliveries to Asia and Europe by another month, as LNG cargo traffic through the Strait of Hormuz remains largely blocked.'
+    ),
+    false
+  );
+});
+
+// --- Plant-based hyphen normalization ---
+
+test('isRelevantToOilFatsScope: "plant-based" (regular hyphen) is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('A plant-based gut-health push', 'The company focuses on plant-based nutrition.'),
+    true
+  );
+});
+
+test('isRelevantToOilFatsScope: "plant‑based" (non-breaking hyphen, U+2011) is relevant', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('Gut feeling: Biomel’s UK plant‑based gut‑health push', null),
+    true
+  );
+});
