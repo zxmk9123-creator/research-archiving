@@ -123,7 +123,105 @@ const TRUST_GRADE_EXPLANATION_HTML = `<details class="section">
       </p>
     </details>`;
 
-async function renderArchive(query = {}) {
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Home carousel auto-advance timers — tracked globally so router() can
+// clear them on every navigation (including away from Home), otherwise a
+// setInterval from a previous renderHome() call keeps firing against
+// detached DOM after app.innerHTML is replaced by whichever page comes
+// next.
+let homeCarouselIntervals = [];
+function clearHomeCarouselIntervals() {
+  homeCarouselIntervals.forEach(clearInterval);
+  homeCarouselIntervals = [];
+}
+
+// Wires prev/next + 10s auto-advance for one Home carousel module. A
+// module with 0 or 1 slides (3 or fewer items) has nothing to advance
+// through, so its arrows are simply disabled rather than left to no-op.
+function initHomeCarousel(containerEl) {
+  const track = containerEl.querySelector('.home-carousel-track');
+  const slides = track.querySelectorAll('.home-carousel-slide');
+  const prevBtn = containerEl.querySelector('.home-carousel-nav.prev');
+  const nextBtn = containerEl.querySelector('.home-carousel-nav.next');
+  const total = slides.length;
+  if (total <= 1) {
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+  let index = 0;
+  function render() {
+    track.style.transform = `translateX(-${index * 100}%)`;
+  }
+  function startTimer() {
+    const timer = setInterval(() => {
+      index = (index + 1) % total;
+      render();
+    }, 10000);
+    homeCarouselIntervals.push(timer);
+  }
+  function go(dir) {
+    index = (index + dir + total) % total;
+    render();
+    clearHomeCarouselIntervals();
+    startTimer();
+  }
+  prevBtn.onclick = () => go(-1);
+  nextBtn.onclick = () => go(1);
+  startTimer();
+}
+
+// heading/entry area of each module is clickable (navigates to the
+// dedicated full-list page); the grid itself reuses the existing
+// itemCard()/Detail-navigation component unchanged.
+function homeCarouselModule(heading, moduleItems, targetHash, importantIds, savedIds) {
+  const slides = chunk(moduleItems, 3);
+  const headerHtml = `<div class="home-module-header" onclick="location.hash='${targetHash}'">
+    <h2>${heading}</h2><span class="home-module-arrow">›</span>
+  </div>`;
+  if (!slides.length) {
+    return `<div class="home-module">${headerHtml}<p class="meta">표시할 자료가 없습니다.</p></div>`;
+  }
+  return `<div class="home-module">
+    ${headerHtml}
+    <div class="home-carousel">
+      <button type="button" class="home-carousel-nav prev" aria-label="이전 자료">‹</button>
+      <div class="home-carousel-viewport">
+        <div class="home-carousel-track">
+          ${slides.map((slide) => `<div class="home-carousel-slide">${slide.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>`).join('')}
+        </div>
+      </div>
+      <button type="button" class="home-carousel-nav next" aria-label="다음 자료">›</button>
+    </div>
+  </div>`;
+}
+
+async function renderHome() {
+  const [items, ranking] = await Promise.all([
+    api('/items?status=Published'),
+    api('/picks/ranking').catch(() => []),
+  ]);
+  const importantIds = new Set(ranking.map((r) => r.id));
+  const savedIds = getPersonalSaveIds();
+  const latestItems = items.slice(0, 9);
+
+  app.innerHTML = `
+    <h1>Home</h1>
+    <p class="page-lede">유지 시장 리서치 아카이브의 최신 소식과 전체 자료를 확인하세요.</p>
+    ${homeCarouselModule('최신 자료', latestItems, '#/latest', importantIds, savedIds)}
+    ${homeCarouselModule('전체 결과', items, '#/archive', importantIds, savedIds)}
+  `;
+
+  document.querySelectorAll('.home-carousel').forEach((el) => initHomeCarousel(el));
+}
+
+async function renderArchive(query = {}, opts = {}) {
+  const mode = opts.mode === 'latest' ? 'latest' : 'all';
   const [sectors, usages, sources, items, ranking] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
     api('/picks/ranking').catch(() => []),
@@ -185,8 +283,8 @@ async function renderArchive(query = {}) {
       </div>`;
 
   app.innerHTML = `
-    <h1>Research Archive</h1>
-    <p class="page-lede">오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.</p>
+    <h1>${mode === 'latest' ? '최신 자료' : 'Research Archive'}</h1>
+    <p class="page-lede">${mode === 'latest' ? '가장 최근에 발행된 유지 시장 리서치입니다. 아래 필터로 좁혀볼 수 있습니다.' : '오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.'}</p>
     ${TRUST_GRADE_EXPLANATION_HTML}
     <div class="archive-tabs">${viewTabsHtml}</div>
     <div class="archive">
@@ -217,10 +315,10 @@ async function renderArchive(query = {}) {
         </div>
       </div>
 
-      <div class="section" style="margin-top:0">
+      ${mode === 'all' ? `<div class="section" style="margin-top:0">
         <h2>최신 자료</h2>
         <div class="grid">${latest.map((it) => itemCard(it, importantIds, savedIds)).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
-      </div>
+      </div>` : ''}
 
       <details class="section">
         <summary>팀 Pick · 많이 본 자료</summary>
@@ -229,8 +327,8 @@ async function renderArchive(query = {}) {
         </table>
       </details>
 
-      <div class="section">
-        <div class="section-header"><h2>전체 결과</h2><span class="count">${visibleItems.length}개</span></div>
+      <div class="section" style="${mode === 'latest' ? 'margin-top:0' : ''}">
+        <div class="section-header"><h2>${mode === 'latest' ? '최신 자료' : '전체 결과'}</h2><span class="count">${visibleItems.length}개</span></div>
         ${emptyState}
         <div class="grid">${visibleItems.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
       </div>
@@ -869,8 +967,14 @@ function updateActiveNavTab(path) {
 async function router() {
   const { path, param, query } = parseHash();
   updateActiveNavTab(path);
+  // Leaving Home (or re-rendering it) must stop its carousels' setInterval
+  // timers before the next page's render replaces app.innerHTML — otherwise
+  // they keep firing against detached DOM.
+  clearHomeCarouselIntervals();
   try {
-    if (path === 'home' || path === '' || path === 'archive') await renderArchive(query);
+    if (path === 'home' || path === '') await renderHome();
+    else if (path === 'archive') await renderArchive(query);
+    else if (path === 'latest') await renderArchive(query, { mode: 'latest' });
     else if (path === 'detail') {
       await renderDetail(param);
       // The browser can otherwise preserve the previous page's scroll
@@ -889,6 +993,6 @@ async function router() {
 
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
-  if (!location.hash) location.hash = '#/archive';
+  if (!location.hash) location.hash = '#/home';
   router();
 });

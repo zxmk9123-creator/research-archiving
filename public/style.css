@@ -96,6 +96,35 @@ p { margin: 0; }
 @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
 
+/* Home entry modules: compact carousel showing 3 items at a time, with
+   the heading itself acting as the link to the module's dedicated
+   full-list page. Kept deliberately minimal — no card/container chrome
+   beyond the existing .card component and a subtle circular arrow. */
+.home-module { margin-bottom: var(--sp-7); }
+.home-module-header { display: flex; align-items: center; gap: 4px; cursor: pointer; margin-bottom: var(--sp-4); width: fit-content; }
+.home-module-header:hover h2 { color: var(--action); }
+.home-module-header h2 { margin: 0; }
+.home-module-arrow { color: var(--text-tertiary); font-size: 20px; line-height: 1; }
+.home-module-header:hover .home-module-arrow { color: var(--action); }
+
+.home-carousel { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }
+.home-carousel-track { display: flex; transition: transform 0.4s ease; }
+.home-carousel-slide {
+  min-width: 100%; flex-shrink: 0;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+}
+@media (max-width: 900px) { .home-carousel-slide { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .home-carousel-slide { grid-template-columns: 1fr; } }
+
+.home-carousel-nav {
+  flex-shrink: 0; width: 32px; height: 32px; margin-top: 60px;
+  border: 1px solid var(--border); border-radius: 50%; background: none;
+  color: var(--text-tertiary); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.home-carousel-nav:hover { color: var(--text); border-color: var(--border-strong); }
+.home-carousel-nav:disabled { opacity: .35; cursor: default; }
+
 /* ---------------------------------------------------------------------
    Editorial content module — image (or source-identity fallback) sits
    outside/above the text, not wrapped in a bordered/shadowed card.
