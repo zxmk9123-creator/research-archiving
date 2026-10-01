@@ -124,7 +124,7 @@ const FAILURE_BACKOFF_INTERVAL = '1 day';
 async function getDueSources() {
   const { rows } = await pool.query(`
     SELECT * FROM sources
-    WHERE method IN ('rss', 'institution', 'structured') AND url IS NOT NULL
+    WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL
       AND (last_collected_at IS NULL OR last_collected_at < now() - (frequency_days || ' days')::interval)
       AND (last_error_at IS NULL OR last_error_at < now() - $1::interval)
   `, [FAILURE_BACKOFF_INTERVAL]);
@@ -156,7 +156,7 @@ async function runDueCollections() {
 // stops the rest.
 async function collectAllSourcesNow() {
   const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method IN ('rss', 'institution', 'structured') AND url IS NOT NULL`
+    `SELECT * FROM sources WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL`
   );
   const results = [];
   for (const source of sources) {

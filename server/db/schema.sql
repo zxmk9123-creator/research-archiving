@@ -362,13 +362,31 @@ INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_
 SELECT 'IFPRI Publications', 'International Food Policy Research Institute', 'https://www.ifpri.org/publications/', 'institution', 14, 'poc-institutional', 'A'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.ifpri.org/publications/');
 
--- Seed: Web Research Discovery PoC source (method='crawl', repurposing
--- the previously-unimplemented 'crawl' enum value already present in the
--- sources_method_check constraint above — no schema migration needed).
--- Unlike every other method, `url` here holds a fixed, hand-written
--- search query rather than a listing page or file URL — see
--- server/lib/adapters/webSearch.js and server/lib/webDiscoveryIngest.js.
--- Query is anchored to the existing "oil/fat regulation" research scope.
+-- Seed: Web Research Discovery Query Registry v1 (method='crawl',
+-- repurposing the previously-unimplemented 'crawl' enum value already
+-- present in the sources_method_check constraint above — no schema
+-- migration needed). Unlike every other method, `url` here holds a
+-- fixed, hand-written search query rather than a listing page or file
+-- URL — see server/lib/adapters/webSearch.js and
+-- server/lib/webDiscoveryIngest.js. The "registry" is just these rows:
+-- items.source_id already gives every discovered item full provenance
+-- (which query/scope found it) via the normal FK, so no new column or
+-- table is needed to track query identity.
+--
+-- One fixed query per existing research scope — never AI-generated,
+-- never expanded automatically:
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'Web Discovery: palm oil export tariff regulation', NULL, 'palm oil export tariff regulation', 'crawl', 7, 'poc-web-discovery', 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'palm oil export tariff regulation' AND method = 'crawl');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'Web Discovery: crude oil price OPEC supply policy', NULL, 'crude oil price OPEC supply policy', 'crawl', 7, 'poc-web-discovery', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'crude oil price OPEC supply policy' AND method = 'crawl');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'Web Discovery: vegetable oil tanker freight rates shipping', NULL, 'vegetable oil tanker freight rates shipping', 'crawl', 7, 'poc-web-discovery', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'vegetable oil tanker freight rates shipping' AND method = 'crawl');
+
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'Web Discovery: Wilmar Cargill palm oil investment expansion', NULL, 'Wilmar Cargill palm oil investment expansion', 'crawl', 7, 'poc-web-discovery', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'Wilmar Cargill palm oil investment expansion' AND method = 'crawl');
