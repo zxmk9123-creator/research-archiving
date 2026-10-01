@@ -361,3 +361,14 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://thedocs.worldbank.o
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'IFPRI Publications', 'International Food Policy Research Institute', 'https://www.ifpri.org/publications/', 'institution', 14, 'poc-institutional', 'A'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'https://www.ifpri.org/publications/');
+
+-- Seed: Web Research Discovery PoC source (method='crawl', repurposing
+-- the previously-unimplemented 'crawl' enum value already present in the
+-- sources_method_check constraint above — no schema migration needed).
+-- Unlike every other method, `url` here holds a fixed, hand-written
+-- search query rather than a listing page or file URL — see
+-- server/lib/adapters/webSearch.js and server/lib/webDiscoveryIngest.js.
+-- Query is anchored to the existing "oil/fat regulation" research scope.
+INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
+SELECT 'Web Discovery: palm oil export tariff regulation', NULL, 'palm oil export tariff regulation', 'crawl', 7, 'poc-web-discovery', 'B'
+WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'palm oil export tariff regulation' AND method = 'crawl');

@@ -6,16 +6,18 @@ const { generateAiDraftForItem } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { collectInstitutionSource } = require('./institutionalIngest');
 const { collectStructuredSource } = require('./structuredDataIngest');
+const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
 
 // One acquisition-method dispatcher shared by the scheduler and manual
 // "지금 수집"/collect-all — the orchestration loop (due-source selection,
 // backoff, per-source result logging) stays a single shared loop; only
 // what happens *inside* one source's collection differs by method. Adding
-// a fourth acquisition method later means adding one more branch here, not
+// a fifth acquisition method later means adding one more branch here, not
 // a second scheduler.
 function collectBySource(source) {
   if (source.method === 'institution') return collectInstitutionSource(source);
   if (source.method === 'structured') return collectStructuredSource(source);
+  if (source.method === 'crawl') return collectWebDiscoverySource(source);
   return collectSource(source);
 }
 
