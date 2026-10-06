@@ -248,10 +248,17 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 
   await pool.query(`UPDATE items SET ai_status = 'pending', ai_error = NULL WHERE id = $1`, [itemId]);
 
+  // Measures only the provider call itself (not the taxonomy fetch or JSON
+  // parsing before/after it) — started right before providerFn runs, read
+  // in both the success and failure paths below. Stays null if the call
+  // never started (e.g. getTaxonomy() itself throws first).
+  let providerCallStartedAt;
   try {
     const taxonomy = await getTaxonomy();
     const userPrompt = buildUserPrompt(item, taxonomy, extractedText);
+    providerCallStartedAt = Date.now();
     const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
+    const latencyMs = Date.now() - providerCallStartedAt;
     // providerFn is callProviderWithFallback by default ({ text, provider }),
     // but a caller (e.g. a test, or an explicit single-provider override)
     // may still pass a function returning a bare string — accept both
@@ -271,18 +278,30 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
          ai_eligibility_reason = $6,
          ai_insight = $7,
          ai_error = NULL,
+         ai_failure_type = NULL,
+         ai_latency_ms = $8,
          ai_generated_at = now()
-       WHERE id = $8`,
-      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, itemId]
+       WHERE id = $9`,
+      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, latencyMs, itemId]
     );
     // Operational visibility: which provider actually produced this draft
     // (useful once a fallback chain means it isn't always the same one).
-    console.log(`AI draft generated for item ${itemId} via ${usedProvider || 'unknown provider'}`);
+    console.log(`AI draft generated for item ${itemId} via ${usedProvider || 'unknown provider'} latency_ms=${latencyMs}`);
     return { ok: true };
   } catch (err) {
     const reason = sanitizeError(err);
-    console.error(`AI draft generation failed for item ${itemId}: ${reason}`);
-    await pool.query(`UPDATE items SET ai_status = 'failed', ai_error = $1 WHERE id = $2`, [reason, itemId]);
+    const latencyMs = providerCallStartedAt ? Date.now() - providerCallStartedAt : null;
+    // err.failureType (set by provider.js's markFallback) is only present
+    // for a provider/transport-level failure (timeout/rate_limit/
+    // server_error/auth/network/empty_response) — absent for a downstream
+    // application error (e.g. invalid-JSON draft), which is exactly the
+    // distinction this field exists to preserve.
+    const failureType = err.failureType || null;
+    console.error(`AI draft generation failed for item ${itemId}: ${reason} failure_type=${failureType || 'none'} latency_ms=${latencyMs}`);
+    await pool.query(
+      `UPDATE items SET ai_status = 'failed', ai_error = $1, ai_failure_type = $2, ai_latency_ms = $3 WHERE id = $4`,
+      [reason, failureType, latencyMs, itemId]
+    );
     return { ok: false, error: reason };
   }
 }

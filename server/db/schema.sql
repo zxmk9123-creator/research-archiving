@@ -79,6 +79,17 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_suggested_usages INTEGER[] DEFAULT
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_error TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_generated_at TIMESTAMPTZ;
 
+-- Minimal persistent telemetry for judging AI provider (FreeLLMAPI) call
+-- stability over several days without relying on platform log retention.
+-- ai_failure_type mirrors provider.js's err.failureType (timeout/
+-- rate_limit/server_error/auth/network/empty_response) and is NULL for a
+-- successful call or a non-provider (application/contract) failure.
+-- ai_latency_ms is the wall-clock duration of the provider call itself
+-- (success or failure), NULL if the call never started (e.g. taxonomy
+-- fetch failed first).
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_failure_type TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_latency_ms INTEGER;
+
 -- Archive-eligibility recommendation: advisory only, same suggestion-layer
 -- convention as the rest of ai_* — never auto-applied to status. NULL means
 -- no recommendation yet (e.g. ai_status is not 'completed').

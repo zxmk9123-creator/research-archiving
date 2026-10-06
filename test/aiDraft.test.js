@@ -10,6 +10,7 @@ const {
   factOrUnconfirmed,
   parseEligible,
   applyAiDraftIfEligible,
+  generateAiDraftForItem,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
   SYSTEM_PROMPT,
@@ -550,6 +551,84 @@ test('applyAiDraftIfEligible: does NOT publish when only a sector (no usage) end
     const result = await applyAiDraftIfEligible(7);
     assert.equal(result.archived, false);
     assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+// --- generateAiDraftForItem: persistent telemetry (ai_latency_ms / ai_failure_type) ---
+
+function mockTaxonomyAnd(itemsHandler) {
+  return mockPool([
+    ['SELECT * FROM items WHERE id', itemsHandler],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '식용' }] })],
+  ]);
+}
+
+function delay(ms, value) {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+test('generateAiDraftForItem: a successful call persists ai_latency_ms and clears ai_failure_type', async () => {
+  const { calls, restore } = mockTaxonomyAnd(() => ({ rows: [{ id: 1, title: 't', summary: 's' }] }));
+  try {
+    const providerFn = () => delay(15, { text: fullResponse(), provider: 'freellmapi' });
+    const result = await generateAiDraftForItem(1, providerFn);
+    assert.equal(result.ok, true);
+
+    const completedCall = calls.find((c) => c.text.includes("ai_status = 'completed'"));
+    assert.ok(completedCall, 'expected the completed UPDATE to run');
+    assert.match(completedCall.text, /ai_failure_type = NULL/);
+    assert.match(completedCall.text, /ai_latency_ms = \$8/);
+    const latencyMs = completedCall.params[7];
+    assert.equal(typeof latencyMs, 'number');
+    assert.ok(latencyMs >= 15, `expected latency >= 15ms, got ${latencyMs}`);
+  } finally {
+    restore();
+  }
+});
+
+test('generateAiDraftForItem: a provider timeout persists ai_failure_type=timeout and a non-null ai_latency_ms', async () => {
+  const { calls, restore } = mockTaxonomyAnd(() => ({ rows: [{ id: 2, title: 't', summary: 's' }] }));
+  try {
+    const providerFn = async () => {
+      await delay(10);
+      const err = new Error('AI provider unavailable (timeout)');
+      err.transient = true;
+      err.failureType = 'timeout';
+      throw err;
+    };
+    const result = await generateAiDraftForItem(2, providerFn);
+    assert.equal(result.ok, false);
+
+    const failedCall = calls.find((c) => c.text.includes("ai_status = 'failed'"));
+    assert.ok(failedCall, 'expected the failed UPDATE to run');
+    const [reason, failureType, latencyMs, itemId] = failedCall.params;
+    assert.match(reason, /timeout/);
+    assert.equal(failureType, 'timeout');
+    assert.equal(typeof latencyMs, 'number');
+    assert.ok(latencyMs >= 10, `expected latency >= 10ms, got ${latencyMs}`);
+    assert.equal(itemId, 2);
+  } finally {
+    restore();
+  }
+});
+
+test('generateAiDraftForItem: a non-provider (application) failure persists ai_failure_type=NULL', async () => {
+  const { calls, restore } = mockTaxonomyAnd(() => ({ rows: [{ id: 3, title: 't', summary: 's' }] }));
+  try {
+    // No .failureType set — e.g. an invalid-JSON draft response, same as
+    // runProviderChain's distinction between provider and application errors.
+    const providerFn = () => delay(5, { text: 'not valid json', provider: 'freellmapi' });
+    const result = await generateAiDraftForItem(3, providerFn);
+    assert.equal(result.ok, false);
+
+    const failedCall = calls.find((c) => c.text.includes("ai_status = 'failed'"));
+    assert.ok(failedCall);
+    const [, failureType, latencyMs] = failedCall.params;
+    assert.equal(failureType, null);
+    assert.equal(typeof latencyMs, 'number');
   } finally {
     restore();
   }
