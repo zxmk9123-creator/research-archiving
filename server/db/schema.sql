@@ -79,6 +79,30 @@ FROM (VALUES
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Second Discovery Query Registry expansion: the initial 12 queries were
+-- overwhelmingly news/article-shaped (see the 7-day backfill audit) with
+-- zero research-literature coverage. These 8 add peer-reviewed/working-
+-- paper research, institutional white papers, oilseed/shipping market
+-- research, and company/IR — using domain-intent hints (journal, working
+-- paper, site:edu/ssrn.com/researchgate.net for literature; investor
+-- relations/annual report for company/IR) rather than any single
+-- hardcoded publisher. Same idempotent INSERT...WHERE NOT EXISTS pattern,
+-- same crawl/is_daily_discovery=true/7-day convention as the rest of the
+-- registry — existing queries and pipeline behavior are untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: palm oil soybean oil peer-reviewed journal research', 'palm oil soybean oil price volatility peer-reviewed journal research study'),
+  ('Web Discovery: edible oil market working paper academic research', 'edible oil vegetable oil market working paper academic research site:ssrn.com OR site:researchgate.net OR site:edu'),
+  ('Web Discovery: institutional white paper oilseed market outlook', 'oilseed vegetable oil market outlook institutional white paper research institute'),
+  ('Web Discovery: commodity oil price forecast research institute', 'commodity edible oil price forecast research institute working paper'),
+  ('Web Discovery: vegetable oil tanker shipping economics research paper', 'vegetable oil tanker freight rate shipping economics academic research paper'),
+  ('Web Discovery: palm oil sustainability journal study', 'palm oil sustainability deforestation journal study peer-reviewed research'),
+  ('Web Discovery: edible oil company investor relations earnings', 'ADM Bunge Wilmar Cargill edible oils investor relations earnings report'),
+  ('Web Discovery: palm oil company annual report investor presentation', 'palm oil company annual report investor presentation')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- The 4 pre-existing Web Discovery sources are also part of the Daily
 -- Discovery registry — backfill the flag on them by name (no-op once set).
 UPDATE sources SET is_daily_discovery = true
