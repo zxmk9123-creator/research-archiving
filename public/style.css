@@ -73,7 +73,8 @@ body {
   padding: 16px 28px; background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
 }
-.brand { justify-self: start; font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
+.brand { justify-self: start; display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
+.brand-icon { display: block; flex-shrink: 0; }
 .topbar nav { grid-column: 2; justify-self: center; display: flex; align-items: center; gap: 4px; }
 .topbar nav a {
   padding: 8px 14px; border-radius: var(--radius-control); color: var(--text-secondary); text-decoration: none;
