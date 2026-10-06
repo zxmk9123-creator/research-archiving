@@ -84,3 +84,28 @@ test('searchWeb: throws a clear error on a non-ok API response', () => withApiKe
     restore();
   }
 }));
+
+// --- freshness: optional date-range pass-through (e.g. a one-time 7-day
+// backfill), omitted by every existing caller so their query is unaffected ---
+
+test('searchWeb: omits the freshness param entirely when not given', () => withApiKey('test-key', async () => {
+  let requestedUrl;
+  const restore = mockFetch(async (url) => { requestedUrl = url; return braveResponse([]); });
+  try {
+    await searchWeb('q');
+    assert.ok(!requestedUrl.includes('freshness'));
+  } finally {
+    restore();
+  }
+}));
+
+test('searchWeb: passes options.freshness through as the Brave freshness param', () => withApiKey('test-key', async () => {
+  let requestedUrl;
+  const restore = mockFetch(async (url) => { requestedUrl = url; return braveResponse([]); });
+  try {
+    await searchWeb('q', { freshness: 'pw' });
+    assert.match(requestedUrl, /freshness=pw/);
+  } finally {
+    restore();
+  }
+}));

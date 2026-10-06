@@ -20,9 +20,13 @@ const extractMetadataModule = require('./extractMetadata');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 
-async function collectWebDiscoverySource(source) {
+// searchOptions is an optional pass-through to searchWeb() (e.g.
+// { freshness: 'pw' } for a date-bounded backfill run) — omitted by every
+// existing caller (collector.js's hourly scheduler, dailyDiscovery.js),
+// which keeps searching with no date constraint, unchanged.
+async function collectWebDiscoverySource(source, searchOptions = {}) {
   try {
-    const candidates = (await webSearchAdapter.searchWeb(source.url)).slice(0, webSearchAdapter.MAX_RESULTS);
+    const candidates = (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
 
     let filtered = 0;
     let archived = 0;

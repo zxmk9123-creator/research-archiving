@@ -11,11 +11,17 @@
 const BRAVE_SEARCH_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const MAX_RESULTS = 10;
 
-async function searchWeb(query) {
+// options.freshness maps directly to Brave's `freshness` param (e.g. 'pd'
+// past day, 'pw' past week, 'pm' past month, or an explicit
+// 'YYYY-MM-DDtoYYYY-MM-DD' range) — optional, omitted entirely by default
+// so every existing caller (the hourly scheduler, the daily Discovery job)
+// keeps searching with no date constraint, unchanged.
+async function searchWeb(query, options = {}) {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) throw new Error('no BRAVE_SEARCH_API_KEY configured');
 
-  const url = `${BRAVE_SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}&count=${MAX_RESULTS}`;
+  const freshnessParam = options.freshness ? `&freshness=${encodeURIComponent(options.freshness)}` : '';
+  const url = `${BRAVE_SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}&count=${MAX_RESULTS}${freshnessParam}`;
   const res = await fetch(url, {
     headers: {
       Accept: 'application/json',

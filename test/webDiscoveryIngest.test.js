@@ -186,3 +186,44 @@ test('collectWebDiscoverySource: a search/API-level failure records last_error a
     restore();
   }
 });
+
+// --- optional searchOptions pass-through (e.g. a one-time 7-day backfill's
+// { freshness: 'pw' }) — omitted by every existing caller (collector.js's
+// hourly scheduler, dailyDiscovery.js), which keeps calling searchWeb(url)
+// with no second argument, unchanged. ---
+
+test('collectWebDiscoverySource: passes searchOptions through to searchWeb unchanged', () => withNoProviders(async () => {
+  let receivedOptions;
+  const restoreSearch = mockSearchWeb((query, options) => {
+    receivedOptions = options;
+    return [];
+  });
+  const { restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+  ]);
+  try {
+    await collectWebDiscoverySource(webDiscoverySource(), { freshness: 'pw' });
+    assert.deepEqual(receivedOptions, { freshness: 'pw' });
+  } finally {
+    restoreSearch();
+    restore();
+  }
+}));
+
+test('collectWebDiscoverySource: defaults to an empty searchOptions object when omitted', () => withNoProviders(async () => {
+  let receivedOptions;
+  const restoreSearch = mockSearchWeb((query, options) => {
+    receivedOptions = options;
+    return [];
+  });
+  const { restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+  ]);
+  try {
+    await collectWebDiscoverySource(webDiscoverySource());
+    assert.deepEqual(receivedOptions, {});
+  } finally {
+    restoreSearch();
+    restore();
+  }
+}));
