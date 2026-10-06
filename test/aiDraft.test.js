@@ -9,6 +9,7 @@ const {
   isUngroundedGeneralization,
   factOrUnconfirmed,
   parseEligible,
+  parseQaDecision,
   applyAiDraftIfEligible,
   generateAiDraftForItem,
   UNCONFIRMED,
@@ -265,6 +266,43 @@ test('parseDraftResponse: non-array suggestion fields degrade to empty arrays, n
   assert.deepEqual(draft.suggestedUsages, []);
 });
 
+// --- Publication Quality Gate v1: parseQaDecision / parseDraftResponse ---
+
+test('parseQaDecision: accepts PASS/HOLD/REJECT as-is', () => {
+  assert.equal(parseQaDecision('PASS'), 'PASS');
+  assert.equal(parseQaDecision('HOLD'), 'HOLD');
+  assert.equal(parseQaDecision('REJECT'), 'REJECT');
+});
+
+test('parseQaDecision: is case-insensitive and trims whitespace', () => {
+  assert.equal(parseQaDecision('pass'), 'PASS');
+  assert.equal(parseQaDecision('  Reject  '), 'REJECT');
+});
+
+test('parseQaDecision: fails closed to HOLD for anything missing, malformed, or unrecognized — never guesses PASS', () => {
+  assert.equal(parseQaDecision(undefined), 'HOLD');
+  assert.equal(parseQaDecision(null), 'HOLD');
+  assert.equal(parseQaDecision(''), 'HOLD');
+  assert.equal(parseQaDecision('maybe'), 'HOLD');
+  assert.equal(parseQaDecision(true), 'HOLD');
+});
+
+test('parseDraftResponse: extracts publication_decision/publication_reason from a valid response', () => {
+  const draft = parseDraftResponse(fullResponse({ publication_decision: 'PASS', publication_reason: '유의미한 수치와 정책 변화를 포함한 원본 기사다.' }), taxonomy);
+  assert.equal(draft.qaDecision, 'PASS');
+  assert.equal(draft.qaReason, '유의미한 수치와 정책 변화를 포함한 원본 기사다.');
+});
+
+test('parseDraftResponse: a response that omits publication_decision defaults to HOLD, not PASS', () => {
+  const draft = parseDraftResponse(fullResponse(), taxonomy);
+  assert.equal(draft.qaDecision, 'HOLD');
+});
+
+test('parseDraftResponse: missing publication_reason falls back to 미확보', () => {
+  const draft = parseDraftResponse(fullResponse({ publication_decision: 'REJECT', publication_reason: '' }), taxonomy);
+  assert.equal(draft.qaReason, UNCONFIRMED);
+});
+
 test('factOrUnconfirmed: returns the trimmed value when present', () => {
   assert.equal(factOrUnconfirmed('  톤당 50달러  '), '톤당 50달러');
 });
@@ -484,7 +522,7 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
-        id: 42, ai_status: 'completed', ai_eligible: true,
+        id: 42, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
         ai_summary: '요약문', ai_insight: '인사이트', type: '보고서',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
@@ -509,7 +547,7 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
-        id: 43, ai_status: 'completed', ai_eligible: true,
+        id: 43, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
         ai_summary: 's', ai_insight: 'i', type: '뉴스',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
@@ -528,7 +566,7 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
 test('applyAiDraftIfEligible: skips sector/usage inserts when none were suggested', async () => {
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
-      rows: [{ id: 5, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
+      rows: [{ id: 5, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
     })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
   ]);
@@ -547,7 +585,7 @@ test('applyAiDraftIfEligible: skips sector/usage inserts when none were suggeste
 test('applyAiDraftIfEligible: does NOT publish an eligible item with no suggested sectors/usages (no classification)', async () => {
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
-      rows: [{ id: 6, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
+      rows: [{ id: 6, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [], ai_suggested_usages: [] }],
     })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
   ]);
@@ -563,12 +601,75 @@ test('applyAiDraftIfEligible: does NOT publish an eligible item with no suggeste
 test('applyAiDraftIfEligible: does NOT publish when only a sector (no usage) ends up classified', async () => {
   const { calls, restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({
-      rows: [{ id: 7, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [] }],
+      rows: [{ id: 7, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [] }],
     })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: false }] })],
   ]);
   try {
     const result = await applyAiDraftIfEligible(7);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+// --- Publication Quality Gate v1: ai_eligible=true + valid classification
+// is no longer sufficient by itself — ai_qa_decision must also be 'PASS' ---
+
+test('applyAiDraftIfEligible: does NOT publish when ai_qa_decision is REJECT, even though eligible and fully classified (low-value/repost example)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 50, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'REJECT',
+        ai_summary: '팜유 가격: 1,234원/kg', ai_insight: 'i', type: '뉴스',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(50);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: does NOT publish when ai_qa_decision is HOLD, even though eligible and fully classified (stale/borderline example)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 51, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'HOLD',
+        ai_summary: 's', ai_insight: 'i', type: '보고서',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(51);
+    assert.equal(result.archived, false);
+    assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: does NOT publish when ai_qa_decision is NULL (e.g. an item generated before this gate existed)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 52, ai_status: 'completed', ai_eligible: true, ai_qa_decision: null,
+        ai_summary: 's', ai_insight: 'i', type: '보고서',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(52);
     assert.equal(result.archived, false);
     assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
   } finally {
@@ -600,10 +701,31 @@ test('generateAiDraftForItem: a successful call persists ai_latency_ms and clear
     const completedCall = calls.find((c) => c.text.includes("ai_status = 'completed'"));
     assert.ok(completedCall, 'expected the completed UPDATE to run');
     assert.match(completedCall.text, /ai_failure_type = NULL/);
-    assert.match(completedCall.text, /ai_latency_ms = \$8/);
-    const latencyMs = completedCall.params[7];
+    assert.match(completedCall.text, /ai_latency_ms = \$10/);
+    const latencyMs = completedCall.params[9];
     assert.equal(typeof latencyMs, 'number');
     assert.ok(latencyMs >= 15, `expected latency >= 15ms, got ${latencyMs}`);
+  } finally {
+    restore();
+  }
+});
+
+test('generateAiDraftForItem: persists ai_qa_decision/ai_qa_reason from the Publication Quality Gate', async () => {
+  const { calls, restore } = mockTaxonomyAnd(() => ({ rows: [{ id: 60, title: 't', summary: 's' }] }));
+  try {
+    const providerFn = async () => ({
+      text: fullResponse({ publication_decision: 'REJECT', publication_reason: '가격 티커만 있는 저가치 페이지다.' }),
+      provider: 'freellmapi',
+    });
+    const result = await generateAiDraftForItem(60, providerFn);
+    assert.equal(result.ok, true);
+
+    const completedCall = calls.find((c) => c.text.includes("ai_status = 'completed'"));
+    assert.ok(completedCall);
+    assert.match(completedCall.text, /ai_qa_decision = \$8/);
+    assert.match(completedCall.text, /ai_qa_reason = \$9/);
+    assert.equal(completedCall.params[7], 'REJECT');
+    assert.equal(completedCall.params[8], '가격 티커만 있는 저가치 페이지다.');
   } finally {
     restore();
   }

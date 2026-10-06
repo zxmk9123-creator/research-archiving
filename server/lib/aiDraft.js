@@ -26,7 +26,7 @@ const SYSTEM_PROMPT = `You are a research-archiving assistant for an oils & fats
 Given a title and (if available) a short description of a collected article, respond with STRICT JSON ONLY — no markdown fences, no commentary, nothing before or after the JSON object.
 
 The JSON object must have exactly this shape:
-{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "insight": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[]}
+{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "insight": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[], "publication_decision": "PASS"|"HOLD"|"REJECT", "publication_reason": string}
 
 Rules:
 - eligible: evaluate in this order, and only then decide true/false. Do NOT use "has specific facts/figures" by itself as the test — a fact-dense article can still be ineligible, and a sparse one can still be eligible.
@@ -44,6 +44,16 @@ Rules:
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
 - If you cannot confidently choose any tag, return an empty array for that field rather than guessing.
+- publication_decision / publication_reason: a FINAL publication quality gate, separate and independent from "eligible" above (eligible only governs whether a human reviewer should look at this soon; publication_decision governs whether it may ever be auto-published). Evaluate at minimum:
+  (1) Oil & Fats market relevance — is this actually about oil/fats markets, trade, policy, or adjacent logistics/feedstocks?
+  (2) substantive research or reusable information value — does it contain real analysis, data, or reporting, not just a routine price snapshot, bare ticker/quote page, or a one-line stub?
+  (3) source/original-content quality — is this original reporting/analysis, not a thin aggregator page with no real content of its own?
+  (4) obvious repost/duplicate — is this clearly a syndicated copy or re-publication of content that adds nothing new?
+  (5) freshness where applicable — if the article concerns a point-in-time event or figure, is it being presented as current when it is actually stale/outdated?
+  - "PASS": the material clearly satisfies all of the above — safe to auto-publish as-is.
+  - "REJECT": the material clearly fails one or more criteria — irrelevant to oil/fats, no substantive content, an obvious repost/duplicate, a bare low-value page (e.g. just a price ticker), or clearly stale content presented as current.
+  - "HOLD": anything that is not confidently PASS or REJECT — insufficient information, borderline quality, or genuine uncertainty. When unsure, you MUST choose "HOLD" — never guess "PASS".
+- publication_reason: one concise Korean sentence explaining the publication_decision verdict, referencing which of the 5 criteria above drove it.
 - You are working only from the title/description given — do not claim to have read a full article.
 - Output ONLY the JSON object.`;
 
@@ -174,6 +184,21 @@ function parseEligible(value) {
   return null;
 }
 
+// Publication Quality Gate v1: a final, independent publish-worthiness
+// verdict (see the prompt rule above), separate from `eligible`. Fail-closed
+// by design — the entire point of this gate is that AI screening/
+// classification succeeding is NOT by itself enough to auto-publish, so
+// anything the model didn't clearly mark PASS (missing, malformed, an
+// unrecognized string, wrong type) becomes HOLD, never a silent PASS.
+const QA_DECISIONS = new Set(['PASS', 'HOLD', 'REJECT']);
+function parseQaDecision(value) {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toUpperCase();
+    if (QA_DECISIONS.has(normalized)) return normalized;
+  }
+  return 'HOLD';
+}
+
 // Pure validation: parses the model's raw text, enforces the contract, and
 // discards any sector/usage id not present in the taxonomy passed in. Never
 // touches the DB — fully unit-testable without a provider or a database.
@@ -217,7 +242,12 @@ function parseDraftResponse(raw, taxonomy) {
     ? [...new Set(parsed.suggested_usages.map(Number))].filter((id) => usageIds.has(id))
     : [];
 
-  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages };
+  const qaDecision = parseQaDecision(parsed.publication_decision);
+  const qaReason = typeof parsed.publication_reason === 'string' && parsed.publication_reason.trim()
+    ? parsed.publication_reason.trim()
+    : UNCONFIRMED;
+
+  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages, qaDecision, qaReason };
 }
 
 async function getTaxonomy() {
@@ -277,12 +307,14 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
          ai_eligible = $5,
          ai_eligibility_reason = $6,
          ai_insight = $7,
+         ai_qa_decision = $8,
+         ai_qa_reason = $9,
          ai_error = NULL,
          ai_failure_type = NULL,
-         ai_latency_ms = $8,
+         ai_latency_ms = $10,
          ai_generated_at = now()
-       WHERE id = $9`,
-      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, latencyMs, itemId]
+       WHERE id = $11`,
+      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, draft.qaDecision, draft.qaReason, latencyMs, itemId]
     );
     // Operational visibility: which provider actually produced this draft
     // (useful once a fallback chain means it isn't always the same one).
@@ -323,10 +355,19 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 // ai_suggested_sectors/ai_suggested_usages become the item's actual tags
 // the same way a reviewer's "적용" action would, just without a human
 // clicking it.
+//
+// Publication Quality Gate v1: ai_eligible alone (screening/classification
+// succeeding) is NOT sufficient to auto-publish — ai_qa_decision must also
+// be the literal string 'PASS' (see parseQaDecision: anything else,
+// including an item generated before this gate existed where the column is
+// NULL, fails closed to HOLD and is excluded here exactly like REJECT).
+// HOLD/REJECT items are untouched by this function — they simply stay
+// whatever they already were (normally Draft), still fully visible and
+// actionable in Review, never silently discarded.
 async function applyAiDraftIfEligible(itemId) {
   const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
   const item = rows[0];
-  if (!item || item.ai_status !== 'completed' || item.ai_eligible !== true) {
+  if (!item || item.ai_status !== 'completed' || item.ai_eligible !== true || item.ai_qa_decision !== 'PASS') {
     return { archived: false };
   }
 
@@ -372,6 +413,7 @@ module.exports = {
   isUngroundedGeneralization,
   factOrUnconfirmed,
   parseEligible,
+  parseQaDecision,
   parseDraftResponse,
   getTaxonomy,
   sanitizeError,

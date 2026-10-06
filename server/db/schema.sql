@@ -190,6 +190,18 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_insight TEXT;
 -- means the reviewer hasn't confirmed or overridden a verdict yet.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS reviewer_eligible BOOLEAN;
 
+-- Publication Quality Gate v1 (aiDraft.js: parseQaDecision/
+-- applyAiDraftIfEligible): a FINAL, independent publish-worthiness verdict,
+-- separate from ai_eligible — ai_eligible alone (screening succeeding) is
+-- no longer sufficient to auto-publish; ai_qa_decision must also be the
+-- literal 'PASS'. HOLD/REJECT (or NULL, e.g. an item generated before this
+-- gate existed) are excluded from auto-publish exactly alike, and simply
+-- leave the item as whatever it already was (normally Draft) — never
+-- retroactively applied to already-Published items, since this column is
+-- only ever set by a fresh generateAiDraftForItem() call.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_qa_decision TEXT CHECK (ai_qa_decision IN ('PASS','HOLD','REJECT'));
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_qa_reason TEXT;
+
 -- Archive / Daily Report split: a Published item's bucket for the Archive
 -- UI's [Archive]/[Daily Report] toggle. Decided deterministically from the
 -- existing `type` taxonomy at publish time (see deriveContentCategory() in
