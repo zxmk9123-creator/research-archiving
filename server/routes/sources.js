@@ -69,21 +69,37 @@ router.post('/backfill-7day-discovery', async (req, res) => {
 });
 
 router.get('/', async (req, res) => {
+  // Staleness only means something for a source that is actively ingested —
+  // a Reference Source Library entry (is_reference=true) is never collected
+  // (method stays 'manual', already excluded from every ingestion query),
+  // so last_collected_at being NULL for it is expected, not a failure.
   const { rows } = await pool.query(`
     SELECT s.*,
-      (s.last_collected_at IS NULL OR s.last_collected_at < now() - (s.frequency_days || ' days')::interval) AS stale
+      (s.is_reference = false AND (s.last_collected_at IS NULL OR s.last_collected_at < now() - (s.frequency_days || ' days')::interval)) AS stale
     FROM sources s ORDER BY s.name
   `);
   res.json(rows);
 });
 
 router.post('/', async (req, res) => {
-  const { name, publisher, url, method, frequency_days, owner, trust_grade } = req.body;
+  const {
+    name, publisher, url, method, frequency_days, owner, trust_grade,
+    is_reference, source_type, region, commodities, coverage_note,
+    access_format, update_frequency, usage_note, last_verified_at, rss_available,
+  } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   const { rows } = await pool.query(
-    `INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [name, publisher || null, url || null, method || 'manual', frequency_days || 1, owner || null, trust_grade || 'A']
+    `INSERT INTO sources (
+       name, publisher, url, method, frequency_days, owner, trust_grade,
+       is_reference, source_type, region, commodities, coverage_note,
+       access_format, update_frequency, usage_note, last_verified_at, rss_available
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+    [
+      name, publisher || null, url || null, method || 'manual', frequency_days || 1, owner || null, trust_grade || 'A',
+      Boolean(is_reference), source_type || null, region || null, commodities || [], coverage_note || null,
+      access_format || [], update_frequency || null, usage_note || null, last_verified_at || null, Boolean(rss_available),
+    ]
   );
   res.status(201).json(rows[0]);
 });

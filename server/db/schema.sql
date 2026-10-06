@@ -51,6 +51,60 @@ ALTER TABLE sources ADD CONSTRAINT sources_method_check CHECK (method IN ('rss',
 -- webDiscoveryIngest.js already prevents re-ingesting the same candidate.
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_daily_discovery BOOLEAN DEFAULT false;
 
+-- Reference Source Library v1: catalogs high-value research/data sources
+-- (authoritative statistics publishers, specification databases, industry
+-- intelligence) that may have no RSS feed and no active ingestion at all,
+-- but are still worth recording for human reference. is_reference is a
+-- pure cataloging flag, deliberately ORTHOGONAL to `method` — `method`
+-- alone still decides active-ingestion eligibility everywhere it already
+-- did (collector.js/dailyDiscovery.js's WHERE method IN (...) clauses are
+-- unchanged), so a reference source simply keeps method='manual' (already
+-- excluded from every ingestion query) exactly like any other manual
+-- source today. rss_available separately records whether RSS exists for
+-- this source at all, independent of whether ingestion via it is active.
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_reference BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS source_type TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS commodities TEXT[] DEFAULT '{}';
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS coverage_note TEXT;
+-- access_format: any mix of web/PDF/XLSX/CSV/API/RSS a source is actually
+-- reachable through — an array since many sources offer more than one
+-- (e.g. a dashboard with both a web UI and a CSV export).
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS access_format TEXT[] DEFAULT '{}';
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS update_frequency TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS usage_note TEXT;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_verified_at DATE;
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS rss_available BOOLEAN NOT NULL DEFAULT false;
+
+-- Seed: a small, representative set of high-value Oil&Fats reference
+-- sources with no RSS feed — authoritative statistics/report publishers a
+-- reviewer should know about even though nothing here is auto-ingested.
+-- Deliberately few: this is a starting catalog, not a bulk directory.
+INSERT INTO sources (name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+SELECT * FROM (VALUES
+  ('USDA FAS PSD Online', 'USDA Foreign Agricultural Service', 'https://apps.fas.usda.gov/psdonline/app/index.html#/app/downloads', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '세계 유지종자 생산·소비·교역 공식 통계(Production, Supply & Distribution), 국가별/품목별 월간 갱신',
+   ARRAY['web','CSV','API'], 'Monthly', 'NBO 작성 시 공급/수요 기초 통계 1차 출처로 사용', '2026-10-01'::date, false),
+  ('MPOB Palm Oil Statistics', 'Malaysian Palm Oil Board', 'https://bepi.mpob.gov.my/index.php/en/', 'manual', 'reference-library', 'A', true,
+   '업계단체 통계', 'Malaysia', ARRAY['팜유'],
+   '말레이시아 팜유 생산·재고·수출 월간 통계, 가격 동향',
+   ARRAY['web','XLSX'], 'Monthly', '말레이시아 팜유 공급측 동향 확인용 1차 출처', '2026-10-01'::date, false),
+  ('GAPKI Palm Oil Statistics', 'Indonesian Palm Oil Association (GAPKI)', 'https://gapki.id/en/news/category/statistic', 'manual', 'reference-library', 'B', true,
+   '업계단체 통계', 'Indonesia', ARRAY['팜유'],
+   '인도네시아 팜유 생산·수출 통계 및 산업 동향 보고서',
+   ARRAY['web','PDF'], 'Monthly', '인도네시아 팜유 공급측 동향 확인용 보조 출처', '2026-10-01'::date, false),
+  ('Bursa Malaysia Derivatives (FCPO)', 'Bursa Malaysia', 'https://www.bursamalaysia.com/trade/trading_resources/derivatives/fcpo', 'manual', 'reference-library', 'A', true,
+   '거래소/가격데이터', 'Malaysia', ARRAY['팜유'],
+   '팜유 선물(FCPO) 가격·거래량 데이터, 시장 벤치마크',
+   ARRAY['web','API'], 'Daily', '팜유 선물가 벤치마크 확인 및 가격·물류 분석 보조 자료', '2026-10-01'::date, false),
+  ('UN Comtrade', 'United Nations Statistics Division', 'https://comtradeplus.un.org/', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '국가간 품목별 수출입 교역 통계(HS 코드 기준), 연/월 단위',
+   ARRAY['web','API','CSV'], 'Monthly', '유지 교역 흐름/무역 통계 교차 검증용', '2026-10-01'::date, false)
+) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- One row per named background job, tracking the last calendar date (in
 -- that job's own reference timezone) it ran — the guard against running
 -- Daily Discovery more than once per day. Generic by job_name rather than

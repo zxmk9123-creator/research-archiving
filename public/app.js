@@ -589,52 +589,106 @@ async function renderDetail(id) {
   };
 }
 
-async function renderSources() {
+// Reference Source Library v1: a separate, client-side filtered view over
+// the same `sources` table (is_reference=true) — no parallel source system,
+// same convention renderArchive() already uses for its 전체/내 저장/팀 Pick
+// tabs (a view axis, not a new query param). Reference sources are never
+// collected (method stays 'manual'), so this table shows cataloging fields
+// instead of ingestion-status ones.
+function referenceSourcesTable(sources) {
+  const refs = sources.filter((s) => s.is_reference);
+  if (!refs.length) return '<p class="meta">등록된 Reference Source가 없습니다.</p>';
+  return `<table class="sources-table">
+    <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>접근형식</th><th>업데이트 주기</th><th>RSS</th><th>최종 검증일</th><th>비고</th><th></th></tr>
+    ${refs.map((s) => `<tr>
+      <td class="cell-strong"><a href="${s.url || '#'}" target="_blank">${s.name}</a></td>
+      <td class="cell-muted">${s.source_type || '-'}</td>
+      <td class="cell-muted">${s.region || '-'}</td>
+      <td class="cell-muted">${(s.commodities || []).join(', ') || '-'}</td>
+      <td class="cell-muted">${s.coverage_note || '-'}</td>
+      <td class="cell-muted">${(s.access_format || []).join(', ') || '-'}</td>
+      <td class="cell-muted">${s.update_frequency || '-'}</td>
+      <td class="cell-muted">${s.rss_available ? '있음' : '없음'}</td>
+      <td class="cell-muted">${s.last_verified_at ? new Date(s.last_verified_at).toLocaleDateString() : '-'}</td>
+      <td class="cell-muted">${s.usage_note || '-'}</td>
+      <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+async function renderSources(query = {}) {
   const sources = await api('/sources');
+  const view = query.view === 'reference' ? 'reference' : 'all';
+  const viewTabs = [
+    { key: 'all', label: '전체' },
+    { key: 'reference', label: 'Reference Sources' },
+  ];
+  const viewTabsHtml = viewTabs.map((t) =>
+    `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/sources?view=${t.key}">${t.label}</a>`
+  ).join('');
+
   app.innerHTML = `
     <h1>Sources</h1>
-    <p class="page-lede">RSS 수집 소스 상태를 관리합니다.</p>
-    <button class="btn primary btn-compact" id="collect-all-btn">전체 자료 지금 수집</button>
+    <p class="page-lede">${view === 'reference' ? '자동 수집 대상이 아니더라도 참고 가치가 높은 유지 시장 리서치/통계 출처를 기록합니다.' : 'RSS 수집 소스 상태를 관리합니다.'}</p>
+    <div class="archive-tabs">${viewTabsHtml}</div>
+    ${view === 'all' ? `<button class="btn primary btn-compact" id="collect-all-btn">전체 자료 지금 수집</button>
     <div class="collect-all-result" id="collect-all-result"></div>
     <table class="sources-table">
       <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
       ${sources.map((s) => `<tr>
-        <td class="cell-strong">${s.name}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
+        <td class="cell-strong">${s.name}${s.is_reference ? ' <span class="pill">Reference</span>' : ''}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
         <td class="cell-muted">${s.trust_grade}</td><td class="cell-muted">${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
-        <td>${s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>')}</td>
+        <td>${s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
         <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
       </tr>`).join('')}
-    </table>
+    </table>` : referenceSourcesTable(sources)}
 
     <details class="section">
       <summary>소스 추가</summary>
       <div class="form-row"><label>이름</label><input id="s-name"></div>
+      <div class="form-row"><label>
+        <input type="checkbox" id="s-is-reference" ${view === 'reference' ? 'checked' : ''}> Reference Source (자동 수집 없이 참고용으로만 등록)
+      </label></div>
       <div class="form-row"><label>수집방식</label>
         <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="structured">structured (통계 데이터 자동 수집)</option><option value="crawl">crawl</option></select>
       </div>
       <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
       <div class="form-row"><label>오너</label><input id="s-owner"></div>
       <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
+      <div class="form-row"><label>유형 (예: 정부/국제기구 통계, 거래소/가격데이터)</label><input id="s-type"></div>
+      <div class="form-row"><label>지역/국가</label><input id="s-region"></div>
+      <div class="form-row"><label>품목 (쉼표 구분, 예: 팜유,대두유)</label><input id="s-commodities"></div>
+      <div class="form-row"><label>데이터/보고서 커버리지</label><input id="s-coverage"></div>
+      <div class="form-row"><label>접근형식 (쉼표 구분: web,PDF,XLSX,CSV,API,RSS)</label><input id="s-access-format"></div>
+      <div class="form-row"><label>업데이트 주기 (예: Monthly, Weekly)</label><input id="s-update-freq"></div>
+      <div class="form-row"><label>
+        <input type="checkbox" id="s-rss-available"> RSS 제공 여부
+      </label></div>
+      <div class="form-row"><label>최종 검증일</label><input id="s-last-verified" type="date"></div>
+      <div class="form-row"><label>비고 / 활용 노트</label><input id="s-usage-note"></div>
       <button class="btn primary" id="s-add">추가</button>
     </details>
 
-    ${collectionWarningHtml(sources)}
+    ${view === 'all' ? collectionWarningHtml(sources) : ''}
   `;
-  document.getElementById('collect-all-btn').onclick = async (e) => {
-    const btn = e.currentTarget;
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = '수집 중...';
-    let resultText = '';
-    try {
-      const { totals } = await api('/sources/collect-all', { method: 'POST' });
-      resultText = `수집 완료 — 조회 ${totals.fetched} / 중복 ${totals.duplicates} / 필터됨 ${totals.filtered} / 신규 ${totals.newItems} / 실패 소스 ${totals.failedSources}`;
-    } catch (err) {
-      alert(`수집 실패: ${err.message}`);
-    }
-    await renderSources();
-    if (resultText) document.getElementById('collect-all-result').textContent = resultText;
-  };
+  const collectAllBtn = document.getElementById('collect-all-btn');
+  if (collectAllBtn) {
+    collectAllBtn.onclick = async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = '수집 중...';
+      let resultText = '';
+      try {
+        const { totals } = await api('/sources/collect-all', { method: 'POST' });
+        resultText = `수집 완료 — 조회 ${totals.fetched} / 중복 ${totals.duplicates} / 필터됨 ${totals.filtered} / 신규 ${totals.newItems} / 실패 소스 ${totals.failedSources}`;
+      } catch (err) {
+        alert(`수집 실패: ${err.message}`);
+      }
+      await renderSources(query);
+      if (resultText) document.getElementById('collect-all-result').textContent = resultText;
+    };
+  }
   document.querySelectorAll('[data-delete-source]').forEach((btn) => {
     btn.onclick = async () => {
       if (!confirm('이 소스를 삭제하시겠습니까? 기존에 수집된 자료는 유지됩니다.')) return;
@@ -644,10 +698,14 @@ async function renderSources() {
         alert(`삭제 실패: ${err.message}`);
         return;
       }
-      renderSources();
+      renderSources(query);
     };
   });
   document.getElementById('s-add').onclick = async () => {
+    const commodities = document.getElementById('s-commodities').value
+      .split(',').map((v) => v.trim()).filter(Boolean);
+    const accessFormat = document.getElementById('s-access-format').value
+      .split(',').map((v) => v.trim()).filter(Boolean);
     await api('/sources', {
       method: 'POST',
       body: JSON.stringify({
@@ -656,9 +714,19 @@ async function renderSources() {
         url: document.getElementById('s-url').value,
         owner: document.getElementById('s-owner').value,
         frequency_days: Number(document.getElementById('s-freq').value) || 1,
+        is_reference: document.getElementById('s-is-reference').checked,
+        source_type: document.getElementById('s-type').value || null,
+        region: document.getElementById('s-region').value || null,
+        commodities,
+        coverage_note: document.getElementById('s-coverage').value || null,
+        access_format: accessFormat,
+        update_frequency: document.getElementById('s-update-freq').value || null,
+        rss_available: document.getElementById('s-rss-available').checked,
+        last_verified_at: document.getElementById('s-last-verified').value || null,
+        usage_note: document.getElementById('s-usage-note').value || null,
       }),
     });
-    renderSources();
+    renderSources(query);
   };
 }
 
@@ -1067,7 +1135,7 @@ async function router() {
       // Archive.
       window.scrollTo(0, 0);
     }
-    else if (path === 'sources') await renderSources();
+    else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
     else app.innerHTML = '<p>페이지를 찾을 수 없습니다.</p>';
   } catch (err) {
