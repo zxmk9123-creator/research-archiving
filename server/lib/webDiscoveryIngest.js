@@ -20,6 +20,40 @@ const extractMetadataModule = require('./extractMetadata');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 
+const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
+const FALLBACK_CANDIDATES_TO_TRY = 3;
+
+// 403 acquisition fallback: the original URL is blocked, so this searches
+// for the SAME article at an alternate, accessible location and runs the
+// exact same extractMetadata() on that page — never on title/snippet text
+// alone, so a candidate that never yields a real fetched page can never
+// reach AI screening or publish (see the loop below: returning null here
+// is indistinguishable from the original 403, same acquisition_failed
+// path). No proxy, no header spoofing, no site-specific scraping — just
+// another ordinary search + an ordinary fetch of whatever it returns.
+async function attemptAcquisitionFallback(candidate) {
+  const doiMatch = DOI_RE.exec(candidate.link) || DOI_RE.exec(candidate.title);
+  const query = doiMatch ? `${candidate.title} ${doiMatch[0]}` : candidate.title;
+
+  let results;
+  try {
+    results = await webSearchAdapter.searchWeb(query);
+  } catch {
+    return null;
+  }
+
+  for (const result of results.slice(0, FALLBACK_CANDIDATES_TO_TRY)) {
+    if (!result.link || result.link === candidate.link) continue;
+    try {
+      const meta = await extractMetadataModule.extractMetadata(result.link);
+      return { url: result.link, meta };
+    } catch {
+      // Try the next alternate; only exhausting all of them is a failure.
+    }
+  }
+  return null;
+}
+
 // searchOptions is an optional pass-through to searchWeb() (e.g.
 // { freshness: 'pw' } for a date-bounded backfill run) — omitted by every
 // existing caller (collector.js's hourly scheduler, dailyDiscovery.js),
@@ -45,12 +79,20 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       // bad URL never stops the rest, same failure-isolation contract as
       // collectSource()/collectInstitutionSource().
       let meta;
+      let fallbackUrl = null;
       try {
         meta = await extractMetadataModule.extractMetadata(candidate.link);
       } catch (err) {
-        failed++;
-        details.push({ title: candidate.title, link: candidate.link, stage: 'acquisition_failed', error: err.message });
-        continue;
+        const statusMatch = /fetch failed: (\d+)/.exec(err.message);
+        const status = statusMatch ? Number(statusMatch[1]) : null;
+        const fallback = status === 403 ? await attemptAcquisitionFallback(candidate) : null;
+        if (!fallback) {
+          failed++;
+          details.push({ title: candidate.title, link: candidate.link, stage: 'acquisition_failed', error: err.message });
+          continue;
+        }
+        meta = fallback.meta;
+        fallbackUrl = fallback.url;
       }
 
       const extractedText = meta.summary || candidate.title;
@@ -63,15 +105,18 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       let itemId;
       try {
         const { rows: inserted } = await pool.query(
-          `INSERT INTO items (title, source_url, published_at, source_id, type, thumbnail_url)
-           VALUES ($1, $2, $3, $4, '뉴스', $5) RETURNING id`,
-          [meta.title || candidate.title, candidate.link, meta.published_at, source.id, meta.thumbnail_url]
+          `INSERT INTO items (title, source_url, published_at, source_id, type, thumbnail_url, acquisition_fallback_url)
+           VALUES ($1, $2, $3, $4, '뉴스', $5, $6) RETURNING id`,
+          [meta.title || candidate.title, candidate.link, meta.published_at, source.id, meta.thumbnail_url, fallbackUrl]
         );
         itemId = inserted[0].id;
       } catch (err) {
         failed++;
         details.push({ title: candidate.title, link: candidate.link, stage: 'insert_failed', error: err.message });
         continue;
+      }
+      if (fallbackUrl) {
+        details.push({ title: candidate.title, link: candidate.link, itemId, stage: 'acquisition_fallback_used', fallbackUrl });
       }
 
       const draftResult = await generateAiDraftForItem(itemId, undefined, extractedText);
@@ -110,4 +155,4 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
   }
 }
 
-module.exports = { collectWebDiscoverySource };
+module.exports = { collectWebDiscoverySource, attemptAcquisitionFallback };

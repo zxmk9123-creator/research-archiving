@@ -161,6 +161,15 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_generated_at TIMESTAMPTZ;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_failure_type TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_latency_ms INTEGER;
 
+-- Web Discovery 403 acquisition fallback (webDiscoveryIngest.js): when the
+-- original candidate URL (source_url, unchanged — dedup still keys on it)
+-- returns 403, a fallback searches for an alternate accessible source and
+-- extracts from THAT page instead. acquisition_fallback_url records the
+-- alternate actually fetched, kept separate from source_url for
+-- traceability — NULL means no fallback was used (the original URL
+-- answered directly, same as before this feature existed).
+ALTER TABLE items ADD COLUMN IF NOT EXISTS acquisition_fallback_url TEXT;
+
 -- Archive-eligibility recommendation: advisory only, same suggestion-layer
 -- convention as the rest of ai_* — never auto-applied to status. NULL means
 -- no recommendation yet (e.g. ai_status is not 'completed').
