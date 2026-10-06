@@ -15,7 +15,7 @@ function typeTag(t) {
   return `<span class="tag ${TYPE_CLASS[t] || ''}">${t}</span>`;
 }
 
-const { buildSectorMaps, sectorAncestryPath, buildColumns, getSectorCheckState, setSectorSelection } = SectorTree;
+const { buildSectorMaps, sectorAncestryPath, buildColumns, collectSubtreeIds, getSectorCheckState, setSectorSelection } = SectorTree;
 const { classifyEligibilityMatch } = EligibilityMatch;
 const { normalizeImportantIds } = CardHelpers;
 const { translateSourceError } = SourceErrors;
@@ -228,20 +228,61 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
   </div>`;
 }
 
+// Home's top-level theme roots — the two existing root sectors, in the
+// fixed display order the milestone specifies. Any other root sector (none
+// exist today) is simply not shown on Home, same as before this feature.
+const HOME_THEME_ROOT_NAMES = ['식용유지', '비식용유지'];
+
+// Reuses the existing sector taxonomy (GET /api/sectors) as-is — no new
+// taxonomy, no DB change. A theme's items are whichever already-fetched
+// Published items carry that sector tag (the same {id, name}[] array every
+// item already returns), so this is purely a client-side grouping.
+function itemsForSector(items, sectorId) {
+  return items.filter((it) => (it.sectors || []).some((s) => s.id === sectorId));
+}
+
+// One top-level theme (식용유지/비식용유지): a clickable heading that opens
+// the full-results view filtered to the whole root subtree, followed by one
+// compact carousel per child theme (팜유, 대두유, ... / UCO, SAF, ...),
+// each reusing homeCarouselModule() unchanged so card/detail behavior and
+// visual language stay exactly as they are elsewhere on Home.
+function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
+  const children = byParent.get(root.id) || [];
+  const childModulesHtml = children
+    .map((child) => homeCarouselModule(child.name, itemsForSector(items, child.id), `#/archive?sector=${child.id}`, importantIds, savedIds))
+    .join('');
+  // Items are tagged with a leaf/child sector, essentially never the root
+  // itself — the root link must filter on the whole subtree (root +
+  // every child id), same expansion the Archive page's own sector-tree
+  // checkbox already does, or clicking a root would show an empty result.
+  const subtreeIds = collectSubtreeIds(byParent, root.id);
+  return `<section class="home-theme-root">
+    <div class="home-theme-root-header" onclick="location.hash='#/archive?sector=${subtreeIds.join(',')}'">
+      <h2>${root.name}</h2><span class="home-module-arrow">›</span>
+    </div>
+    <div class="home-theme-children">${childModulesHtml || '<p class="meta">표시할 테마가 없습니다.</p>'}</div>
+  </section>`;
+}
+
 async function renderHome() {
-  const [items, ranking] = await Promise.all([
+  const [sectors, items, ranking] = await Promise.all([
+    api('/sectors'),
     api('/items?status=Published'),
     api('/picks/ranking').catch(() => []),
   ]);
   const importantIds = new Set(ranking.map((r) => r.id));
   const savedIds = getPersonalSaveIds();
-  const latestItems = items.slice(0, 9);
+  const { byParent } = buildSectorMaps(sectors);
+  const roots = (byParent.get(null) || []).filter((s) => HOME_THEME_ROOT_NAMES.includes(s.name));
+
+  const themesHtml = roots.length
+    ? roots.map((root) => homeThemeRoot(root, byParent, items, importantIds, savedIds)).join('')
+    : '<p class="meta">표시할 테마가 없습니다.</p>';
 
   app.innerHTML = `
     <h1>Home</h1>
-    <p class="page-lede">유지 시장 리서치 아카이브의 최신 소식과 전체 자료를 확인하세요.</p>
-    ${homeCarouselModule('최신 자료', latestItems, '#/latest', importantIds, savedIds)}
-    ${homeCarouselModule('전체 결과', items, '#/archive', importantIds, savedIds)}
+    <p class="page-lede">유지 시장 리서치 아카이브를 테마별로 둘러보세요.</p>
+    ${themesHtml}
   `;
 
   document.querySelectorAll('.home-carousel').forEach((el) => initHomeCarousel(el));
@@ -296,8 +337,6 @@ async function renderArchive(query = {}, opts = {}) {
   const visibleItems = view === 'saved' ? items.filter((it) => savedIds.has(it.id))
     : view === 'team' ? items.filter((it) => importantIds.has(it.id))
     : items;
-  const latest = visibleItems.slice(0, 9);
-
   const viewTabs = [
     { key: 'all', label: '전체' },
     { key: 'saved', label: '내 저장' },
@@ -325,7 +364,7 @@ async function renderArchive(query = {}, opts = {}) {
       </div>`;
 
   app.innerHTML = `
-    <h1>${mode === 'latest' ? '최신 자료' : 'Research Archive'}</h1>
+    <h1>${mode === 'latest' ? '최신 자료' : '전체 결과'}</h1>
     <p class="page-lede">${mode === 'latest' ? '가장 최근에 발행된 유지 시장 리서치입니다. 아래 필터로 좁혀볼 수 있습니다.' : '오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.'}</p>
     ${TRUST_GRADE_EXPLANATION_HTML}
     ${mode === 'all' ? `<div class="archive-tabs category-tabs">${categoryTabsHtml}</div>` : ''}
@@ -357,11 +396,6 @@ async function renderArchive(query = {}, opts = {}) {
           <div class="archive-chip-row" id="sector-chips"></div>
         </div>
       </div>
-
-      ${mode === 'all' ? `<div class="section" style="margin-top:0">
-        <h2>최신 자료</h2>
-        <div class="grid">${latest.map((it) => itemCard(it, importantIds, savedIds)).join('') || '<p class="meta">발행된 자료가 없습니다.</p>'}</div>
-      </div>` : ''}
 
       <details class="section">
         <summary>팀 Pick · 많이 본 자료</summary>

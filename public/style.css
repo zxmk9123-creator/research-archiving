@@ -141,6 +141,16 @@ p { margin: 0; }
 .home-module-arrow { color: var(--text-tertiary); font-size: 20px; line-height: 1; }
 .home-module-header:hover .home-module-arrow { color: var(--action); }
 
+/* Home theme roots (식용유지/비식용유지): a bigger clickable heading than
+   a child theme's .home-module-header, grouping that root's child-theme
+   carousels underneath. The children themselves are plain .home-module
+   instances, unchanged. */
+.home-theme-root { margin-bottom: var(--sp-8); }
+.home-theme-root-header { display: flex; align-items: center; gap: 4px; cursor: pointer; margin-bottom: var(--sp-5); width: fit-content; }
+.home-theme-root-header:hover h2 { color: var(--action); }
+.home-theme-root-header h2 { margin: 0; font-size: 1.4rem; }
+.home-theme-root-header .home-module-arrow { font-size: 24px; }
+
 .home-carousel { display: flex; align-items: flex-start; gap: var(--sp-3); }
 .home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }
 .home-carousel-track { display: flex; transition: transform 0.4s ease; }
