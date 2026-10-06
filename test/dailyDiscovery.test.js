@@ -203,3 +203,80 @@ test('maybeRunDailyDiscovery: claims and runs once during the due hour', () => w
     restore();
   }
 }));
+
+// --- Full autonomous-path regression: an eligible, classified candidate
+// reaches Published through collectDailyDiscoveryNow with no mocked
+// shortcuts in generateAiDraftForItem/applyAiDraftIfEligible themselves —
+// only the FreeLLMAPI HTTP call and taxonomy/classification queries are
+// mocked, exactly like aiDraft.test.js's own archive tests. ---
+
+function fullDraftResponse() {
+  return JSON.stringify({
+    eligible: true,
+    eligibility_reason: '구체적 수치와 시점이 포함된 시장 뉴스다.',
+    who: '인도네시아 정부', what: '팜유 수출세를 인상했다', amount: '톤당 50달러',
+    when: '2026-09-01', where: '인도네시아', why: '국내 공급 안정을 위해',
+    impact: '아시아 팜유 가격 상승 압력',
+    summary: '인도네시아 정부가 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상했다.',
+    insight: '이번 조치는 다른 팜유 수출국의 유사 정책으로 이어질 가능성이 있다.',
+    key_takeaway: '수출세 인상이 단기 가격 상승 요인이다.',
+    suggested_sectors: [3], suggested_usages: [3],
+  });
+}
+
+function mockFreeLLMAPISuccess() {
+  const original = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('freellmapi')) {
+      return {
+        ok: true, status: 200,
+        json: async () => ({ choices: [{ message: { content: fullDraftResponse() } }] }),
+        text: async () => '',
+      };
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  return () => { global.fetch = original; };
+}
+
+test('collectDailyDiscoveryNow: an eligible, classified candidate reaches Published end-to-end (autonomous path)', async () => {
+  const sourceA = { id: 93, name: 'Query A', url: 'palm oil export tariff regulation', method: 'crawl', frequency_days: 7 };
+  const restoreFetch = mockFreeLLMAPISuccess();
+  const restoreSearch = mockSearchWeb({
+    'palm oil export tariff regulation': [{ title: 'Palm oil export tariff raised', link: 'https://example.org/eligible' }],
+  });
+  const restoreMeta = mockExtractMetadataAlwaysSucceeds();
+  // generateAiDraftForItem reads the item row before the AI call (still
+  // ai_status=null) and applyAiDraftIfEligible reads it again right after
+  // the 'completed' UPDATE below — this flag flips so the second read
+  // reflects that write, instead of returning the same pre-draft row twice.
+  let draftCompleted = false;
+  const { calls, restore } = mockPool([
+    [`method = 'crawl' AND is_daily_discovery = true`, () => ({ rows: [sourceA] })],
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 555 }] })],
+    ["ai_status = 'completed'", () => { draftCompleted = true; return { rows: [] }; }],
+    ['SELECT * FROM items WHERE id', () => (draftCompleted
+      ? { rows: [{ id: 555, ai_status: 'completed', ai_eligible: true, ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [3] }] }
+      : { rows: [{ id: 555, ai_status: null, ai_eligible: null }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '시장 전망' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  const prevKey = process.env.FREELLMAPI_API_KEY;
+  const prevUrl = process.env.FREELLMAPI_BASE_URL;
+  process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+  process.env.FREELLMAPI_BASE_URL = 'https://freellmapi.example.com/v1';
+  try {
+    const result = await collectDailyDiscoveryNow();
+    assert.equal(result.results[0].archived, 1);
+    assert.ok(calls.some((c) => c.text.includes("status = 'Published'")));
+  } finally {
+    restoreFetch();
+    restoreSearch();
+    restoreMeta();
+    restore();
+    if (prevKey === undefined) delete process.env.FREELLMAPI_API_KEY; else process.env.FREELLMAPI_API_KEY = prevKey;
+    if (prevUrl === undefined) delete process.env.FREELLMAPI_BASE_URL; else process.env.FREELLMAPI_BASE_URL = prevUrl;
+  }
+});
