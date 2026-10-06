@@ -27,10 +27,10 @@ function requireNonEmptyText(text, providerLabel) {
 //   other non-ok   -> unmarked (application/contract-ish)
 //   network/DNS/refused connection, or our own AbortSignal timeout firing
 //                  -> 'timeout' / 'network' (transient)
-async function fetchProvider(providerLabel, url, init) {
+async function fetchProvider(providerLabel, url, init, timeoutMs = 20000) {
   let res;
   try {
-    res = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) });
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const failureType = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
     console.error(`${providerLabel} request failed: ${failureType} (${err.message})`);
@@ -57,6 +57,11 @@ async function callFreeLLMAPI({ system, user }) {
   if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
   const model = process.env.FREELLMAPI_MODEL || 'auto';
 
+  // FreeLLMAPI itself cascades through several free-tier upstream models on
+  // failure (Groq -> OpenRouter -> Google -> ...) before answering, which
+  // routinely takes longer than the 20s budget other single-hop providers
+  // need — a 20s client-side abort was cutting FreeLLMAPI off mid-fallback
+  // ("client disconnected mid-attempt" in its logs), not a hang on our end.
   const res = await fetchProvider('freellmapi', `${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -71,7 +76,7 @@ async function callFreeLLMAPI({ system, user }) {
         { role: 'user', content: user },
       ],
     }),
-  });
+  }, 60000);
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
