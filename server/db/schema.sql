@@ -42,6 +42,53 @@ ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 ALTER TABLE sources DROP CONSTRAINT IF EXISTS sources_method_check;
 ALTER TABLE sources ADD CONSTRAINT sources_method_check CHECK (method IN ('rss','crawl','manual','institution','structured'));
 
+-- Daily Discovery Query Registry: a crawl-method source flagged here is
+-- run once a day by the separate Daily Discovery job (dailyDiscovery.js),
+-- independent of its own frequency_days/last_collected_at due-check used
+-- by the existing hourly Research Sources scheduler (collector.js). A
+-- source can be in both: the hourly scheduler may also pick it up on its
+-- own weekly cadence — harmless, since exact-URL dedup in
+-- webDiscoveryIngest.js already prevents re-ingesting the same candidate.
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_daily_discovery BOOLEAN DEFAULT false;
+
+-- One row per named background job, tracking the last calendar date (in
+-- that job's own reference timezone) it ran — the guard against running
+-- Daily Discovery more than once per day. Generic by job_name rather than
+-- a single dedicated column so any future daily/periodic job can reuse it.
+CREATE TABLE IF NOT EXISTS scheduler_jobs (
+  job_name TEXT PRIMARY KEY,
+  last_run_date DATE
+);
+
+-- Seed the Discovery Query Registry's initial 12 queries (4 pre-existing +
+-- 8 new) covering commodity/market news, logistics/shipping, regulation/
+-- policy, major-company/IR, and reports/research papers. Idempotent by
+-- name (sources.name has no UNIQUE constraint, so INSERT...WHERE NOT
+-- EXISTS rather than ON CONFLICT) — safe to rerun every boot.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: palm oil soybean oil price market news', 'palm oil soybean oil price market news today'),
+  ('Web Discovery: edible oil tanker freight rates Baltic index', 'edible oil tanker freight rates Baltic index'),
+  ('Web Discovery: EU deforestation regulation palm oil EUDR', 'EU deforestation regulation palm oil EUDR'),
+  ('Web Discovery: Indonesia Malaysia palm oil export quota policy', 'Indonesia Malaysia palm oil export quota policy'),
+  ('Web Discovery: Bunge ADM Louis Dreyfus edible oil investment', 'Bunge ADM Louis Dreyfus edible oil investment expansion'),
+  ('Web Discovery: USDA oilseeds outlook report', 'USDA oilseeds outlook report'),
+  ('Web Discovery: IGC grain market report oilseeds', 'IGC grain market report oilseeds'),
+  ('Web Discovery: soybean crush margin market report', 'soybean crush margin market report')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+-- The 4 pre-existing Web Discovery sources are also part of the Daily
+-- Discovery registry — backfill the flag on them by name (no-op once set).
+UPDATE sources SET is_daily_discovery = true
+WHERE method = 'crawl' AND name IN (
+  'Web Discovery: palm oil export tariff regulation',
+  'Web Discovery: crude oil price OPEC supply policy',
+  'Web Discovery: vegetable oil tanker freight rates shipping',
+  'Web Discovery: Wilmar Cargill palm oil investment expansion'
+) AND is_daily_discovery IS DISTINCT FROM true;
+
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
   id SERIAL PRIMARY KEY,
