@@ -309,12 +309,13 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 // Autonomous-ingestion-only step: applies an already-generated AI draft as
 // the item's canonical record and publishes it, with NO human "apply" in
 // between. This is the one place in the codebase that copies ai_summary/
-// ai_insight into summary/insight and flips status to 'Published' — every
-// other path (RSS collection, manual entry, Review) leaves that gap
-// deliberately open for a human to confirm (see the ai_* column comments
-// in schema.sql). Only called by the institutional-report ingestion path
-// (institutionalIngest.js); RSS collection never calls this, so its
-// existing human-review flow is completely unaffected.
+// ai_insight into summary/insight and flips status to 'Published' — manual
+// entry and Review leave that gap deliberately open for a human to confirm
+// (see the ai_* column comments in schema.sql). Called by every ingestion
+// path's own collect function — institutionalIngest.js, structuredDataIngest.js,
+// webDiscoveryIngest.js, and collector.js's collectSource() (RSS) — right
+// after a successful generateAiDraftForItem(), so all four share this one
+// gate instead of duplicating the publish decision.
 //
 // Reuses ai_eligible/ai_eligibility_reason as-is for the archive decision
 // and its recorded reason — no new "screening result" column, per the

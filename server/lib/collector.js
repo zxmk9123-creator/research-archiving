@@ -2,7 +2,7 @@ const pool = require('../db/pool');
 const { parseFeed, toDateOnly } = require('./feedParser');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
-const { generateAiDraftForItem } = require('./aiDraft');
+const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { collectInstitutionSource } = require('./institutionalIngest');
 const { collectStructuredSource } = require('./structuredDataIngest');
@@ -83,8 +83,14 @@ async function collectSource(source) {
       // Fire-and-forget: AI drafting must never block or fail RSS collection.
       // generateAiDraftForItem never throws (it resolves { ok: false, ... }
       // on failure and records it on the item), so this .catch is only a
-      // last-resort safety net.
-      generateAiDraftForItem(rows[0].id).catch((err) => {
+      // last-resort safety net. Chains into applyAiDraftIfEligible() — the
+      // exact same autonomous-publish gate (AI eligible + >=1 valid sector +
+      // >=1 valid usage) institution/structured/crawl already use — only
+      // after a successful draft, same as those paths; a failed/ineligible
+      // draft is left as Draft for human review, unchanged from before.
+      generateAiDraftForItem(rows[0].id).then((result) => {
+        if (result.ok) return applyAiDraftIfEligible(rows[0].id);
+      }).catch((err) => {
         console.error(`AI draft generation errored for item ${rows[0].id}: ${err.message}`);
       });
 
