@@ -3,7 +3,7 @@ const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata } = require('../lib/extractMetadata');
 const { generateAiDraftForItem } = require('../lib/aiDraft');
-const { hasValidClassification } = require('../lib/classification');
+const { hasValidClassification, deriveContentCategory } = require('../lib/classification');
 
 const router = express.Router();
 
@@ -40,11 +40,12 @@ const ITEM_SELECT = `
 `;
 
 router.get('/', async (req, res) => {
-  const { q, sector, usage, type, source_id, status, from, to } = req.query;
+  const { q, sector, usage, type, source_id, status, from, to, category } = req.query;
   const clauses = [];
   const params = [];
 
   if (status) { params.push(status); clauses.push(`i.status = $${params.length}`); }
+  if (category) { params.push(category); clauses.push(`i.content_category = $${params.length}`); }
   if (type) { params.push(type); clauses.push(`i.type = $${params.length}`); }
   if (source_id) { params.push(source_id); clauses.push(`i.source_id = $${params.length}`); }
   if (from) { params.push(from); clauses.push(`i.published_at >= $${params.length}`); }
@@ -150,7 +151,7 @@ router.post('/', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const id = req.params.id;
-  const { rows: existingRows } = await pool.query('SELECT id FROM items WHERE id = $1', [id]);
+  const { rows: existingRows } = await pool.query('SELECT id, type FROM items WHERE id = $1', [id]);
   if (!existingRows[0]) return res.status(404).json({ error: 'not found' });
 
   // Apply any tag changes from this same request first, so a reviewer
@@ -181,6 +182,15 @@ router.patch('/:id', async (req, res) => {
       params.push(req.body[f]);
       sets.push(`${f} = $${params.length}`);
     }
+  }
+  // Archive / Daily Report split, same deterministic type-based rule the
+  // autonomous publish path (aiDraft.js) uses — set only when this request
+  // actually publishes, against whichever type ends up effective (a type
+  // change in the same request takes precedence over the stored one).
+  if (req.body.status === 'Published') {
+    const effectiveType = req.body.type !== undefined ? req.body.type : existingRows[0].type;
+    params.push(deriveContentCategory(effectiveType));
+    sets.push(`content_category = $${params.length}`);
   }
   if (sets.length) {
     params.push(id);

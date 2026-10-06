@@ -485,7 +485,7 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
         id: 42, ai_status: 'completed', ai_eligible: true,
-        ai_summary: '요약문', ai_insight: '인사이트',
+        ai_summary: '요약문', ai_insight: '인사이트', type: '보고서',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
     })],
@@ -496,10 +496,30 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
     assert.equal(result.archived, true);
     const publishCall = calls.find((c) => c.text.includes('UPDATE items SET summary'));
     assert.ok(publishCall);
-    assert.deepEqual(publishCall.params, ['요약문', '인사이트', 42]);
+    assert.deepEqual(publishCall.params, ['요약문', '인사이트', 'archive', 42]);
     assert.match(publishCall.text, /status = 'Published'/);
     assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_sectors') && c.text.includes('(42, 3)')));
     assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_usages') && c.text.includes('(42, 7)')));
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=daily_report', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 43, ai_status: 'completed', ai_eligible: true,
+        ai_summary: 's', ai_insight: 'i', type: '뉴스',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    await applyAiDraftIfEligible(43);
+    const publishCall = calls.find((c) => c.text.includes('UPDATE items SET summary'));
+    assert.deepEqual(publishCall.params, ['s', 'i', 'daily_report', 43]);
   } finally {
     restore();
   }

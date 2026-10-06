@@ -48,7 +48,7 @@ function itemRow(overrides) {
 
 test('PATCH /:id: rejects publishing an item with no sector/usage classification', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 10 }] })],
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 10, type: '뉴스' }] })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: false, has_usage: false }] })],
   ]);
   try {
@@ -70,7 +70,7 @@ test('PATCH /:id: rejects publishing an item with no sector/usage classification
 
 test('PATCH /:id: publishes an item that already has valid sector/usage tags', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 11 }] })],
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 11, type: '뉴스' }] })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
     ['FROM items i', () => ({ rows: [itemRow({ id: 11, status: 'Published' })] })],
   ]);
@@ -91,9 +91,78 @@ test('PATCH /:id: publishes an item that already has valid sector/usage tags', a
   }
 });
 
+test('PATCH /:id: publishing a 뉴스 item sets content_category to daily_report', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 14, type: '뉴스' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 14, status: 'Published' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/14`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published' }),
+      });
+      assert.equal(res.status, 200);
+      const updateCall = calls.find((c) => c.text.includes('UPDATE items SET') && c.text.includes('content_category'));
+      assert.ok(updateCall);
+      assert.ok(updateCall.params.includes('daily_report'));
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: publishing a 보고서 item sets content_category to archive', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 15, type: '보고서' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 15, status: 'Published' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/15`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published' }),
+      });
+      assert.equal(res.status, 200);
+      const updateCall = calls.find((c) => c.text.includes('UPDATE items SET') && c.text.includes('content_category'));
+      assert.ok(updateCall);
+      assert.ok(updateCall.params.includes('archive'));
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('PATCH /:id: a type change in the same publish request decides content_category over the stored type', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 16, type: '뉴스' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 16, status: 'Published' })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/16`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'Published', type: '보고서' }),
+      });
+      assert.equal(res.status, 200);
+      const updateCall = calls.find((c) => c.text.includes('UPDATE items SET') && c.text.includes('content_category'));
+      assert.ok(updateCall);
+      assert.ok(updateCall.params.includes('archive'));
+    });
+  } finally {
+    restore();
+  }
+});
+
 test('PATCH /:id: classifying and publishing in the same request is evaluated against the new tags', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 12 }] })],
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 12, type: '뉴스' }] })],
     // setTags() issues DELETE then INSERT for sectors/usages — none of
     // that needs real persistence here, only that hasValidClassification
     // is checked with the "tags now exist" answer, proving the route
@@ -120,7 +189,7 @@ test('PATCH /:id: classifying and publishing in the same request is evaluated ag
 
 test('PATCH /:id: a non-publish update (e.g. editing the title) is never gated by the classification check', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT id FROM items WHERE id', () => ({ rows: [{ id: 13 }] })],
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [{ id: 13, type: '뉴스' }] })],
     ['FROM items i', () => ({ rows: [itemRow({ id: 13, title: 'New title' })] })],
   ]);
   try {
@@ -138,9 +207,27 @@ test('PATCH /:id: a non-publish update (e.g. editing the title) is never gated b
   }
 });
 
+test('GET /: a category query param filters on content_category, same clause style as status/sector', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}?status=Published&category=daily_report`);
+      assert.equal(res.status, 200);
+      const listCall = calls.find((c) => c.text.includes('FROM items i'));
+      assert.ok(listCall);
+      assert.match(listCall.text, /i\.content_category = \$\d/);
+      assert.ok(listCall.params.includes('daily_report'));
+    });
+  } finally {
+    restore();
+  }
+});
+
 test('PATCH /:id: returns 404 for a nonexistent item without running the classification check', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT id FROM items WHERE id', () => ({ rows: [] })],
+    ['SELECT id, type FROM items WHERE id', () => ({ rows: [] })],
   ]);
   try {
     await withServer(async (base) => {

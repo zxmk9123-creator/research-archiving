@@ -1,7 +1,7 @@
 const pool = require('../db/pool');
 const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
-const { hasValidClassification } = require('./classification');
+const { hasValidClassification, deriveContentCategory } = require('./classification');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
 // single collection run can create dozens of items at once. Bounding the
@@ -353,8 +353,8 @@ async function applyAiDraftIfEligible(itemId) {
   }
 
   await pool.query(
-    `UPDATE items SET summary = $1, insight = $2, status = 'Published' WHERE id = $3`,
-    [item.ai_summary, item.ai_insight, itemId]
+    `UPDATE items SET summary = $1, insight = $2, content_category = $3, status = 'Published' WHERE id = $4`,
+    [item.ai_summary, item.ai_insight, deriveContentCategory(item.type), itemId]
   );
 
   return { archived: true };

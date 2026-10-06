@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { hasValidClassification } = require('../server/lib/classification');
+const { hasValidClassification, deriveContentCategory } = require('../server/lib/classification');
 const pool = require('../server/db/pool');
 
 function mockPool(handler) {
@@ -57,4 +57,22 @@ test('hasValidClassification: queries by the given item id', async () => {
   } finally {
     restore();
   }
+});
+
+// --- deriveContentCategory: the Archive / Daily Report split ---
+
+test('deriveContentCategory: 뉴스 maps to daily_report', () => {
+  assert.equal(deriveContentCategory('뉴스'), 'daily_report');
+});
+
+test('deriveContentCategory: 보고서/통계/규제 all map to archive', () => {
+  assert.equal(deriveContentCategory('보고서'), 'archive');
+  assert.equal(deriveContentCategory('통계'), 'archive');
+  assert.equal(deriveContentCategory('규제'), 'archive');
+});
+
+test('deriveContentCategory: an unknown/missing type defaults to archive, never throws', () => {
+  assert.equal(deriveContentCategory(undefined), 'archive');
+  assert.equal(deriveContentCategory(null), 'archive');
+  assert.equal(deriveContentCategory('뭔가다른값'), 'archive');
 });

@@ -249,8 +249,14 @@ async function renderHome() {
 
 async function renderArchive(query = {}, opts = {}) {
   const mode = opts.mode === 'latest' ? 'latest' : 'all';
+  // Archive / Daily Report toggle — a server-side filter (content_category),
+  // separate from the client-side "view" tabs (전체/내 저장/팀 Pick) below.
+  // Scoped to the 전체 결과 (mode='all') screen only, per the milestone;
+  // 최신 자료 (mode='latest') keeps showing every Published item unchanged.
+  const category = mode === 'all' ? (query.category === 'daily_report' ? 'daily_report' : 'archive') : null;
+  const itemsQuery = category ? { ...query, category } : query;
   const [sectors, usages, sources, items, ranking] = await Promise.all([
-    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(query)),
+    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(itemsQuery)),
     api('/picks/ranking').catch(() => []),
   ]);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
@@ -302,6 +308,15 @@ async function renderArchive(query = {}, opts = {}) {
     `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(t.key)}">${t.label}</a>`
   ).join('');
 
+  const categoryTabs = [
+    { key: 'archive', label: 'Archive' },
+    { key: 'daily_report', label: 'Daily Report' },
+  ];
+  const categoryTabQuery = (key) => toQuery({ ...query, category: key }).slice(1);
+  const categoryTabsHtml = categoryTabs.map((t) =>
+    `<a class="archive-tab ${category === t.key ? 'active' : ''}" href="#/archive?${categoryTabQuery(t.key)}">${t.label}</a>`
+  ).join('');
+
   const emptyState = visibleItems.length
     ? ''
     : `<div class="archive-empty">
@@ -313,6 +328,7 @@ async function renderArchive(query = {}, opts = {}) {
     <h1>${mode === 'latest' ? '최신 자료' : 'Research Archive'}</h1>
     <p class="page-lede">${mode === 'latest' ? '가장 최근에 발행된 유지 시장 리서치입니다. 아래 필터로 좁혀볼 수 있습니다.' : '오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.'}</p>
     ${TRUST_GRADE_EXPLANATION_HTML}
+    ${mode === 'all' ? `<div class="archive-tabs category-tabs">${categoryTabsHtml}</div>` : ''}
     <div class="archive-tabs">${viewTabsHtml}</div>
     <div class="archive">
       <div class="archive-search-bar">
@@ -433,6 +449,9 @@ async function renderArchive(query = {}, opts = {}) {
       source_id: document.getElementById('f-source').value,
       from: document.getElementById('f-from').value,
       to: document.getElementById('f-to').value,
+      // Preserve whichever Archive/Daily Report tab is currently active —
+      // applying a sector/date filter must not silently snap back to Archive.
+      category: mode === 'all' ? category : '',
     }).slice(1);
   };
   document.getElementById('f-clear').onclick = () => { location.hash = '#/archive'; };

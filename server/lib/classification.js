@@ -16,4 +16,16 @@ async function hasValidClassification(itemId) {
   return rows[0].has_sector && rows[0].has_usage;
 }
 
-module.exports = { hasValidClassification };
+// Archive / Daily Report split: decided deterministically from the
+// existing `type` taxonomy at publish time, reused by both the autonomous
+// applyAiDraftIfEligible() path (aiDraft.js) and the manual Review PATCH
+// route (routes/items.js) so a Published item always gets the same
+// category regardless of which path published it. '뉴스' (news) is the
+// day-to-day bulletin content; every other type (보고서/통계/규제) is
+// longer-shelf-life research that belongs in the Archive view.
+const DAILY_REPORT_TYPES = new Set(['뉴스']);
+function deriveContentCategory(type) {
+  return DAILY_REPORT_TYPES.has(type) ? 'daily_report' : 'archive';
+}
+
+module.exports = { hasValidClassification, deriveContentCategory };

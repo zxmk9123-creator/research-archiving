@@ -190,6 +190,22 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_insight TEXT;
 -- means the reviewer hasn't confirmed or overridden a verdict yet.
 ALTER TABLE items ADD COLUMN IF NOT EXISTS reviewer_eligible BOOLEAN;
 
+-- Archive / Daily Report split: a Published item's bucket for the Archive
+-- UI's [Archive]/[Daily Report] toggle. Decided deterministically from the
+-- existing `type` taxonomy at publish time (see deriveContentCategory() in
+-- classification.js: '뉴스' → daily_report, everything else → archive) —
+-- reused by both the autonomous publish path (aiDraft.js) and the manual
+-- Review PATCH route, never a separate AI call of its own. NULL means not
+-- yet published (a Draft has no category).
+ALTER TABLE items ADD COLUMN IF NOT EXISTS content_category TEXT CHECK (content_category IN ('archive','daily_report'));
+
+-- Backfill: every already-Published item gets a category now, using the
+-- exact same type-based rule future publishes apply. Idempotent — only
+-- fills rows that don't have one yet, so this is a safe no-op on repeat
+-- boots and never touches a category a later code path explicitly set.
+UPDATE items SET content_category = CASE WHEN type = '뉴스' THEN 'daily_report' ELSE 'archive' END
+  WHERE status = 'Published' AND content_category IS NULL;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,
