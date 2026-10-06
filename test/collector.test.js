@@ -7,7 +7,7 @@ const { getDueSources, runDueCollections } = require('../server/lib/collector');
 // generateAiDraftForItem's fire-and-forget call (triggered inside
 // collectSource on a successful insert) fails fast on "No AI provider
 // configured" without ever attempting a real network fetch.
-const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY'];
+const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'FREELLMAPI_API_KEY'];
 
 function withNoProviders(fn) {
   const prev = Object.fromEntries(PROVIDER_ENV_VARS.map((k) => [k, process.env[k]]));

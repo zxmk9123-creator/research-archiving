@@ -9,7 +9,7 @@ const structuredDataAdapter = require('../server/lib/adapters/structuredData');
 // deterministically instead of hitting a real network, so the "AI
 // screening ran but failed" branch is exercised without mocking aiDraft.js
 // itself.
-const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY'];
+const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'FREELLMAPI_API_KEY'];
 
 function withNoProviders(fn) {
   const prev = Object.fromEntries(PROVIDER_ENV_VARS.map((k) => [k, process.env[k]]));
