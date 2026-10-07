@@ -147,6 +147,47 @@ router.post('/backfill-2026h1-discovery', async (req, res) => {
   res.json({ totals, perQuery });
 });
 
+// ONE-TIME MANUAL TOOL — same shape as backfill-2026h1-discovery above,
+// for a single historical diagnostic/collection run over 2026-01-01..
+// 2026-10-07 (full year to date, superseding the need to separately
+// re-run Sept/H1 for the Archive Discovery queries added after those
+// ran — exact-URL dedup makes re-covering the same months a no-op for
+// anything already archived). Unlike the two routes above, this one
+// computes itemType per source from is_archive_discovery — those two
+// historical routes predate the Archive-pipeline fix and would otherwise
+// insert every candidate as '뉴스' regardless of query intent, same bug
+// webDiscoveryIngest.js's INSERT used to have unconditionally. Does not
+// touch sources.frequency_days/is_daily_discovery/is_archive_discovery or
+// the query registry; does not create any new scheduler. Intended to be
+// removed after the one-time backfill it was added for.
+router.post('/backfill-2026fullyear-discovery', async (req, res) => {
+  const { rows: sources } = await pool.query(
+    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
+  );
+  const perQuery = [];
+  for (const source of sources) {
+    const result = await collectWebDiscoverySource(source, {
+      freshness: '2026-01-01to2026-10-07',
+      skipStaleCheck: true,
+      itemType: source.is_archive_discovery ? '보고서' : '뉴스',
+    });
+    perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
+  }
+  const totals = perQuery.reduce(
+    (acc, r) => ({
+      discovered: acc.discovered + (r.discovered || 0),
+      filtered: acc.filtered + (r.filtered || 0),
+      archived: acc.archived + (r.archived || 0),
+      rejected: acc.rejected + (r.rejected || 0),
+      failed: acc.failed + (r.failed || 0),
+      failedQueries: acc.failedQueries + (r.ok ? 0 : 1),
+    }),
+    { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
+  );
+  console.log(`backfill_2026fullyear_discovery run_completed ${JSON.stringify(totals)}`);
+  res.json({ totals, perQuery });
+});
+
 router.get('/', async (req, res) => {
   // Staleness only means something for a source that is actively ingested —
   // a Reference Source Library entry (is_reference=true) is never collected
