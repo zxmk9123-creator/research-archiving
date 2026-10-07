@@ -11,6 +11,10 @@ async function api(path, opts) {
   return res.json();
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function typeTag(t) {
   return `<span class="tag ${TYPE_CLASS[t] || ''}">${t}</span>`;
 }
@@ -281,7 +285,73 @@ function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
   </section>`;
 }
 
+// Minimum conversation context for AI Research Search follow-ups — kept
+// in memory only (module-level, not localStorage/sessionStorage), reset on
+// every renderHome() (i.e. every fresh visit to Home). No persistent chat
+// history by design.
+let aiSearchHistory = [];
+
+function aiSearchHtml() {
+  return `<section class="ai-search">
+    <form id="ai-search-form">
+      <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off">
+      <button type="submit" class="btn">검색</button>
+    </form>
+    <div id="ai-search-result"></div>
+  </section>`;
+}
+
+function aiSearchSourcesHtml(sources) {
+  if (!sources || !sources.length) return '';
+  return `<ul class="ai-search-sources">${sources.map((s) => `
+    <li><a href="#/detail/${s.id}">${escapeHtml(s.title)}</a>
+      <span class="meta">${escapeHtml(s.source || '미확인')} · ${s.published_at ? String(s.published_at).slice(0, 10) : '미확인'}</span>
+    </li>`).join('')}</ul>`;
+}
+
+function bindAiSearchForm() {
+  const form = document.getElementById('ai-search-form');
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('ai-search-input');
+    const resultEl = document.getElementById('ai-search-result');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const question = input.value.trim();
+    if (!question) {
+      resultEl.innerHTML = '<p class="meta">질문을 입력해 주세요.</p>';
+      return;
+    }
+    resultEl.innerHTML = '<p class="meta">검색 중...</p>';
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, history: aiSearchHistory }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        resultEl.innerHTML = `<p class="meta">${escapeHtml(body.error || 'AI 검색 중 오류가 발생했습니다.')}</p>`;
+        return;
+      }
+      aiSearchHistory.push({ role: 'user', content: question });
+      aiSearchHistory.push({ role: 'assistant', content: body.answer });
+      resultEl.innerHTML = `
+        <div class="ai-search-answer">${escapeHtml(body.answer).replace(/\n/g, '<br>')}</div>
+        ${aiSearchSourcesHtml(body.sources)}
+      `;
+      input.value = '';
+    } catch (err) {
+      resultEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
+    } finally {
+      submitBtn.disabled = false;
+    }
+  };
+}
+
 async function renderHome() {
+  aiSearchHistory = [];
   const [sectors, items, ranking] = await Promise.all([
     api('/sectors'),
     api('/items?status=Published'),
@@ -299,10 +369,12 @@ async function renderHome() {
   app.innerHTML = `
     <h1>Home</h1>
     <p class="page-lede">최근 유지시장의 주요 이슈를 둘러보세요.</p>
+    ${aiSearchHtml()}
     ${themesHtml}
   `;
 
   document.querySelectorAll('.home-carousel').forEach((el) => initHomeCarousel(el));
+  bindAiSearchForm();
 }
 
 async function renderArchive(query = {}, opts = {}) {

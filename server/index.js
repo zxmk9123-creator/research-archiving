@@ -9,6 +9,7 @@ app.use(express.json());
 app.use('/api/sources', require('./routes/sources'));
 app.use('/api/companies', require('./routes/companies'));
 app.use('/api/items', require('./routes/items'));
+app.use('/api/search', require('./routes/search'));
 app.use('/api/picks', require('./routes/picks'));
 app.use('/api', require('./routes/taxonomy'));
 
