@@ -23,6 +23,24 @@ const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
 const FALLBACK_CANDIDATES_TO_TRY = 3;
 
+// "Newly published" as a first-class criterion, without inventing dates:
+// only acts when (a) the caller explicitly asked for a freshness-biased
+// run (searchOptions.freshness set — Daily Discovery's news/market-type
+// queries, never the hourly scheduler or a research-literature query, see
+// dailyDiscovery.js) AND (b) the page's own extracted metadata gives a
+// real published_at. No metadata -> never rejected for staleness; this is
+// a defense-in-depth check on top of Brave's own `freshness` search
+// param, for the case where the engine still returns something clearly
+// old despite the date filter.
+const STALE_THRESHOLD_DAYS = 90;
+function isClearlyStale(publishedAt, now = new Date()) {
+  if (!publishedAt) return false;
+  const published = new Date(publishedAt);
+  if (Number.isNaN(published.getTime())) return false;
+  const ageDays = (now.getTime() - published.getTime()) / (1000 * 60 * 60 * 24);
+  return ageDays > STALE_THRESHOLD_DAYS;
+}
+
 // 403 acquisition fallback: the original URL is blocked, so this searches
 // for the SAME article at an alternate, accessible location and runs the
 // exact same extractMetadata() on that page — never on title/snippet text
@@ -95,6 +113,12 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         fallbackUrl = fallback.url;
       }
 
+      if (searchOptions.freshness && isClearlyStale(meta.published_at)) {
+        filtered++;
+        details.push({ title: candidate.title, link: candidate.link, stage: 'stale_for_daily_discovery', published_at: meta.published_at });
+        continue;
+      }
+
       const extractedText = meta.summary || candidate.title;
       if (!isRelevantToOilFatsScope(candidate.title, extractedText)) {
         filtered++;
@@ -155,4 +179,4 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
   }
 }
 
-module.exports = { collectWebDiscoverySource, attemptAcquisitionFallback };
+module.exports = { collectWebDiscoverySource, attemptAcquisitionFallback, isClearlyStale, STALE_THRESHOLD_DAYS };

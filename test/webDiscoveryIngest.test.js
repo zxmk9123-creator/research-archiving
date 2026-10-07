@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const pool = require('../server/db/pool');
-const { collectWebDiscoverySource } = require('../server/lib/webDiscoveryIngest');
+const { collectWebDiscoverySource, isClearlyStale } = require('../server/lib/webDiscoveryIngest');
 const webSearchAdapter = require('../server/lib/adapters/webSearch');
 const extractMetadataModule = require('../server/lib/extractMetadata');
 
@@ -356,6 +356,108 @@ test('collectWebDiscoverySource: defaults to an empty searchOptions object when 
     assert.deepEqual(receivedOptions, {});
   } finally {
     restoreSearch();
+    restore();
+  }
+}));
+
+// --- "Newly published" as a first-class criterion, without inventing
+// dates — see dailyDiscovery.js for which queries request freshness. ---
+
+test('isClearlyStale: a recently published date is not stale', () => {
+  const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(isClearlyStale(recent), false);
+});
+
+test('isClearlyStale: a date well beyond the threshold is stale', () => {
+  const old = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(isClearlyStale(old), true);
+});
+
+test('isClearlyStale: no date at all is never treated as stale (never invent a date to justify rejection)', () => {
+  assert.equal(isClearlyStale(null), false);
+  assert.equal(isClearlyStale(undefined), false);
+});
+
+test('isClearlyStale: an unparseable date string is never treated as stale', () => {
+  assert.equal(isClearlyStale('not-a-date'), false);
+});
+
+test('collectWebDiscoverySource: with freshness requested, a candidate whose extracted published_at is clearly old is filtered as stale, not archived', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([{ title: 'Old palm oil export tariff story', link: 'https://example.org/old' }]);
+  const oldDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Palm oil export tariff raised to 10%',
+    summary: 'Indonesia raised its palm oil export tariff, affecting edible oil supply chains.',
+    thumbnail_url: null,
+    published_at: oldDate,
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource(), { freshness: 'pw' });
+    assert.equal(result.ok, true);
+    assert.equal(result.filtered, 1);
+    assert.equal(result.archived, 0);
+    assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')), 'a clearly stale candidate must never be inserted when freshness was requested');
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
+test('collectWebDiscoverySource: with NO freshness requested (the hourly scheduler\'s existing default), an old published_at is NOT filtered as stale — unchanged existing behavior', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([{ title: 'Old palm oil export tariff story', link: 'https://example.org/old-but-fine' }]);
+  const oldDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Palm oil export tariff raised to 10%',
+    summary: 'Indonesia raised its palm oil export tariff, affecting edible oil supply chains.',
+    thumbnail_url: null,
+    published_at: oldDate,
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 779 }] })],
+    ['SELECT \\* FROM items WHERE id', () => ({ rows: [{ id: 779, ai_status: null }] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource()); // no searchOptions, exactly as collector.js's hourly dispatch calls it
+    assert.equal(result.ok, true);
+    assert.equal(result.filtered, 0);
+    assert.ok(calls.some((c) => c.text.includes('INSERT INTO items')), 'an old item must still be inserted when no freshness/recency constraint was requested');
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
+test('collectWebDiscoverySource: a candidate from a domain never present in sources is still processed end-to-end — the discovered URL IS the candidate, no pre-registration required', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([{ title: 'Novel outlet reports on palm oil', link: 'https://brand-new-outlet-never-seen.example/article' }]);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Palm oil export tariff raised to 10%',
+    summary: 'Indonesia raised its palm oil export tariff, affecting edible oil supply chains.',
+    thumbnail_url: null,
+    published_at: null,
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 780 }] })],
+    ['SELECT \\* FROM items WHERE id', () => ({ rows: [{ id: 780, ai_status: null }] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource());
+    const insertCall = calls.find((c) => c.text.includes('INSERT INTO items'));
+    assert.ok(insertCall, 'expected the never-before-seen domain to still reach item creation');
+    assert.equal(insertCall.params[1], 'https://brand-new-outlet-never-seen.example/article');
+    // No query ever checks the discovered URL's domain against `sources` —
+    // only the Query Registry source itself (source_id) and exact-URL dedup.
+    assert.ok(!calls.some((c) => c.text.includes('INSERT INTO sources') || c.text.includes('SELECT') && c.text.includes("sources") && c.text.includes('url =')));
+    assert.equal(result.ok, true);
+  } finally {
+    restoreSearch();
+    restoreMeta();
     restore();
   }
 }));

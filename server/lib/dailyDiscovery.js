@@ -16,6 +16,25 @@ const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
 
 const JOB_NAME = 'daily_discovery';
 
+// "Newly published" as a first-class Daily Discovery criterion: news/
+// market/regulatory/company-IR queries get a Brave `freshness: 'pw'`
+// (past-week) bias plus webDiscoveryIngest's isClearlyStale() backstop,
+// so a daily run surfaces what's actually new rather than re-surfacing
+// the same old pages every day. Academic/peer-reviewed literature queries
+// are intentionally exempt — a working paper or journal study is still
+// useful well past a week old, and the task is explicitly not meant to
+// become a strict date-only crawler. Classified by the query text itself
+// (no new schema column) — a simple, generous heuristic: when in doubt,
+// it exempts (skips the extra staleness check) rather than risks
+// rejecting a possibly-fresh item.
+const ACADEMIC_LITERATURE_QUERY_RE = /journal|peer-reviewed|working paper|academic research/i;
+function isAcademicLiteratureQuery(queryText) {
+  return ACADEMIC_LITERATURE_QUERY_RE.test(queryText || '');
+}
+function dailyDiscoverySearchOptions(source) {
+  return isAcademicLiteratureQuery(source.url) ? {} : { freshness: 'pw' };
+}
+
 // Current date/hour in Asia/Seoul, independent of the container's own
 // timezone (Railway runs UTC). `now` is injectable for tests.
 function kstPartsOf(now = new Date()) {
@@ -60,7 +79,7 @@ async function collectDailyDiscoveryNow() {
   );
   const results = [];
   for (const source of sources) {
-    results.push(await collectWebDiscoverySource(source));
+    results.push(await collectWebDiscoverySource(source, dailyDiscoverySearchOptions(source)));
   }
   const totals = results.reduce(
     (acc, r) => ({
@@ -92,4 +111,6 @@ module.exports = {
   claimDailyDiscoveryRunForToday,
   collectDailyDiscoveryNow,
   maybeRunDailyDiscovery,
+  isAcademicLiteratureQuery,
+  dailyDiscoverySearchOptions,
 };

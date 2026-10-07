@@ -9,6 +9,8 @@ const {
   claimDailyDiscoveryRunForToday,
   collectDailyDiscoveryNow,
   maybeRunDailyDiscovery,
+  isAcademicLiteratureQuery,
+  dailyDiscoverySearchOptions,
 } = require('../server/lib/dailyDiscovery');
 
 const PROVIDER_ENV_VARS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_API_KEY', 'FREELLMAPI_API_KEY'];
@@ -280,3 +282,111 @@ test('collectDailyDiscoveryNow: an eligible, classified candidate reaches Publis
     if (prevUrl === undefined) delete process.env.FREELLMAPI_BASE_URL; else process.env.FREELLMAPI_BASE_URL = prevUrl;
   }
 });
+
+// --- "Newly published" as a first-class Daily Discovery criterion,
+// without turning the whole system into a strict date-only crawler:
+// news/market-type queries get a freshness bias, academic/peer-reviewed
+// literature queries are intentionally exempt. ---
+
+test('isAcademicLiteratureQuery: recognizes peer-reviewed/working-paper/academic-research query text', () => {
+  assert.equal(isAcademicLiteratureQuery('palm oil soybean oil price volatility peer-reviewed journal research study'), true);
+  assert.equal(isAcademicLiteratureQuery('edible oil vegetable oil market working paper academic research site:ssrn.com'), true);
+  assert.equal(isAcademicLiteratureQuery('vegetable oil tanker freight rate shipping economics academic research paper'), true);
+});
+
+test('isAcademicLiteratureQuery: ordinary market/news/company-IR query text is not exempt', () => {
+  assert.equal(isAcademicLiteratureQuery('palm oil soybean oil price market news today'), false);
+  assert.equal(isAcademicLiteratureQuery('ADM Bunge Wilmar Cargill edible oils investor relations earnings report'), false);
+  assert.equal(isAcademicLiteratureQuery('EU deforestation regulation palm oil EUDR'), false);
+});
+
+test('dailyDiscoverySearchOptions: requests freshness for a news/market query, none for an academic-literature query', () => {
+  assert.deepEqual(dailyDiscoverySearchOptions({ url: 'palm oil soybean oil price market news today' }), { freshness: 'pw' });
+  assert.deepEqual(dailyDiscoverySearchOptions({ url: 'palm oil soybean oil price volatility peer-reviewed journal research study' }), {});
+});
+
+function mockSearchWebCapturingOptions(byQuery) {
+  const original = webSearchAdapter.searchWeb;
+  const callsByQuery = {};
+  webSearchAdapter.searchWeb = async (query, options) => {
+    callsByQuery[query] = options;
+    return byQuery[query] || [];
+  };
+  return { callsByQuery, restore: () => { webSearchAdapter.searchWeb = original; } };
+}
+
+test('collectDailyDiscoveryNow: passes a freshness bias to Brave for a news/market query but not for an academic-literature query', () => withNoProviders(async () => {
+  const newsSource = { id: 94, name: 'Market News Query', url: 'palm oil soybean oil price market news today', method: 'crawl', frequency_days: 7 };
+  const academicSource = { id: 95, name: 'Academic Query', url: 'palm oil soybean oil price volatility peer-reviewed journal research study', method: 'crawl', frequency_days: 7 };
+  const { callsByQuery, restore: restoreSearch } = mockSearchWebCapturingOptions({});
+  const { restore } = mockPool([
+    [`method = 'crawl' AND is_daily_discovery = true`, () => ({ rows: [newsSource, academicSource] })],
+  ]);
+  try {
+    await collectDailyDiscoveryNow();
+    assert.deepEqual(callsByQuery['palm oil soybean oil price market news today'], { freshness: 'pw' });
+    assert.deepEqual(callsByQuery['palm oil soybean oil price volatility peer-reviewed journal research study'], {});
+  } finally {
+    restoreSearch();
+    restore();
+  }
+}));
+
+test('collectDailyDiscoveryNow: a clearly old result from a news/market query is filtered as stale, never archived', () => withNoProviders(async () => {
+  const newsSource = { id: 96, name: 'Market News Query', url: 'palm oil soybean oil price market news today', method: 'crawl', frequency_days: 7 };
+  const oldDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const restoreSearch = mockSearchWeb({
+    'palm oil soybean oil price market news today': [{ title: 'Year-old palm oil story', link: 'https://example.org/stale' }],
+  });
+  const restoreMeta = (() => {
+    const original = extractMetadataModule.extractMetadata;
+    extractMetadataModule.extractMetadata = async () => ({
+      title: 'Year-old palm oil story', summary: 'Indonesia raised its palm oil export tariff.', thumbnail_url: null, published_at: oldDate,
+    });
+    return () => { extractMetadataModule.extractMetadata = original; };
+  })();
+  const { calls, restore } = mockPool([
+    [`method = 'crawl' AND is_daily_discovery = true`, () => ({ rows: [newsSource] })],
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+  ]);
+  try {
+    const result = await collectDailyDiscoveryNow();
+    assert.equal(result.results[0].archived, 0);
+    assert.equal(result.results[0].filtered, 1);
+    assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')));
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
+test('collectDailyDiscoveryNow: the exact same old publication date from the academic-literature query is NOT filtered — genuinely useful older research is preserved', () => withNoProviders(async () => {
+  const academicSource = { id: 97, name: 'Academic Query', url: 'palm oil soybean oil price volatility peer-reviewed journal research study', method: 'crawl', frequency_days: 7 };
+  const oldDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const restoreSearch = mockSearchWeb({
+    'palm oil soybean oil price volatility peer-reviewed journal research study': [{ title: 'Foundational palm oil price volatility study', link: 'https://example.org/evergreen-paper' }],
+  });
+  const restoreMeta = (() => {
+    const original = extractMetadataModule.extractMetadata;
+    extractMetadataModule.extractMetadata = async () => ({
+      title: 'Foundational palm oil price volatility study', summary: 'A widely-cited analysis of palm oil price volatility drivers over two decades.', thumbnail_url: null, published_at: oldDate,
+    });
+    return () => { extractMetadataModule.extractMetadata = original; };
+  })();
+  const { calls, restore } = mockPool([
+    [`method = 'crawl' AND is_daily_discovery = true`, () => ({ rows: [academicSource] })],
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 781 }] })],
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 781, ai_status: null }] })],
+  ]);
+  try {
+    const result = await collectDailyDiscoveryNow();
+    assert.equal(result.results[0].filtered, 0);
+    assert.ok(calls.some((c) => c.text.includes('INSERT INTO items')), 'an old but genuinely useful research paper must still be archived when found by a research-oriented query');
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));

@@ -71,6 +71,44 @@ test('discovery registry: new queries use multi-domain intent hints, not a singl
   assert.ok(siteHints.length >= 2, `expected multiple site: hints, got ${JSON.stringify(siteHints)}`);
 });
 
+// --- Third expansion: production/supply/demand, sunflower/rapeseed, and
+// Black Sea/Ukraine-Russia trade — distinct intents the first 20 queries
+// left thin, not near-duplicates of any existing query. ---
+
+const THIRD_EXPANSION_QUERY_NAMES = [
+  'Web Discovery: palm oil soybean oil production supply demand balance',
+  'Web Discovery: sunflower rapeseed canola oil market price EU',
+  'Web Discovery: Black Sea Ukraine Russia sunflower grain oilseed exports',
+];
+
+test('discovery registry: the third expansion (production/supply/demand, sunflower/rapeseed, Black Sea trade) is seeded as crawl + is_daily_discovery', () => {
+  for (const name of THIRD_EXPANSION_QUERY_NAMES) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected schema.sql to seed "${name}"`);
+  }
+  const thirdSeedBlock = schemaSql.slice(
+    schemaSql.indexOf(THIRD_EXPANSION_QUERY_NAMES[0]) - 500,
+    schemaSql.indexOf(THIRD_EXPANSION_QUERY_NAMES[THIRD_EXPANSION_QUERY_NAMES.length - 1]) + 500
+  );
+  assert.match(thirdSeedBlock, /'crawl', 7, 'B', true/);
+  assert.match(thirdSeedBlock, /WHERE NOT EXISTS \(SELECT 1 FROM sources s WHERE s\.name = v\.name\)/);
+});
+
+test('discovery registry: the third expansion does not duplicate any pre-existing or second-expansion query name', () => {
+  const allPriorNames = [...PRE_EXISTING_QUERY_NAMES, ...NEW_RESEARCH_QUERY_NAMES];
+  for (const name of THIRD_EXPANSION_QUERY_NAMES) {
+    assert.ok(!allPriorNames.includes(name), `"${name}" must be new, not a pre-existing query`);
+  }
+  for (const name of allPriorNames) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected prior query "${name}" to still be present unchanged`);
+  }
+});
+
+test('discovery registry: the Query Registry stays bounded (not dozens of queries)', () => {
+  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length;
+  assert.equal(totalQueries, 23);
+  assert.ok(totalQueries < 30, 'the registry should stay bounded enough to control API cost/search volume');
+});
+
 test('discovery registry: getDueSources/collectDailyDiscoveryNow select generically on is_daily_discovery — no per-query-name code exists', () => {
   const collectorJs = fs.readFileSync(path.join(__dirname, '../server/lib/collector.js'), 'utf8');
   const dailyDiscoveryJs = fs.readFileSync(path.join(__dirname, '../server/lib/dailyDiscovery.js'), 'utf8');

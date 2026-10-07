@@ -214,6 +214,24 @@ FROM (VALUES
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Third Discovery Query Registry expansion: fills 3 distinct research
+-- intents the first 20 queries left thin — production/supply/demand
+-- balance (distinct from spot price/market news), sunflower/rapeseed oil
+-- specifically (the first 20 are overwhelmingly palm/soybean), and
+-- Black Sea/Ukraine-Russia grain-and-oilseed export trade (distinct from
+-- the general freight/shipping-rate query). Deliberately 3, not dozens —
+-- near-duplicate coverage of an existing intent was avoided rather than
+-- added. Same idempotent pattern, same crawl/is_daily_discovery=true/
+-- 7-day convention; existing queries/pipeline behavior untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: palm oil soybean oil production supply demand balance', 'palm oil soybean oil production supply demand balance report'),
+  ('Web Discovery: sunflower rapeseed canola oil market price EU', 'sunflower rapeseed canola oil market price EU production'),
+  ('Web Discovery: Black Sea Ukraine Russia sunflower grain oilseed exports', 'Black Sea Ukraine Russia sunflower oil grain oilseed exports trade')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- The 4 pre-existing Web Discovery sources are also part of the Daily
 -- Discovery registry — backfill the flag on them by name (no-op once set).
 UPDATE sources SET is_daily_discovery = true
