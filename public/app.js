@@ -238,7 +238,24 @@ const HOME_THEME_ROOT_NAMES = ['식용유지', '비식용유지'];
 // Published items carry that sector tag (the same {id, name}[] array every
 // item already returns), so this is purely a client-side grouping.
 function itemsForSector(items, sectorId) {
-  return items.filter((it) => (it.sectors || []).some((s) => s.id === sectorId));
+  return items
+    .filter((it) => (it.sectors || []).some((s) => s.id === sectorId))
+    .filter((it) => isWithinPastMonth(it.published_at));
+}
+
+// Home carousel freshness window — the item's own published_at (never
+// created_at/collected_at), within the last 1 calendar month. An item with
+// no published_at can't be judged "recent" so it's excluded, not kept.
+// Deliberately a filter, not a backfill: if fewer than a full slide's worth
+// of items qualify, the carousel just shows fewer slides/cards — it never
+// reaches past the window to pad slots with older items.
+function isWithinPastMonth(publishedAt) {
+  if (!publishedAt) return false;
+  const d = new Date(publishedAt);
+  if (Number.isNaN(d.getTime())) return false;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 1);
+  return d >= cutoff;
 }
 
 // One top-level theme (식용유지/비식용유지): a clickable heading that opens
@@ -294,7 +311,10 @@ async function renderArchive(query = {}, opts = {}) {
   // separate from the client-side "view" tabs (전체/내 저장/팀 Pick) below.
   // Scoped to the 전체 결과 (mode='all') screen only, per the milestone;
   // 최신 자료 (mode='latest') keeps showing every Published item unchanged.
-  const category = mode === 'all' ? (query.category === 'daily_report' ? 'daily_report' : 'archive') : null;
+  // Daily Report is the default/first result view — entering a sector from
+  // Home (or any link that doesn't specify category) lands here. Archive
+  // stays reachable as an explicit tab/category value, never removed.
+  const category = mode === 'all' ? (query.category === 'archive' ? 'archive' : 'daily_report') : null;
   const itemsQuery = category ? { ...query, category } : query;
   const [sectors, usages, sources, items, ranking] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(itemsQuery)),
@@ -348,8 +368,8 @@ async function renderArchive(query = {}, opts = {}) {
   ).join('');
 
   const categoryTabs = [
-    { key: 'archive', label: 'Archive' },
     { key: 'daily_report', label: 'Daily Report' },
+    { key: 'archive', label: 'Archive' },
   ];
   const categoryTabQuery = (key) => toQuery({ ...query, category: key }).slice(1);
   const categoryTabsHtml = categoryTabs.map((t) =>
