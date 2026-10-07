@@ -76,6 +76,14 @@ async function attemptAcquisitionFallback(candidate) {
 // { freshness: 'pw' } for a date-bounded backfill run) — omitted by every
 // existing caller (collector.js's hourly scheduler, dailyDiscovery.js),
 // which keeps searching with no date constraint, unchanged.
+//
+// searchOptions.skipStaleCheck: bypasses isClearlyStale() below. Needed for
+// a historical backfill whose target window is itself older than
+// STALE_THRESHOLD_DAYS from today (e.g. a months-old custom freshness
+// range) — that staleness check is relative to "now", not to the requested
+// freshness window, so without this a historical run would filter out
+// everything it was asked to find. Omitted (falsy) by every existing
+// caller, so Daily Discovery's own recency behavior is unchanged.
 async function collectWebDiscoverySource(source, searchOptions = {}) {
   try {
     const candidates = (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
@@ -113,7 +121,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         fallbackUrl = fallback.url;
       }
 
-      if (searchOptions.freshness && isClearlyStale(meta.published_at)) {
+      if (searchOptions.freshness && !searchOptions.skipStaleCheck && isClearlyStale(meta.published_at)) {
         filtered++;
         details.push({ title: candidate.title, link: candidate.link, stage: 'stale_for_daily_discovery', published_at: meta.published_at });
         continue;
