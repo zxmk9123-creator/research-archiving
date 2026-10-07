@@ -1251,21 +1251,25 @@ async function router() {
     if (path === 'home' || path === '') await renderHome();
     else if (path === 'archive') await renderArchive(query);
     else if (path === 'latest') await renderArchive(query, { mode: 'latest' });
-    else if (path === 'detail') {
-      await renderDetail(param);
-      // The browser can otherwise preserve the previous page's scroll
-      // position across a hash change; a Detail view should always open
-      // at its own top regardless of where the visitor scrolled to on
-      // Archive.
-      window.scrollTo(0, 0);
-    }
+    else if (path === 'detail') await renderDetail(param);
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
     else app.innerHTML = '<p>페이지를 찾을 수 없습니다.</p>';
+    // The browser can otherwise preserve/restore the previous page's scroll
+    // position across a hash change or back/forward navigation (see the
+    // history.scrollRestoration override below) — every route, including
+    // switching between Latest and All Results (or returning to a tab left
+    // earlier), always opens at its own top instead.
+    window.scrollTo(0, 0);
   } catch (err) {
     app.innerHTML = `<p>오류: ${err.message}</p>`;
   }
 }
+
+// Without this, the browser restores each history entry's own scroll
+// position on back/forward — exactly the preservation this route change
+// (router()'s window.scrollTo(0, 0) on every render) is meant to remove.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
