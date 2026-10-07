@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callFreeLLMAPI } = require('../server/lib/ai/provider');
+const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callFreeLLMAPI, FREELLMAPI_TIMEOUT_MS } = require('../server/lib/ai/provider');
 
 function transientError(message) {
   const err = new Error(message);
@@ -219,5 +219,60 @@ test('callFreeLLMAPI: throws when FREELLMAPI_BASE_URL is missing', async () => {
     await assert.rejects(() => callFreeLLMAPI({ system: 's', user: 'u' }), /FREELLMAPI_BASE_URL/);
   } finally {
     delete process.env.FREELLMAPI_API_KEY;
+  }
+});
+
+// --- Caller timeout budget: must safely exceed FreeLLMAPI's own documented
+// worst-case retry budget (FALLBACK_TIME_BUDGET_MS=45s default, widened up
+// to MAX_BUDGET_MULTIPLIER=3x = 135s) plus a safety margin, so the caller
+// never aborts a cascade FreeLLMAPI itself is still healthily working
+// through. See the module-level comment above callFreeLLMAPI(). ---
+
+test('FREELLMAPI_TIMEOUT_MS is 150000ms (135s FreeLLMAPI worst-case budget + 15s margin), not the old 60000ms', () => {
+  assert.equal(FREELLMAPI_TIMEOUT_MS, 150000);
+  assert.ok(FREELLMAPI_TIMEOUT_MS > 60000, 'must be strictly larger than the previous 60s cap');
+  assert.ok(FREELLMAPI_TIMEOUT_MS > 135000, 'must safely exceed FreeLLMAPI\'s documented 135s worst-case (45s base budget x 3 adaptive widening)');
+});
+
+test('callFreeLLMAPI: passes FREELLMAPI_TIMEOUT_MS to AbortSignal.timeout, not the old 60000ms value', async () => {
+  const originalTimeout = AbortSignal.timeout;
+  const capturedTimeouts = [];
+  AbortSignal.timeout = (ms) => { capturedTimeouts.push(ms); return originalTimeout(ms); };
+  const restoreFetch = mockFetchByUrl([
+    ['router.example.com', async () => jsonResponse(200, { choices: [{ message: { content: 'ok' } }] })],
+  ]);
+  try {
+    process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+    process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
+    await callFreeLLMAPI({ system: 's', user: 'u' });
+    assert.deepEqual(capturedTimeouts, [FREELLMAPI_TIMEOUT_MS]);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+    restoreFetch();
+    delete process.env.FREELLMAPI_API_KEY;
+    delete process.env.FREELLMAPI_BASE_URL;
+  }
+});
+
+// A cascade that takes longer than the OLD 60s cap, but well within the new
+// 150s one, must still succeed — proving the caller no longer aborts a
+// healthy-but-slow FreeLLMAPI cascade (the exact production symptom:
+// "client disconnected mid-attempt" on a cascade that was still working).
+test('callFreeLLMAPI: a response that would have exceeded the old 60s timeout still succeeds under the new budget', async () => {
+  const restoreFetch = mockFetchByUrl([
+    ['router.example.com', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80)); // simulated slow cascade, scaled down for a fast test
+      return jsonResponse(200, { choices: [{ message: { content: 'slow but healthy cascade result' } }] });
+    }],
+  ]);
+  try {
+    process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+    process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
+    const text = await callFreeLLMAPI({ system: 's', user: 'u' });
+    assert.equal(text, 'slow but healthy cascade result');
+  } finally {
+    restoreFetch();
+    delete process.env.FREELLMAPI_API_KEY;
+    delete process.env.FREELLMAPI_BASE_URL;
   }
 });

@@ -8,6 +8,11 @@
 // fallback/rotation on its own side. One configured endpoint, one bearer
 // token.
 
+// See callFreeLLMAPI() below for how this value is derived from
+// FreeLLMAPI's own documented retry budget (FALLBACK_TIME_BUDGET_MS=45s
+// default, widened up to 3x = 135s worst case) plus a 15s safety margin.
+const FREELLMAPI_TIMEOUT_MS = 150000;
+
 function markFallback(err, failureType) {
   err.transient = true; // kept for back-compat with existing call sites/tests
   err.failureType = failureType;
@@ -59,9 +64,29 @@ async function callFreeLLMAPI({ system, user }) {
 
   // FreeLLMAPI itself cascades through several free-tier upstream models on
   // failure (Groq -> OpenRouter -> Google -> ...) before answering, which
-  // routinely takes longer than the 20s budget other single-hop providers
-  // need — a 20s client-side abort was cutting FreeLLMAPI off mid-fallback
-  // ("client disconnected mid-attempt" in its logs), not a hang on our end.
+  // routinely takes longer than the budget a single-hop provider needs. A
+  // prior 20s client-side abort was already raised to 60s for exactly this
+  // reason, but 60s still isn't enough: production logs (Daily Discovery,
+  // 2026-10-07) showed FreeLLMAPI's own "client disconnected mid-attempt"
+  // on cascades that were still healthy and progressing, plus several
+  // successful completions that themselves took 40-52s — leaving almost no
+  // margin inside a 60s cap.
+  //
+  // FREELLMAPI_TIMEOUT_MS is sized off FreeLLMAPI's own documented retry
+  // budget, not a guess: FALLBACK_TIME_BUDGET_MS defaults to 45_000ms
+  // (attempt 0 and the first failover hop are always allowed regardless of
+  // budget; FreeLLMAPI's ttfb-budget.ts widens that per-endpoint for a
+  // historically-slow-but-successful endpoint, capped at
+  // MAX_BUDGET_MULTIPLIER = 3x). So FreeLLMAPI's own worst case before IT
+  // gives up and returns a clean exhaustion response is
+  // 45_000 * 3 = 135_000ms. This caller timeout must safely exceed that so
+  // a healthy cascade is never killed out from under FreeLLMAPI — hence
+  // 135_000 + a 15_000ms margin (DNS/TLS/queueing/response transmission
+  // overhead on top of FreeLLMAPI's own internal budget) = 150_000ms.
+  // If FreeLLMAPI's FALLBACK_TIME_BUDGET_MS is ever reconfigured away from
+  // its 45s default, this value should be re-derived the same way
+  // (new_budget * 3 + 15_000). See the module-level FREELLMAPI_TIMEOUT_MS
+  // declaration above for the exported constant.
   const res = await fetchProvider('freellmapi', `${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -76,7 +101,7 @@ async function callFreeLLMAPI({ system, user }) {
         { role: 'user', content: user },
       ],
     }),
-  }, 60000);
+  }, FREELLMAPI_TIMEOUT_MS);
 
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -133,4 +158,5 @@ module.exports = {
   runProviderChain,
   buildProviderChain,
   requireNonEmptyText,
+  FREELLMAPI_TIMEOUT_MS,
 };
