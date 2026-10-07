@@ -298,7 +298,7 @@ async function renderHome() {
 
   app.innerHTML = `
     <h1>Home</h1>
-    <p class="page-lede">유지 시장 리서치 아카이브를 테마별로 둘러보세요.</p>
+    <p class="page-lede">최근 유지시장의 주요 이슈를 둘러보세요.</p>
     ${themesHtml}
   `;
 
