@@ -51,6 +51,19 @@ function mockExtractMetadata(handler) {
   return () => { extractMetadataModule.extractMetadata = original; };
 }
 
+// Unlike mockExtractMetadata above, this mocks global.fetch and lets the
+// REAL extractMetadata() run — needed to exercise its isBotBlockPage()
+// check, which mocking extractMetadata itself would bypass entirely.
+function mockFetchHtml(html, status = 200) {
+  const original = global.fetch;
+  global.fetch = async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => html,
+  });
+  return () => { global.fetch = original; };
+}
+
 function webDiscoverySource(overrides) {
   return {
     id: 50,
@@ -523,6 +536,35 @@ test('collectWebDiscoverySource: a unique-violation on INSERT (duplicate candida
   } finally {
     restoreSearch();
     restoreMeta();
+    restore();
+  }
+}));
+
+// Regression for a confirmed production defect: several Archive Discovery
+// items were archived with titles like "Client Challenge" or "Radware Bot
+// Manager Captcha" — a bot-block/CAPTCHA interstitial returns HTTP 200
+// with a real <title>, so extractMetadata() "succeeded" and the
+// placeholder page was treated as the article itself. Uses mockFetchHtml
+// (not mockExtractMetadata) so the REAL extractMetadata() runs and its
+// isBotBlockPage() check is actually exercised.
+test('collectWebDiscoverySource: a bot-block/CAPTCHA interstitial (HTTP 200, "Client Challenge" title) is treated as an acquisition failure, never reaches item creation', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([
+    { title: 'Palm oil sustainability journal study', link: 'https://link.springer.com/content/pdf/blocked.pdf' },
+  ]);
+  const restoreFetch = mockFetchHtml('<html><head><title>Client Challenge</title></head><body></body></html>');
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource());
+    assert.equal(result.ok, true);
+    assert.equal(result.failed, 1, 'the bot-block page must count as an acquisition failure');
+    assert.equal(result.archived, 0);
+    assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')), 'a bot-block interstitial must never reach item creation');
+    assert.ok(result.details.some((d) => d.stage === 'acquisition_failed' && /bot-block/.test(d.error)));
+  } finally {
+    restoreSearch();
+    restoreFetch();
     restore();
   }
 }));
