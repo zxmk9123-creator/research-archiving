@@ -189,6 +189,23 @@ test('POST /: AI provider failure returns a generic 502 without leaking provider
   }
 });
 
+test('SYSTEM_PROMPT instructs the model never to emit citation markers — the app owns citations', () => {
+  const prompt = searchRouter.SYSTEM_PROMPT;
+  assert.match(prompt, /Do NOT output any citation marker/);
+  assert.match(prompt, /\[1\]/); // named as a forbidden example, not an instruction to use it
+  assert.match(prompt, /no \[1\], \[7\], \(1\)/);
+  // Must not instruct the model to cite by bracket/number (the pre-redesign prompt did).
+  assert.ok(!/refer to them by their \[번호\]/.test(prompt));
+});
+
+test('buildMaterialsBlock labels retrieved materials without bracket-style numbering (so the model has no bracket syntax to copy)', () => {
+  const block = searchRouter.buildMaterialsBlock([
+    { title: '팜유 가격 동향', source_name: 'MPOB', published_at: '2026-09-01', summary: '요약 내용', insight: null, ai_summary: null, ai_insight: null },
+  ]);
+  assert.match(block, /자료 1 — 제목: 팜유 가격 동향/);
+  assert.ok(!block.includes('[1]'));
+});
+
 test('POST /: conversation history is folded into the provider prompt as prior turns', async () => {
   const { restore } = mockPool([
     ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],

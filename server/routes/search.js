@@ -51,11 +51,19 @@ async function retrieveCandidates(question) {
   return rows;
 }
 
+// The application owns citations (see the `sources` array built from real
+// DB rows below) — the model must never emit its own citation markers,
+// since those can't be guaranteed to map back to a real record. Light
+// Markdown is still allowed so the client's controlled renderer can turn it
+// into real headings/bold/lists instead of a wall of plain text.
 const SYSTEM_PROMPT = `You are the AI Research Search assistant for the Oil&Fats Research Center, a Korean oils & fats (유지) market intelligence archive.
 Answer the user's question using ONLY the "Research Center materials" supplied in the user message below — never your own outside knowledge, never invented facts, never invented sources or URLs.
+Formatting:
+- Light Markdown is fine for readability: **bold** for key terms/figures, "- " for a bullet list, "1. " for a numbered list, and a short "#" line for a section heading when the answer has multiple parts.
+- Do NOT output any citation marker — no [1], [7], (1), footnote-style references, Markdown links, or raw URLs. The application lists the sources separately; never cite them yourself, by number or otherwise.
 Rules:
 - If the supplied materials do not contain enough information to answer, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
-- Every factual claim must be traceable to one of the supplied materials — refer to them by their [번호] (e.g. [1], [2]) when citing.
+- Every factual claim must be grounded in the supplied materials, referred to in plain language (e.g. "관련 자료에 따르면") — never by a number, bracket, or link.
 - Clearly separate stated evidence from your own interpretation/inference; phrase inference as such (e.g. "~로 추정됩니다", "~일 가능성이 있습니다"), never as a reported fact.
 - Be concise and research-oriented — no greetings, no conversational filler, no restating the question.
 - If earlier conversation turns are given, treat them as context for a follow-up question, but still ground every claim only in the materials given now.
@@ -63,7 +71,7 @@ Rules:
 
 function buildMaterialsBlock(candidates) {
   return candidates.map((m, i) => [
-    `[${i + 1}] 제목: ${m.title}`,
+    `자료 ${i + 1} — 제목: ${m.title}`,
     `출처: ${m.source_name || '미확인'}`,
     `발행일: ${m.published_at ? String(m.published_at).slice(0, 10) : '미확인'}`,
     `요약: ${m.summary || m.ai_summary || '(요약 없음)'}`,
@@ -129,3 +137,4 @@ module.exports.extractKeywords = extractKeywords;
 module.exports.buildMaterialsBlock = buildMaterialsBlock;
 module.exports.buildHistoryBlock = buildHistoryBlock;
 module.exports.INSUFFICIENT_MESSAGE = INSUFFICIENT_MESSAGE;
+module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;

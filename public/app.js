@@ -292,7 +292,7 @@ function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
 let aiSearchHistory = [];
 
 function aiSearchHtml() {
-  return `<section class="ai-search">
+  return `<section class="ai-search" id="ai-search">
     <form id="ai-search-form">
       <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off">
       <button type="submit" class="btn">검색</button>
@@ -301,17 +301,86 @@ function aiSearchHtml() {
   </section>`;
 }
 
+// Controlled Markdown-ish rendering for the model's answer — never raw
+// innerHTML of model text. escapeHtml() runs on every text fragment before
+// any tag is added, so the model cannot inject HTML of its own; the only
+// tags on the page come from this file's own template strings. Also strips
+// any citation marker defensively (the system prompt forbids them, but a
+// model can still slip one in) so a stray [1]/(1) never reaches the page.
+function renderInlineAnswerText(line) {
+  const escaped = escapeHtml(line);
+  return escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+function renderAnswerBlock(block) {
+  const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  const headingMatch = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
+  if (headingMatch) {
+    return `<h3 class="ai-answer-heading">${renderInlineAnswerText(headingMatch[1])}</h3>`;
+  }
+  if (lines.every((l) => /^[-•]\s+/.test(l))) {
+    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-•]\s+/, ''))}</li>`).join('')}</ul>`;
+  }
+  if (lines.every((l) => /^\d+[.)]\s+/.test(l))) {
+    return `<ol class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`;
+  }
+  return `<p class="ai-answer-p">${lines.map(renderInlineAnswerText).join('<br>')}</p>`;
+}
+
+function renderAnswerHtml(rawAnswer) {
+  const stripped = String(rawAnswer || '')
+    .replace(/\[\d{1,2}\]/g, '')
+    .replace(/\(\d{1,2}\)/g, '')
+    .trim();
+  const blocks = stripped.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  return `<div class="ai-answer">${blocks.map(renderAnswerBlock).join('')}</div>`;
+}
+
+// Source numbers/titles/dates/links come only from the DB rows the server
+// already returned (never parsed out of the model's text) — see
+// server/routes/search.js, which builds `sources` from the same retrieved
+// rows sent to the LLM.
 function aiSearchSourcesHtml(sources) {
   if (!sources || !sources.length) return '';
-  return `<ul class="ai-search-sources">${sources.map((s) => `
-    <li><a href="#/detail/${s.id}">${escapeHtml(s.title)}</a>
-      <span class="meta">${escapeHtml(s.source || '미확인')} · ${s.published_at ? String(s.published_at).slice(0, 10) : '미확인'}</span>
-    </li>`).join('')}</ul>`;
+  return `<div class="ai-search-sources">
+    <div class="ai-search-sources-label">SOURCES · ${sources.length}</div>
+    <ol class="ai-search-sources-list">${sources.map((s) => `
+      <li>
+        <a href="#/detail/${s.id}">
+          <span class="ai-source-title">${escapeHtml(s.title)}</span>
+          <span class="ai-source-meta">${escapeHtml(s.source || '미확인')} · ${s.published_at ? String(s.published_at).slice(0, 10) : '미확인'}</span>
+        </a>
+      </li>`).join('')}</ol>
+  </div>`;
+}
+
+// Rotates through status copy that reflects the actual request lifecycle
+// (retrieval -> provider call -> formatting) — no fake percentage/progress
+// bar, just what's genuinely happening while the one fetch is in flight.
+const AI_SEARCH_STATUS_STEPS = ['Searching Research Archive', 'Analyzing relevant sources', 'Preparing evidence'];
+let aiSearchStatusTimer = null;
+
+function startAiSearchStatus(moduleEl, statusEl) {
+  let i = 0;
+  statusEl.textContent = AI_SEARCH_STATUS_STEPS[0];
+  moduleEl.classList.add('is-searching');
+  aiSearchStatusTimer = setInterval(() => {
+    i = (i + 1) % AI_SEARCH_STATUS_STEPS.length;
+    statusEl.textContent = AI_SEARCH_STATUS_STEPS[i];
+  }, 1400);
+}
+
+function stopAiSearchStatus(moduleEl) {
+  clearInterval(aiSearchStatusTimer);
+  aiSearchStatusTimer = null;
+  moduleEl.classList.remove('is-searching');
 }
 
 function bindAiSearchForm() {
   const form = document.getElementById('ai-search-form');
   if (!form) return;
+  const moduleEl = document.getElementById('ai-search');
   form.onsubmit = async (e) => {
     e.preventDefault();
     const input = document.getElementById('ai-search-input');
@@ -322,8 +391,12 @@ function bindAiSearchForm() {
       resultEl.innerHTML = '<p class="meta">질문을 입력해 주세요.</p>';
       return;
     }
-    resultEl.innerHTML = '<p class="meta">검색 중...</p>';
+    // Disable duplicate submissions while a request is already in flight.
+    if (submitBtn.disabled) return;
+    resultEl.innerHTML = '<p class="ai-search-status"></p>';
+    const statusEl = resultEl.querySelector('.ai-search-status');
     submitBtn.disabled = true;
+    startAiSearchStatus(moduleEl, statusEl);
     try {
       const res = await fetch('/api/search', {
         method: 'POST',
@@ -338,13 +411,14 @@ function bindAiSearchForm() {
       aiSearchHistory.push({ role: 'user', content: question });
       aiSearchHistory.push({ role: 'assistant', content: body.answer });
       resultEl.innerHTML = `
-        <div class="ai-search-answer">${escapeHtml(body.answer).replace(/\n/g, '<br>')}</div>
+        ${renderAnswerHtml(body.answer)}
         ${aiSearchSourcesHtml(body.sources)}
       `;
       input.value = '';
     } catch (err) {
       resultEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
     } finally {
+      stopAiSearchStatus(moduleEl);
       submitBtn.disabled = false;
     }
   };
