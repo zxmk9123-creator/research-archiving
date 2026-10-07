@@ -2,8 +2,23 @@ const express = require('express');
 const pool = require('../db/pool');
 const { collectBySource, runDueCollections, collectAllSourcesNow } = require('../lib/collector');
 const { collectWebDiscoverySource } = require('../lib/webDiscoveryIngest');
+const { collectDailyDiscoveryNow } = require('../lib/dailyDiscovery');
 
 const router = express.Router();
+
+// Manual trigger: run collectDailyDiscoveryNow() — the exact same function
+// the 08:00 KST scheduler calls — on demand, regardless of
+// maybeRunDailyDiscovery()'s once-per-day claim (that claim guards the
+// automatic scheduler only; this route bypasses it entirely, same as
+// collect-all above bypasses frequency_days). Unlike the backfill-*
+// one-time routes further down, this goes through
+// dailyDiscoverySearchOptions() per source, so is_archive_discovery
+// sources correctly get itemType='보고서' and no freshness bias.
+router.post('/trigger-daily-discovery-now', async (req, res) => {
+  const result = await collectDailyDiscoveryNow();
+  console.log(`daily_discovery manual_run_completed ${JSON.stringify(result.totals)}`);
+  res.json(result);
+});
 
 // Manual trigger: run all due RSS sources now.
 router.post('/collect', async (req, res) => {

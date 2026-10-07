@@ -136,10 +136,21 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
 
       let itemId;
       try {
+        // searchOptions.itemType lets a caller route a candidate to a type
+        // other than the '뉴스' default — needed so Archive-oriented
+        // Discovery Registry queries (reports/papers/institutional
+        // research, long-shelf-life material) land in deriveContentCategory
+        // as 'archive' rather than always being counted as 'daily_report'
+        // (see classification.js: content_category is derived purely from
+        // `type`, and every Web Discovery item previously hardcoded '뉴스'
+        // here regardless of the query's own intent — the Archive view
+        // could structurally never receive anything from this pipeline).
+        // Defaults to '뉴스' so every existing caller is unaffected.
+        const itemType = searchOptions.itemType || '뉴스';
         const { rows: inserted } = await pool.query(
           `INSERT INTO items (title, source_url, published_at, source_id, type, thumbnail_url, acquisition_fallback_url)
-           VALUES ($1, $2, $3, $4, '뉴스', $5, $6) RETURNING id`,
-          [meta.title || candidate.title, candidate.link, meta.published_at, source.id, meta.thumbnail_url, fallbackUrl]
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [meta.title || candidate.title, candidate.link, meta.published_at, source.id, itemType, meta.thumbnail_url, fallbackUrl]
         );
         itemId = inserted[0].id;
       } catch (err) {

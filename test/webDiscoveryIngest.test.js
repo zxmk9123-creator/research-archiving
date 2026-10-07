@@ -86,9 +86,36 @@ test('collectWebDiscoverySource: a new relevant candidate reaches item creation 
     assert.ok(insertCall, 'expected the candidate to reach item creation');
     assert.equal(insertCall.params[0], 'Palm oil export tariff raised to 10%');
     assert.equal(insertCall.params[1], 'https://example.org/a');
-    assert.match(insertCall.text, /'뉴스'/);
+    // type is bound as $5, not a literal, so a plain collectWebDiscoverySource()
+    // call (no searchOptions.itemType) still defaults to '뉴스'.
+    assert.equal(insertCall.params[4], '뉴스');
 
     assert.ok(calls.some((c) => c.text.includes('UPDATE sources SET last_collected_at')));
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
+test('collectWebDiscoverySource: searchOptions.itemType overrides the default 뉴스 type (Archive Discovery routing)', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([{ title: 'Palm oil value chain structure study', link: 'https://example.org/archive-a' }]);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Palm oil value chain structure study',
+    summary: 'A structural analysis of the palm oil value chain and its major processors.',
+    thumbnail_url: null,
+    published_at: null,
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 778 }] })],
+    ['SELECT \\* FROM items WHERE id', () => ({ rows: [{ id: 778, ai_status: null }] })],
+  ]);
+  try {
+    await collectWebDiscoverySource(webDiscoverySource(), { itemType: '보고서' });
+    const insertCall = calls.find((c) => c.text.includes('INSERT INTO items'));
+    assert.ok(insertCall, 'expected the candidate to reach item creation');
+    assert.equal(insertCall.params[4], '보고서');
   } finally {
     restoreSearch();
     restoreMeta();
@@ -218,7 +245,7 @@ test('collectWebDiscoverySource: a 403 falls back to an alternate accessible sou
     // source_url (dedup key) stays the ORIGINAL blocked link; the fallback
     // URL is recorded separately for traceability.
     assert.equal(insertCall.params[1], blockedLink);
-    assert.equal(insertCall.params[5], altLink);
+    assert.equal(insertCall.params[6], altLink);
 
     assert.ok(result.details.some((d) => d.stage === 'acquisition_fallback_used' && d.fallbackUrl === altLink));
     assert.ok(result.details.some((d) => d.stage === 'ai_screening_failed'));

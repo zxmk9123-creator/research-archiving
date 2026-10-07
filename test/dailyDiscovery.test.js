@@ -305,6 +305,23 @@ test('dailyDiscoverySearchOptions: requests freshness for a news/market query, n
   assert.deepEqual(dailyDiscoverySearchOptions({ url: 'palm oil soybean oil price volatility peer-reviewed journal research study' }), {});
 });
 
+test('dailyDiscoverySearchOptions: an is_archive_discovery source gets itemType 보고서 and no freshness bias, regardless of its query text', () => {
+  // Even a plain news-looking query text must still route to itemType
+  // '보고서' when the source is flagged — the column decides, not a
+  // second round of query-text parsing.
+  assert.deepEqual(
+    dailyDiscoverySearchOptions({ url: 'palm oil soybean oil price market news today', is_archive_discovery: true }),
+    { itemType: '보고서' }
+  );
+});
+
+test('dailyDiscoverySearchOptions: is_archive_discovery=false (or absent) falls through to the existing freshness/academic-literature logic unchanged', () => {
+  assert.deepEqual(
+    dailyDiscoverySearchOptions({ url: 'palm oil soybean oil price market news today', is_archive_discovery: false }),
+    { freshness: 'pw' }
+  );
+});
+
 function mockSearchWebCapturingOptions(byQuery) {
   const original = webSearchAdapter.searchWeb;
   const callsByQuery = {};

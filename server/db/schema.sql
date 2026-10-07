@@ -262,6 +262,59 @@ FROM (VALUES
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Archive Discovery: sources.is_archive_discovery=true routes
+-- collectWebDiscoverySource() to itemType='보고서' (see
+-- dailyDiscovery.js's dailyDiscoverySearchOptions) instead of the default
+-- '뉴스', so these items land in deriveContentCategory() as 'archive'
+-- rather than 'daily_report'. Before this column, EVERY Web Discovery
+-- item was hardcoded type='뉴스' regardless of query intent, so the
+-- Archive view could never receive anything from this pipeline even
+-- though research-literature/institutional/company-IR queries had
+-- existed in the registry since the second expansion above — this
+-- backfills the flag on those 8 by name (no-op once set).
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_archive_discovery BOOLEAN DEFAULT false;
+
+UPDATE sources SET is_archive_discovery = true
+WHERE method = 'crawl' AND name IN (
+  'Web Discovery: palm oil soybean oil peer-reviewed journal research',
+  'Web Discovery: edible oil market working paper academic research',
+  'Web Discovery: institutional white paper oilseed market outlook',
+  'Web Discovery: commodity oil price forecast research institute',
+  'Web Discovery: vegetable oil tanker shipping economics research paper',
+  'Web Discovery: palm oil sustainability journal study',
+  'Web Discovery: edible oil company investor relations earnings',
+  'Web Discovery: palm oil company annual report investor presentation'
+) AND is_archive_discovery IS DISTINCT FROM true;
+
+-- Fifth Discovery Query Registry expansion: fills the Archive-relevant
+-- intents the registry left thin even after the retag above — value
+-- chain/industry structure, manufacturing process (crushing/extraction/
+-- refining/fractionation), structural trade/production-capacity analysis
+-- (distinct from the news-framed production/supply/demand query already
+-- in the registry), supply-chain/logistics structure (distinct from the
+-- spot freight-rate queries), regulation/certification framework
+-- (distinct from the EU-only EUDR query), crush-margin/oil-meal-spread
+-- economics (distinct from the news-framed crush-margin query), major-
+-- player/competitor/vertical-integration analysis, processing technology/
+-- innovation, and long-term structural/strategic outlook. All 9 are
+-- is_archive_discovery=true (and therefore is_daily_discovery=true) —
+-- same idempotent pattern as every prior expansion; existing queries and
+-- pipeline behavior are otherwise untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery, is_archive_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true, true
+FROM (VALUES
+  ('Archive Discovery: edible oil value chain industry structure', 'palm soybean edible oil value chain industry structure analysis report'),
+  ('Archive Discovery: crushing extraction refining fractionation process', 'palm soybean oil crushing extraction refining fractionation process technology report'),
+  ('Archive Discovery: oilseed trade structure production capacity analysis', 'global edible oil oilseed trade structure production capacity industry analysis'),
+  ('Archive Discovery: edible oil port logistics supply chain structure', 'edible oil port logistics supply chain infrastructure structural analysis'),
+  ('Archive Discovery: palm oil sustainability certification regulation framework', 'palm oil RSPO sustainability certification tariff regulation policy framework analysis'),
+  ('Archive Discovery: crush margin oil meal spread economics', 'soybean crush margin oil meal spread economics price relationship analysis'),
+  ('Archive Discovery: major player competitor vertical integration analysis', 'ADM Bunge Cargill Wilmar competitor analysis vertical integration market structure'),
+  ('Archive Discovery: edible oil processing technology innovation', 'edible oil processing technology innovation quality improvement research'),
+  ('Archive Discovery: edible oil industry long-term structural outlook', 'edible oil industry long-term structural outlook strategic analysis')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
   id SERIAL PRIMARY KEY,

@@ -31,8 +31,23 @@ const ACADEMIC_LITERATURE_QUERY_RE = /journal|peer-reviewed|working paper|academ
 function isAcademicLiteratureQuery(queryText) {
   return ACADEMIC_LITERATURE_QUERY_RE.test(queryText || '');
 }
+
+// Archive Discovery Registry queries (sources.is_archive_discovery=true):
+// reports/papers/institutional research/long-shelf-life structural
+// material, as opposed to day-to-day news. Two consequences, both keyed
+// off that one column so no query-text parsing is needed:
+//   - itemType '보고서' instead of the default '뉴스', so
+//     classification.js's deriveContentCategory() files the eventual
+//     Published item under 'archive' rather than 'daily_report' — see the
+//     comment in webDiscoveryIngest.js's INSERT for why this matters.
+//   - no freshness:'pw' bias, same exemption academic-literature queries
+//     already get: a report or paper is still useful well past a week
+//     old, and Archive discovery is explicitly not meant to be a
+//     recency-only crawler (unlike the rest of Daily Discovery).
 function dailyDiscoverySearchOptions(source) {
-  return isAcademicLiteratureQuery(source.url) ? {} : { freshness: 'pw' };
+  if (source.is_archive_discovery) return { itemType: '보고서' };
+  if (isAcademicLiteratureQuery(source.url)) return {};
+  return { freshness: 'pw' };
 }
 
 // Current date/hour in Asia/Seoul, independent of the container's own

@@ -136,10 +136,68 @@ test('discovery registry: the fourth expansion does not duplicate any pre-existi
   }
 });
 
+// --- Fifth expansion: Archive Discovery (is_archive_discovery=true) —
+// value chain/industry structure, manufacturing process, structural
+// trade/production-capacity analysis, supply-chain/logistics structure,
+// regulation/certification framework, crush-margin/oil-meal-spread
+// economics, major-player/competitor/vertical-integration analysis,
+// processing technology/innovation, and long-term structural outlook.
+// Distinct from the news-framed queries already in the registry covering
+// similar topics (production/supply/demand, freight rates, EUDR, crush
+// margin) — these are deliberately framed toward reusable structural
+// material instead of day-to-day news. ---
+
+const FIFTH_EXPANSION_QUERY_NAMES = [
+  'Archive Discovery: edible oil value chain industry structure',
+  'Archive Discovery: crushing extraction refining fractionation process',
+  'Archive Discovery: oilseed trade structure production capacity analysis',
+  'Archive Discovery: edible oil port logistics supply chain structure',
+  'Archive Discovery: palm oil sustainability certification regulation framework',
+  'Archive Discovery: crush margin oil meal spread economics',
+  'Archive Discovery: major player competitor vertical integration analysis',
+  'Archive Discovery: edible oil processing technology innovation',
+  'Archive Discovery: edible oil industry long-term structural outlook',
+];
+
+// The second-expansion research-literature/institutional/company-IR
+// queries predate the is_archive_discovery column and are retagged onto
+// it by name, not re-inserted — see NEW_RESEARCH_QUERY_NAMES above.
+const RETAGGED_ARCHIVE_QUERY_NAMES = NEW_RESEARCH_QUERY_NAMES;
+
+test('discovery registry: the fifth expansion (Archive Discovery) is seeded as crawl + is_daily_discovery + is_archive_discovery', () => {
+  for (const name of FIFTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected schema.sql to seed "${name}"`);
+  }
+  const fifthSeedBlock = schemaSql.slice(
+    schemaSql.indexOf(FIFTH_EXPANSION_QUERY_NAMES[0]) - 500,
+    schemaSql.indexOf(FIFTH_EXPANSION_QUERY_NAMES[FIFTH_EXPANSION_QUERY_NAMES.length - 1]) + 500
+  );
+  assert.match(fifthSeedBlock, /'crawl', 7, 'B', true, true/);
+  assert.match(fifthSeedBlock, /WHERE NOT EXISTS \(SELECT 1 FROM sources s WHERE s\.name = v\.name\)/);
+});
+
+test('discovery registry: the fifth expansion does not duplicate any pre-existing query name', () => {
+  const allPriorNames = [...PRE_EXISTING_QUERY_NAMES, ...NEW_RESEARCH_QUERY_NAMES, ...THIRD_EXPANSION_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES];
+  for (const name of FIFTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(!allPriorNames.includes(name), `"${name}" must be new, not a pre-existing query`);
+  }
+});
+
+test('discovery registry: is_archive_discovery column exists and backfills the 8 pre-existing research/institutional/IR queries by name', () => {
+  assert.match(schemaSql, /ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_archive_discovery BOOLEAN DEFAULT false/);
+  const backfillBlock = schemaSql.slice(
+    schemaSql.indexOf('UPDATE sources SET is_archive_discovery = true'),
+    schemaSql.indexOf('is_archive_discovery IS DISTINCT FROM true') + 50
+  );
+  for (const name of RETAGGED_ARCHIVE_QUERY_NAMES) {
+    assert.ok(backfillBlock.includes(`'${name}'`), `expected the is_archive_discovery backfill to retag "${name}"`);
+  }
+});
+
 test('discovery registry: the Query Registry stays bounded (not dozens of queries)', () => {
-  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length;
-  assert.equal(totalQueries, 25);
-  assert.ok(totalQueries < 30, 'the registry should stay bounded enough to control API cost/search volume');
+  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length + FIFTH_EXPANSION_QUERY_NAMES.length;
+  assert.equal(totalQueries, 34);
+  assert.ok(totalQueries < 40, 'the registry should stay bounded enough to control API cost/search volume');
 });
 
 test('discovery registry: getDueSources/collectDailyDiscoveryNow select generically on is_daily_discovery — no per-query-name code exists', () => {
@@ -149,7 +207,7 @@ test('discovery registry: getDueSources/collectDailyDiscoveryNow select generica
   // by method/is_daily_discovery/frequency columns, so every new row above
   // is automatically picked up by both the hourly scheduler and the daily
   // job without needing its own code path.
-  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES]) {
+  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES]) {
     assert.ok(!collectorJs.includes(name), 'collector.js must not special-case a query name');
     assert.ok(!dailyDiscoveryJs.includes(name), 'dailyDiscovery.js must not special-case a query name');
   }
