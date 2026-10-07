@@ -595,25 +595,52 @@ async function renderDetail(id) {
 // tabs (a view axis, not a new query param). Reference sources are never
 // collected (method stays 'manual'), so this table shows cataloging fields
 // instead of ingestion-status ones.
+// Each sector_links entry ({sector, label, url}) renders as its own
+// clickable link, never collapsed into one generic name->url link — the
+// whole point is that a single institution can expose several verified
+// sector/commodity-specific pages (MPOB's production vs. export statistics,
+// for instance), and a reviewer needs to reach the RIGHT one directly.
+function sectorLinksHtml(sectorLinks) {
+  if (!sectorLinks || !sectorLinks.length) return '-';
+  return sectorLinks.map((l) =>
+    `<a class="pill" href="${l.url}" target="_blank" title="${l.sector}">${l.label}</a>`
+  ).join(' ');
+}
+
 function referenceSourcesTable(sources) {
   const refs = sources.filter((s) => s.is_reference);
   if (!refs.length) return '<p class="meta">등록된 Reference Source가 없습니다.</p>';
   return `<table class="sources-table">
-    <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>접근형식</th><th>업데이트 주기</th><th>RSS</th><th>최종 검증일</th><th>비고</th><th></th></tr>
+    <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>섹터별 링크</th><th>접근형식</th><th>업데이트 주기</th><th>RSS</th><th>최종 검증일</th><th>비고</th><th></th></tr>
     ${refs.map((s) => `<tr>
-      <td class="cell-strong"><a href="${s.url || '#'}" target="_blank">${s.name}</a></td>
+      <td class="cell-strong">${s.name}</td>
       <td class="cell-muted">${s.source_type || '-'}</td>
       <td class="cell-muted">${s.region || '-'}</td>
       <td class="cell-muted">${(s.commodities || []).join(', ') || '-'}</td>
       <td class="cell-muted">${s.coverage_note || '-'}</td>
+      <td class="cell-muted">${sectorLinksHtml(s.sector_links)}</td>
       <td class="cell-muted">${(s.access_format || []).join(', ') || '-'}</td>
       <td class="cell-muted">${s.update_frequency || '-'}</td>
       <td class="cell-muted">${s.rss_available ? '있음' : '없음'}</td>
       <td class="cell-muted">${s.last_verified_at ? new Date(s.last_verified_at).toLocaleDateString() : '-'}</td>
       <td class="cell-muted">${s.usage_note || '-'}</td>
-      <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
+      <td>
+        <button class="btn-text-action" data-edit-source="${s.id}">편집</button>
+        <button class="btn-text-action" data-delete-source="${s.id}">삭제</button>
+      </td>
     </tr>`).join('')}
   </table>`;
+}
+
+// One {sector,label,url} row in the add/edit form's dynamic sector-links
+// sub-form (see renderSources).
+function sectorLinkRowHtml(link = {}) {
+  return `<div class="sector-link-row" style="display:flex;gap:6px;margin-bottom:4px">
+    <input class="sl-sector" placeholder="섹터 (예: 팜유 생산 통계)" value="${link.sector || ''}" style="flex:1">
+    <input class="sl-label" placeholder="라벨 (예: Monthly Production)" value="${link.label || ''}" style="flex:1">
+    <input class="sl-url" placeholder="URL (기관 사이트의 해당 섹터 전용 페이지)" value="${link.url || ''}" style="flex:2">
+    <button type="button" class="btn-text-action sl-remove">삭제</button>
+  </div>`;
 }
 
 async function renderSources(query = {}) {
@@ -643,8 +670,9 @@ async function renderSources(query = {}) {
       </tr>`).join('')}
     </table>` : referenceSourcesTable(sources)}
 
-    <details class="section">
-      <summary>소스 추가</summary>
+    <details class="section" id="s-form-section">
+      <summary id="s-form-summary">소스 추가</summary>
+      <input type="hidden" id="s-edit-id">
       <div class="form-row"><label>이름</label><input id="s-name"></div>
       <div class="form-row"><label>
         <input type="checkbox" id="s-is-reference" ${view === 'reference' ? 'checked' : ''}> Reference Source (자동 수집 없이 참고용으로만 등록)
@@ -652,13 +680,18 @@ async function renderSources(query = {}) {
       <div class="form-row"><label>수집방식</label>
         <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="structured">structured (통계 데이터 자동 수집)</option><option value="crawl">crawl</option></select>
       </div>
-      <div class="form-row"><label>URL (rss는 피드 URL)</label><input id="s-url"></div>
+      <div class="form-row"><label>URL (일반/대표 링크. rss는 피드 URL)</label><input id="s-url"></div>
       <div class="form-row"><label>오너</label><input id="s-owner"></div>
       <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
       <div class="form-row"><label>유형 (예: 정부/국제기구 통계, 거래소/가격데이터)</label><input id="s-type"></div>
       <div class="form-row"><label>지역/국가</label><input id="s-region"></div>
       <div class="form-row"><label>품목 (쉼표 구분, 예: 팜유,대두유)</label><input id="s-commodities"></div>
       <div class="form-row"><label>데이터/보고서 커버리지</label><input id="s-coverage"></div>
+      <div class="form-row">
+        <label>섹터별 링크 (기관 사이트 내 품목/섹터 전용 페이지 — 홈페이지가 아닌 검증된 세부 페이지)</label>
+        <div id="s-sector-links"></div>
+        <button type="button" class="btn-text" id="s-sector-link-add">+ 링크 추가</button>
+      </div>
       <div class="form-row"><label>접근형식 (쉼표 구분: web,PDF,XLSX,CSV,API,RSS)</label><input id="s-access-format"></div>
       <div class="form-row"><label>업데이트 주기 (예: Monthly, Weekly)</label><input id="s-update-freq"></div>
       <div class="form-row"><label>
@@ -667,6 +700,7 @@ async function renderSources(query = {}) {
       <div class="form-row"><label>최종 검증일</label><input id="s-last-verified" type="date"></div>
       <div class="form-row"><label>비고 / 활용 노트</label><input id="s-usage-note"></div>
       <button class="btn primary" id="s-add">추가</button>
+      <button class="btn" id="s-cancel-edit" style="display:none">취소</button>
     </details>
 
     ${view === 'all' ? collectionWarningHtml(sources) : ''}
@@ -701,31 +735,101 @@ async function renderSources(query = {}) {
       renderSources(query);
     };
   });
+
+  const sectorLinksContainer = document.getElementById('s-sector-links');
+  function addSectorLinkRow(link) {
+    sectorLinksContainer.insertAdjacentHTML('beforeend', sectorLinkRowHtml(link));
+    const row = sectorLinksContainer.lastElementChild;
+    row.querySelector('.sl-remove').onclick = () => row.remove();
+  }
+  document.getElementById('s-sector-link-add').onclick = () => addSectorLinkRow();
+
+  function collectSectorLinks() {
+    return [...sectorLinksContainer.querySelectorAll('.sector-link-row')]
+      .map((row) => ({
+        sector: row.querySelector('.sl-sector').value.trim(),
+        label: row.querySelector('.sl-label').value.trim(),
+        url: row.querySelector('.sl-url').value.trim(),
+      }))
+      .filter((l) => l.sector && l.label && l.url);
+  }
+
+  function resetForm() {
+    document.getElementById('s-edit-id').value = '';
+    document.getElementById('s-form-summary').textContent = '소스 추가';
+    document.getElementById('s-add').textContent = '추가';
+    document.getElementById('s-cancel-edit').style.display = 'none';
+    ['s-name', 's-url', 's-owner', 's-type', 's-region', 's-commodities', 's-coverage',
+      's-access-format', 's-update-freq', 's-last-verified', 's-usage-note'].forEach((id) => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('s-method').value = 'manual';
+    document.getElementById('s-freq').value = '1';
+    document.getElementById('s-is-reference').checked = view === 'reference';
+    document.getElementById('s-rss-available').checked = false;
+    sectorLinksContainer.innerHTML = '';
+  }
+
+  document.querySelectorAll('[data-edit-source]').forEach((btn) => {
+    btn.onclick = () => {
+      const s = sources.find((row) => String(row.id) === btn.dataset.editSource);
+      if (!s) return;
+      document.getElementById('s-form-section').open = true;
+      document.getElementById('s-edit-id').value = s.id;
+      document.getElementById('s-form-summary').textContent = `소스 편집 — ${s.name}`;
+      document.getElementById('s-add').textContent = '저장';
+      document.getElementById('s-cancel-edit').style.display = '';
+      document.getElementById('s-name').value = s.name || '';
+      document.getElementById('s-method').value = s.method || 'manual';
+      document.getElementById('s-url').value = s.url || '';
+      document.getElementById('s-owner').value = s.owner || '';
+      document.getElementById('s-freq').value = s.frequency_days || 1;
+      document.getElementById('s-is-reference').checked = Boolean(s.is_reference);
+      document.getElementById('s-type').value = s.source_type || '';
+      document.getElementById('s-region').value = s.region || '';
+      document.getElementById('s-commodities').value = (s.commodities || []).join(',');
+      document.getElementById('s-coverage').value = s.coverage_note || '';
+      document.getElementById('s-access-format').value = (s.access_format || []).join(',');
+      document.getElementById('s-update-freq').value = s.update_frequency || '';
+      document.getElementById('s-rss-available').checked = Boolean(s.rss_available);
+      document.getElementById('s-last-verified').value = s.last_verified_at ? s.last_verified_at.slice(0, 10) : '';
+      document.getElementById('s-usage-note').value = s.usage_note || '';
+      sectorLinksContainer.innerHTML = '';
+      (s.sector_links || []).forEach((link) => addSectorLinkRow(link));
+      document.getElementById('s-form-section').scrollIntoView({ behavior: 'smooth' });
+    };
+  });
+  document.getElementById('s-cancel-edit').onclick = () => resetForm();
+
   document.getElementById('s-add').onclick = async () => {
     const commodities = document.getElementById('s-commodities').value
       .split(',').map((v) => v.trim()).filter(Boolean);
     const accessFormat = document.getElementById('s-access-format').value
       .split(',').map((v) => v.trim()).filter(Boolean);
-    await api('/sources', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: document.getElementById('s-name').value,
-        method: document.getElementById('s-method').value,
-        url: document.getElementById('s-url').value,
-        owner: document.getElementById('s-owner').value,
-        frequency_days: Number(document.getElementById('s-freq').value) || 1,
-        is_reference: document.getElementById('s-is-reference').checked,
-        source_type: document.getElementById('s-type').value || null,
-        region: document.getElementById('s-region').value || null,
-        commodities,
-        coverage_note: document.getElementById('s-coverage').value || null,
-        access_format: accessFormat,
-        update_frequency: document.getElementById('s-update-freq').value || null,
-        rss_available: document.getElementById('s-rss-available').checked,
-        last_verified_at: document.getElementById('s-last-verified').value || null,
-        usage_note: document.getElementById('s-usage-note').value || null,
-      }),
-    });
+    const payload = {
+      name: document.getElementById('s-name').value,
+      method: document.getElementById('s-method').value,
+      url: document.getElementById('s-url').value,
+      owner: document.getElementById('s-owner').value,
+      frequency_days: Number(document.getElementById('s-freq').value) || 1,
+      is_reference: document.getElementById('s-is-reference').checked,
+      source_type: document.getElementById('s-type').value || null,
+      region: document.getElementById('s-region').value || null,
+      commodities,
+      coverage_note: document.getElementById('s-coverage').value || null,
+      sector_links: collectSectorLinks(),
+      access_format: accessFormat,
+      update_frequency: document.getElementById('s-update-freq').value || null,
+      rss_available: document.getElementById('s-rss-available').checked,
+      last_verified_at: document.getElementById('s-last-verified').value || null,
+      usage_note: document.getElementById('s-usage-note').value || null,
+    };
+    const editId = document.getElementById('s-edit-id').value;
+    if (editId) {
+      await api(`/sources/${editId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    } else {
+      await api('/sources', { method: 'POST', body: JSON.stringify(payload) });
+    }
     renderSources(query);
   };
 }

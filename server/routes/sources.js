@@ -86,22 +86,59 @@ router.post('/', async (req, res) => {
     name, publisher, url, method, frequency_days, owner, trust_grade,
     is_reference, source_type, region, commodities, coverage_note,
     access_format, update_frequency, usage_note, last_verified_at, rss_available,
+    sector_links,
   } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   const { rows } = await pool.query(
     `INSERT INTO sources (
        name, publisher, url, method, frequency_days, owner, trust_grade,
        is_reference, source_type, region, commodities, coverage_note,
-       access_format, update_frequency, usage_note, last_verified_at, rss_available
+       access_format, update_frequency, usage_note, last_verified_at, rss_available, sector_links
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [
       name, publisher || null, url || null, method || 'manual', frequency_days || 1, owner || null, trust_grade || 'A',
       Boolean(is_reference), source_type || null, region || null, commodities || [], coverage_note || null,
       access_format || [], update_frequency || null, usage_note || null, last_verified_at || null, Boolean(rss_available),
+      JSON.stringify(sector_links || []),
     ]
   );
   res.status(201).json(rows[0]);
+});
+
+// Edit flow for an existing source — most importantly, the only way to
+// register/update a Reference Source's sector_links after creation (POST
+// only covers initial registration). Partial update, same convention as
+// routes/items.js's PATCH: only fields present in the body are touched.
+const PATCHABLE_SOURCE_FIELDS = [
+  'name', 'publisher', 'url', 'method', 'frequency_days', 'owner', 'trust_grade',
+  'is_reference', 'source_type', 'region', 'commodities', 'coverage_note',
+  'access_format', 'update_frequency', 'usage_note', 'last_verified_at', 'rss_available',
+];
+router.patch('/:id', async (req, res) => {
+  const { rows: existingRows } = await pool.query('SELECT id FROM sources WHERE id = $1', [req.params.id]);
+  if (!existingRows[0]) return res.status(404).json({ error: 'not found' });
+
+  const sets = [];
+  const params = [];
+  for (const f of PATCHABLE_SOURCE_FIELDS) {
+    if (req.body[f] !== undefined) {
+      params.push(req.body[f]);
+      sets.push(`${f} = $${params.length}`);
+    }
+  }
+  if (req.body.sector_links !== undefined) {
+    params.push(JSON.stringify(req.body.sector_links));
+    sets.push(`sector_links = $${params.length}`);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'no fields to update' });
+
+  params.push(req.params.id);
+  const { rows } = await pool.query(
+    `UPDATE sources SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  res.json(rows[0]);
 });
 
 // items.source_id is ON DELETE SET NULL (see schema.sql) — deleting a

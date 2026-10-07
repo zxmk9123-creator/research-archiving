@@ -76,6 +76,20 @@ ALTER TABLE sources ADD COLUMN IF NOT EXISTS usage_note TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_verified_at DATE;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS rss_available BOOLEAN NOT NULL DEFAULT false;
 
+-- Reference Source Library v2: a Reference Source often serves several
+-- distinct commodity/sector pages on the same institution's site (e.g. MPOB
+-- publishes separate production and export statistics pages) — the single
+-- `url` column can only ever point at one. sector_links holds the verified,
+-- sector-specific pages as a JSON array of {sector, label, url}, additive
+-- to `url` (kept as the source's single general/primary link, used where a
+-- plain source-level link is still wanted — e.g. the 전체 Sources table).
+-- Deliberately one JSONB column, not a child table: this is the smallest
+-- extension of the existing model that still lets the UI render each
+-- sector as its own clickable link. commodities (detailed commodity
+-- coverage, free-text tags) is untouched — sector_links is for navigation
+-- to verified pages, never a substitute for it.
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS sector_links JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 -- Seed: a small, representative set of high-value Oil&Fats reference
 -- sources with no RSS feed — authoritative statistics/report publishers a
 -- reviewer should know about even though nothing here is auto-ingested.
@@ -104,6 +118,49 @@ SELECT * FROM (VALUES
    ARRAY['web','API','CSV'], 'Monthly', '유지 교역 흐름/무역 통계 교차 검증용', '2026-10-01'::date, false)
 ) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+-- Backfill sector_links on the 5 sources seeded above (idempotent
+-- UPDATE-by-name, same pattern as the is_daily_discovery backfill further
+-- down) — each link is a verified page on the institution's own site
+-- covering that specific commodity/statistics category, never the bare
+-- organizational homepage.
+UPDATE sources SET sector_links = '[
+  {"sector": "유지종자(팜유·대두유 등) 공급·수요 데이터", "label": "PSD Online — 조회/다운로드", "url": "https://apps.fas.usda.gov/psdonline/app/index.html#/app/advQuery"},
+  {"sector": "유지종자 시장 보고서", "label": "Oilseeds: World Markets and Trade", "url": "https://fas.usda.gov/data/oilseeds-world-markets-and-trade"}
+]'::jsonb
+WHERE name = 'USDA FAS PSD Online' AND sector_links = '[]'::jsonb;
+
+UPDATE sources SET sector_links = '[
+  {"sector": "팜유 생산 통계", "label": "Monthly Production Statistics", "url": "https://bepi.mpob.gov.my/index.php/en/statistics/production.html"},
+  {"sector": "팜유 수출 통계", "label": "Monthly Export Statistics", "url": "https://bepi.mpob.gov.my/index.php/en/statistics/export.html"}
+]'::jsonb
+WHERE name = 'MPOB Palm Oil Statistics' AND sector_links = '[]'::jsonb;
+
+UPDATE sources SET sector_links = '[
+  {"sector": "팜유 생산·수출 통계", "label": "GAPKI Statistic", "url": "https://gapki.id/en/news/category/statistic"}
+]'::jsonb
+WHERE name = 'GAPKI Palm Oil Statistics' AND sector_links = '[]'::jsonb;
+
+UPDATE sources SET sector_links = '[
+  {"sector": "팜유 선물(FCPO) 가격·계약 명세", "label": "FCPO Trading Resources", "url": "https://www.bursamalaysia.com/trade/trading_resources/derivatives/fcpo"}
+]'::jsonb
+WHERE name = 'Bursa Malaysia Derivatives (FCPO)' AND sector_links = '[]'::jsonb;
+
+UPDATE sources SET sector_links = '[
+  {"sector": "유지종자·식물성유 교역 통계(HS 1507-1518)", "label": "Comtrade Plus 조회", "url": "https://comtradeplus.un.org/"}
+]'::jsonb
+WHERE name = 'UN Comtrade' AND sector_links = '[]'::jsonb;
+
+-- Standing invariant, not a one-time cleanup: a source used for automated
+-- RSS/Web Discovery/institutional/structured ingestion is an OPERATIONAL
+-- source, never a Reference Source Library entry, even if someone later
+-- flips is_reference by mistake while editing one. Re-asserted on every
+-- boot (no-op once already false) rather than a single UPDATE, so this
+-- can never silently drift back out of sync with `method`. The underlying
+-- operational source row and its ingestion behavior are untouched — only
+-- the cataloging flag is forced back to false.
+UPDATE sources SET is_reference = false
+WHERE method IN ('rss','crawl','institution','structured') AND is_reference = true;
 
 -- One row per named background job, tracking the last calendar date (in
 -- that job's own reference timezone) it ran — the guard against running
