@@ -7,6 +7,12 @@ const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { collectInstitutionSource } = require('./institutionalIngest');
 const { collectStructuredSource } = require('./structuredDataIngest');
 const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
+// Required as a module object (not destructured) so tests can swap
+// extractMetadata for a synthetic result without a real network call —
+// same convention webDiscoveryIngest.js already uses for this exact
+// helper. Reused here rather than writing a second extractor: an RSS
+// item's own page is fetched the same way a Web Discovery candidate's is.
+const extractMetadataModule = require('./extractMetadata');
 
 // One acquisition-method dispatcher shared by the scheduler and manual
 // "지금 수집"/collect-all — the orchestration loop (due-source selection,
@@ -24,6 +30,37 @@ function collectBySource(source) {
 const MAX_ITEMS_PER_RUN = 20;
 const TITLE_SIMILARITY_THRESHOLD = 0.82;
 const RECENT_TITLES_LIMIT = 500;
+
+// Below this length, an extracted page's own description/snippet is not
+// treated as a real acquired article — it's indistinguishable from a bare
+// title or teaser line, so it must not be sent to AI as if it were full
+// article evidence (falls back to the feed's own summary instead, same as
+// a hard acquisition failure).
+const MIN_ACQUIRED_CONTENT_CHARS = 80;
+
+// Acquisition layer for one RSS-discovered article URL, run AFTER the
+// feed-level relevance pre-filter (so a filtered-out item never costs a
+// fetch) and BEFORE the item is inserted/sent to AI. Mirrors Web
+// Discovery's acquisition step exactly (same extractMetadata() call, same
+// "no real content -> don't pretend" rule) rather than inventing a second
+// crawler — the only thing RSS-specific here is that a feed always has its
+// own description to fall back to, so "acquisition failed" is never a
+// terminal/dropped state for RSS the way it can be for Web Discovery.
+// Returns { extractedText, stage } where extractedText is undefined when
+// the existing fallback (the feed's own summary, handled by the caller)
+// should be used instead.
+async function acquireRssArticleContent(url) {
+  let meta;
+  try {
+    meta = await extractMetadataModule.extractMetadata(url);
+  } catch (err) {
+    return { extractedText: undefined, stage: 'acquisition_failed', error: err.message };
+  }
+  if (meta.summary && meta.summary.trim().length >= MIN_ACQUIRED_CONTENT_CHARS) {
+    return { extractedText: meta.summary, stage: 'acquired' };
+  }
+  return { extractedText: undefined, stage: 'insufficient_content' };
+}
 
 async function fetchFeedItems(url) {
   const res = await fetch(url, {
@@ -73,6 +110,15 @@ async function collectSource(source) {
         continue;
       }
 
+      // Acquisition: try to fetch the article's own page so AI screening
+      // gets real content instead of just the feed's title/description —
+      // same acquisition step Web Discovery already runs, isolated per
+      // item (one URL's fetch failure never drops the item or stops the
+      // rest of the feed; it just falls back to the feed's own summary,
+      // exactly as before this change).
+      const acquisition = await acquireRssArticleContent(fi.link);
+      console.log(`rss_acquisition source=${source.id} url=${fi.link} stage=${acquisition.stage}`);
+
       const { rows } = await pool.query(
         `INSERT INTO items (title, source_url, published_at, source_id, type, summary)
          VALUES ($1,$2,$3,$4,'뉴스',$5) RETURNING id`,
@@ -88,7 +134,10 @@ async function collectSource(source) {
       // >=1 valid usage) institution/structured/crawl already use — only
       // after a successful draft, same as those paths; a failed/ineligible
       // draft is left as Draft for human review, unchanged from before.
-      generateAiDraftForItem(rows[0].id).then((result) => {
+      // acquisition.extractedText (real page content) takes priority when
+      // available; otherwise generateAiDraftForItem falls back to the
+      // item's own `summary` column (the feed description), unchanged.
+      generateAiDraftForItem(rows[0].id, undefined, acquisition.extractedText).then((result) => {
         if (result.ok) return applyAiDraftIfEligible(rows[0].id);
       }).catch((err) => {
         console.error(`AI draft generation errored for item ${rows[0].id}: ${err.message}`);
@@ -181,4 +230,7 @@ async function collectAllSourcesNow() {
   return { totals, results };
 }
 
-module.exports = { collectSource, collectBySource, getDueSources, runDueCollections, collectAllSourcesNow };
+module.exports = {
+  collectSource, collectBySource, getDueSources, runDueCollections, collectAllSourcesNow,
+  acquireRssArticleContent, MIN_ACQUIRED_CONTENT_CHARS,
+};

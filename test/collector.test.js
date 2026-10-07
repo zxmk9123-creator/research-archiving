@@ -1,7 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const pool = require('../server/db/pool');
-const { getDueSources, runDueCollections } = require('../server/lib/collector');
+const { getDueSources, runDueCollections, acquireRssArticleContent, MIN_ACQUIRED_CONTENT_CHARS } = require('../server/lib/collector');
+const extractMetadataModule = require('../server/lib/extractMetadata');
+
+function mockExtractMetadata(handler) {
+  const original = extractMetadataModule.extractMetadata;
+  extractMetadataModule.extractMetadata = handler;
+  return () => { extractMetadataModule.extractMetadata = original; };
+}
 
 // Ensures no AI provider is configured during these tests, so
 // generateAiDraftForItem's fire-and-forget call (triggered inside
@@ -230,6 +237,44 @@ function mockFeedAndAI(feedItems, aiResponse) {
   return () => { global.fetch = original; };
 }
 
+// Same as mockFeedAndAI, but also records the exact body sent to the
+// FreeLLMAPI endpoint, so a test can inspect what text actually reached
+// the "Description:" line of the AI prompt (buildUserPrompt in
+// aiDraft.js) — the one place that distinguishes "real acquired article
+// content" from "just the feed's own description" for RSS items.
+function mockFeedAndAICapture(feedItems, aiResponse) {
+  const original = global.fetch;
+  const aiRequestBodies = [];
+  global.fetch = async (url, init) => {
+    if (String(url).includes('freellmapi')) {
+      aiRequestBodies.push(JSON.parse(init.body));
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: aiResponse } }] }), text: async () => '' };
+    }
+    return feedResponse(feedItems);
+  };
+  return { aiRequestBodies, restore: () => { global.fetch = original; } };
+}
+
+// aiDraft.js's provider-call limiter (createLimiter) is a module-level
+// singleton that spaces call *starts* at least AI_MIN_CALL_INTERVAL_MS
+// (3000ms) apart across the whole process. That delays only the actual
+// fetch() — the request body (built from buildUserPrompt) is already
+// fixed before a call enters the limiter queue — so an EARLIER test's
+// still-queued call can physically fire during a LATER test's window and
+// land in that later test's fetch-capturing mock. Polling for "any
+// request body" isn't enough once a test asserts on body content; this
+// waits specifically for a body matching this test's own marker text,
+// ignoring any stray delayed body left over from an earlier test.
+async function waitForAiRequestMatching(aiRequestBodies, marker, timeoutMs = 15000) {
+  const start = Date.now();
+  let found;
+  while (!found && Date.now() - start < timeoutMs) {
+    found = aiRequestBodies.find((b) => b.messages.some((m) => m.content.includes(marker)));
+    if (!found) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return found;
+}
+
 function withFreeLLMAPIEnv(fn) {
   const prevKey = process.env.FREELLMAPI_API_KEY;
   const prevUrl = process.env.FREELLMAPI_BASE_URL;
@@ -329,6 +374,158 @@ test('RSS: AI-eligible but missing sector/usage classification stays Draft, not 
     assert.ok(!calls.some((c) => c.text.includes("status = 'Published'")), 'must not auto-publish without a valid sector+usage');
   } finally {
     restoreFetch();
+    restore();
+  }
+}));
+
+// --- Acquisition layer for RSS-discovered article URLs: before this
+// change, RSS items never fetched their own page at all — only
+// institution/crawl did. acquireRssArticleContent() (and its wiring into
+// collectSource() below) closes that gap by reusing extractMetadata(),
+// the same utility Web Discovery already uses — no second crawler. ---
+
+test('acquireRssArticleContent: a successfully extracted, substantive page description is treated as real article content', async () => {
+  const longSummary = '인도네시아 정부는 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상한다고 발표했다. 이번 조치는 다음 달부터 시행되며 업계는 가격 상승을 예상하고 있다.';
+  const restore = mockExtractMetadata(async () => ({ title: 't', summary: longSummary, thumbnail_url: null, published_at: null }));
+  try {
+    const result = await acquireRssArticleContent('https://example.com/article');
+    assert.equal(result.stage, 'acquired');
+    assert.equal(result.extractedText, longSummary);
+  } finally {
+    restore();
+  }
+});
+
+test('acquireRssArticleContent: a page fetch failure is reported as acquisition_failed, not treated as acquired content', async () => {
+  const restore = mockExtractMetadata(async () => { throw new Error('fetch failed: 403'); });
+  try {
+    const result = await acquireRssArticleContent('https://example.com/blocked');
+    assert.equal(result.stage, 'acquisition_failed');
+    assert.equal(result.extractedText, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('acquireRssArticleContent: a too-short description (snippet-level, not real article content) is classified as insufficient_content, never passed through as full evidence', async () => {
+  const restore = mockExtractMetadata(async () => ({ title: 't', summary: 'Palm oil news', thumbnail_url: null, published_at: null }));
+  try {
+    assert.ok('Palm oil news'.length < MIN_ACQUIRED_CONTENT_CHARS);
+    const result = await acquireRssArticleContent('https://example.com/thin');
+    assert.equal(result.stage, 'insufficient_content');
+    assert.equal(result.extractedText, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('acquireRssArticleContent: no description at all is also insufficient_content, not acquired', async () => {
+  const restore = mockExtractMetadata(async () => ({ title: 't', summary: null, thumbnail_url: null, published_at: null }));
+  try {
+    const result = await acquireRssArticleContent('https://example.com/no-description');
+    assert.equal(result.stage, 'insufficient_content');
+    assert.equal(result.extractedText, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('RSS: a relevant feed item triggers a real acquisition attempt at its own article URL (not just RSS metadata)', () => withNoProviders(async () => {
+  const source = rssSource({ id: 70, name: 'Acquisition Source' });
+  const restoreFetch = mockFetch(async () => feedResponse([
+    { title: 'Indonesia raises palm oil export tariff', link: 'https://example.com/acquire-me', description: 'short feed blurb' },
+  ]));
+  let extractCalledWith = null;
+  const restoreExtract = mockExtractMetadata(async (url) => { extractCalledWith = url; return { title: 't', summary: null, thumbnail_url: null, published_at: null }; });
+  const { restore } = mockPool([
+    ["FROM sources\n    WHERE method IN ('rss', 'institution', 'structured', 'crawl')", () => ({ rows: [source] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 801 }] })],
+  ]);
+  try {
+    await runDueCollections();
+    assert.equal(extractCalledWith, 'https://example.com/acquire-me');
+  } finally {
+    restoreFetch();
+    restoreExtract();
+    restore();
+  }
+}));
+
+test('RSS: successful acquisition sends the real extracted article content to AI screening, not the bare feed description', () => withFreeLLMAPIEnv(async () => {
+  const source = rssSource({ id: 71, name: 'Real Content Source' });
+  const realArticleText = '인도네시아 정부는 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상한다고 발표했다. 이번 조치는 다음 달부터 시행되며 업계는 가격 상승을 예상하고 있다.';
+  const { aiRequestBodies, restore: restoreFetch } = mockFeedAndAICapture(
+    [{ title: 'Indonesia raises palm oil export tariff', link: 'https://example.com/real-content', description: 'short feed blurb' }],
+    fullDraftResponse(),
+  );
+  const restoreExtract = mockExtractMetadata(async () => ({ title: 't', summary: realArticleText, thumbnail_url: null, published_at: null }));
+  const { restore } = mockPool([
+    ["FROM sources\n    WHERE method IN ('rss', 'institution', 'structured', 'crawl')", () => ({ rows: [source] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 802 }] })],
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 802, title: 'Indonesia raises palm oil export tariff', summary: 'short feed blurb' }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '시장 전망' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    await runDueCollections();
+    const match = await waitForAiRequestMatching(aiRequestBodies, '인도네시아 정부는 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상');
+    assert.ok(match, "expected an AI request carrying this test's own acquired content within the timeout");
+    const userMessage = match.messages.find((m) => m.role === 'user').content;
+    assert.match(userMessage, /Description: .*인도네시아 정부는 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상/);
+    assert.ok(!userMessage.includes('short feed blurb'), 'the bare feed description must not be used once real content was acquired');
+  } finally {
+    restoreFetch();
+    restoreExtract();
+    restore();
+  }
+}));
+
+test('RSS: a failed/insufficient acquisition falls back to the existing behavior — the feed\'s own description reaches AI, exactly as before this change', () => withFreeLLMAPIEnv(async () => {
+  const source = rssSource({ id: 72, name: 'Fallback Source' });
+  const { aiRequestBodies, restore: restoreFetch } = mockFeedAndAICapture(
+    [{ title: 'Indonesia raises palm oil export tariff', link: 'https://example.com/fallback', description: 'short feed blurb about tariffs' }],
+    fullDraftResponse(),
+  );
+  const restoreExtract = mockExtractMetadata(async () => { throw new Error('fetch failed: 403'); });
+  const { restore } = mockPool([
+    ["FROM sources\n    WHERE method IN ('rss', 'institution', 'structured', 'crawl')", () => ({ rows: [source] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 803 }] })],
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 803, title: 'Indonesia raises palm oil export tariff', summary: 'short feed blurb about tariffs' }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '시장 전망' }] })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    await runDueCollections();
+    const match = await waitForAiRequestMatching(aiRequestBodies, 'short feed blurb about tariffs');
+    assert.ok(match, "expected an AI request carrying this test's own fallback content within the timeout");
+    const userMessage = match.messages.find((m) => m.role === 'user').content;
+    assert.match(userMessage, /Description: short feed blurb about tariffs/);
+  } finally {
+    restoreFetch();
+    restoreExtract();
+    restore();
+  }
+}));
+
+test('RSS: acquisition is never attempted for a duplicate or out-of-scope item (no unnecessary crawling)', () => withNoProviders(async () => {
+  const source = rssSource({ id: 73, name: 'Filtered Source' });
+  const restoreFetch = mockFetch(async () => feedResponse([
+    { title: 'Local football club wins championship', link: 'https://example.com/sports', description: 'sports news' },
+  ]));
+  let extractCalled = false;
+  const restoreExtract = mockExtractMetadata(async () => { extractCalled = true; return { title: 't', summary: null, thumbnail_url: null, published_at: null }; });
+  const { restore } = mockPool([
+    ["FROM sources\n    WHERE method IN ('rss', 'institution', 'structured', 'crawl')", () => ({ rows: [source] })],
+  ]);
+  try {
+    const results = await runDueCollections();
+    assert.equal(results[0].filtered, 1);
+    assert.equal(extractCalled, false, 'a filtered-out item must never trigger a page fetch');
+  } finally {
+    restoreFetch();
+    restoreExtract();
     restore();
   }
 }));
