@@ -68,6 +68,37 @@ router.post('/backfill-7day-discovery', async (req, res) => {
   res.json({ totals, perQuery });
 });
 
+// ONE-TIME MANUAL TOOL — same shape as backfill-7day-discovery above, for a
+// single historical diagnostic/collection run over 2026-09-01..2026-09-30.
+// Does not touch sources.frequency_days/is_daily_discovery or the query
+// registry; does not create any new scheduler. Only the Brave Search
+// freshness window passed to collectWebDiscoverySource() differs — same
+// pipeline, same dedup/AI screening/QA/classification/publish rules. Intended
+// to be removed after the one-time backfill it was added for.
+router.post('/backfill-sept2026-discovery', async (req, res) => {
+  const { rows: sources } = await pool.query(
+    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
+  );
+  const perQuery = [];
+  for (const source of sources) {
+    const result = await collectWebDiscoverySource(source, { freshness: '2026-09-01to2026-09-30' });
+    perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
+  }
+  const totals = perQuery.reduce(
+    (acc, r) => ({
+      discovered: acc.discovered + (r.discovered || 0),
+      filtered: acc.filtered + (r.filtered || 0),
+      archived: acc.archived + (r.archived || 0),
+      rejected: acc.rejected + (r.rejected || 0),
+      failed: acc.failed + (r.failed || 0),
+      failedQueries: acc.failedQueries + (r.ok ? 0 : 1),
+    }),
+    { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
+  );
+  console.log(`backfill_sept2026_discovery run_completed ${JSON.stringify(totals)}`);
+  res.json({ totals, perQuery });
+});
+
 router.get('/', async (req, res) => {
   // Staleness only means something for a source that is actively ingested —
   // a Reference Source Library entry (is_reference=true) is never collected
