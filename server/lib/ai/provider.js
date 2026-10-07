@@ -95,7 +95,7 @@ async function callFreeLLMAPI({ system, user }) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
