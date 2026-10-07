@@ -68,11 +68,28 @@ async function collectStructuredSource(source) {
     const title = `유지 원자재 가격 동향 (${latestPeriod})`;
     const snapshotText = buildSnapshotText(latestPeriod, previousPeriod, series);
 
-    const { rows: inserted } = await pool.query(
-      `INSERT INTO items (title, source_url, source_id, type)
-       VALUES ($1, $2, $3, '통계') RETURNING id`,
-      [title, periodTag, source.id]
-    );
+    let inserted;
+    try {
+      ({ rows: inserted } = await pool.query(
+        `INSERT INTO items (title, source_url, source_id, type)
+         VALUES ($1, $2, $3, '통계') RETURNING id`,
+        [title, periodTag, source.id]
+      ));
+    } catch (err) {
+      // 23505 = unique_violation on items.source_url — an overlapping run
+      // already ingested this exact period tag between our dedup SELECT
+      // above and this INSERT. Same outcome as the alreadyIngested check
+      // above, not a real failure.
+      if (err.code === '23505') {
+        const { rows: existingRow } = await pool.query('SELECT id FROM items WHERE source_url = $1', [periodTag]);
+        await markSourceHealthy(source.id);
+        return {
+          sourceId: source.id, ok: true, alreadyIngested: true, itemId: existingRow[0] && existingRow[0].id,
+          fetched: 0, count: 0,
+        };
+      }
+      throw err;
+    }
     const itemId = inserted[0].id;
 
     const draftResult = await generateAiDraftForItem(itemId, undefined, snapshotText);

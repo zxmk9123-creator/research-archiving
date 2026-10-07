@@ -461,3 +461,41 @@ test('collectWebDiscoverySource: a candidate from a domain never present in sour
     restore();
   }
 }));
+
+// --- Exact-URL dedup race (confirmed in production: two candidates for
+// the identical URL from the same query's own Brave result set, ~2ms
+// apart — items 233/234 and 237/238). The app-level dedup SELECT above
+// cannot stop this by itself; the DB's UNIQUE index on items.source_url
+// (schema.sql) is the authoritative guard, surfaced here as a 23505
+// unique-violation on INSERT. ---
+
+test('collectWebDiscoverySource: a unique-violation on INSERT (duplicate candidate within the same result set, or an overlapping run) is treated as already_ingested, not a failure', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([
+    { title: 'Palm oil export tariff raised', link: 'https://example.org/raced' },
+  ]);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Palm oil export tariff raised to 10%',
+    summary: 'Indonesia raised its palm oil export tariff, affecting edible oil supply chains.',
+    thumbnail_url: null,
+    published_at: null,
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['INSERT INTO items', () => {
+      const err = new Error('duplicate key value violates unique constraint "idx_items_source_url_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource());
+    assert.equal(result.ok, true, 'a raced duplicate must not fail the whole discovery run');
+    assert.equal(result.failed, 0, 'a raced duplicate is not an acquisition/insert failure');
+    assert.equal(result.archived, 0);
+    assert.ok(!calls.some((c) => c.text.includes('status = \'Published\'')));
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));

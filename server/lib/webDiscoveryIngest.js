@@ -135,6 +135,17 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         );
         itemId = inserted[0].id;
       } catch (err) {
+        // 23505 = unique_violation on items.source_url — a different
+        // candidate (same or another query, this run or an overlapping
+        // one) already inserted this exact URL between our dedup SELECT
+        // above and this INSERT. Confirmed in production: two candidates
+        // for the identical URL from the same query's own result set,
+        // ~2ms apart. Not a real failure — same outcome as the
+        // already_ingested check above.
+        if (err.code === '23505') {
+          details.push({ title: candidate.title, link: candidate.link, stage: 'already_ingested' });
+          continue;
+        }
         failed++;
         details.push({ title: candidate.title, link: candidate.link, stage: 'insert_failed', error: err.message });
         continue;

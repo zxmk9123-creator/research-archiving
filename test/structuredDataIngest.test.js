@@ -167,3 +167,31 @@ test('collectStructuredSource: acquisition/parsing failure records last_error an
     restore();
   }
 });
+
+test('collectStructuredSource: a unique-violation on INSERT (an overlapping run already ingested this exact period) is treated as alreadyIngested, not a failure', () => withNoProviders(async () => {
+  const restoreFetch = mockFetchAndParse(SAMPLE_PARSED);
+  // The pre-insert dedup SELECT finds nothing (no overlapping run has
+  // committed yet); the INSERT itself then races and hits the UNIQUE
+  // constraint; the recovery SELECT (after catching 23505) finds the row
+  // the other, overlapping run just committed.
+  let insertAttempted = false;
+  const { calls, restore } = mockPool([
+    ['INSERT INTO items', () => {
+      insertAttempted = true;
+      const err = new Error('duplicate key value violates unique constraint "idx_items_source_url_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: insertAttempted ? [{ id: 999 }] : [] })],
+  ]);
+  try {
+    const result = await collectStructuredSource(structuredSource());
+    assert.equal(result.ok, true, 'a raced duplicate must not fail the whole collection run');
+    assert.equal(result.alreadyIngested, true);
+    assert.equal(result.itemId, 999);
+    assert.ok(calls.some((c) => c.text.includes('UPDATE sources SET last_collected_at')));
+  } finally {
+    restoreFetch();
+    restore();
+  }
+}));

@@ -529,3 +529,35 @@ test('RSS: acquisition is never attempted for a duplicate or out-of-scope item (
     restore();
   }
 }));
+
+// --- Exact-URL dedup race: the app-level "SELECT ... WHERE source_url"
+// check (above) cannot by itself stop two overlapping collection runs
+// from both passing it for the same URL before either INSERT commits.
+// The DB's UNIQUE index on items.source_url (schema.sql) is the
+// authoritative guard; this proves collectSource() treats the resulting
+// 23505 unique-violation as a benign duplicate, not a run failure. ---
+
+test('RSS: a unique-violation on INSERT (another overlapping run already inserted this exact URL) is treated as a duplicate, not a collection failure', () => withNoProviders(async () => {
+  const source = rssSource({ id: 74, name: 'Race Source' });
+  const restoreFetch = mockFetch(async () => feedResponse([
+    { title: 'Indonesia raises palm oil export tariff', link: 'https://example.com/raced-url' },
+  ]));
+  const { calls, restore } = mockPool([
+    ["FROM sources\n    WHERE method IN ('rss', 'institution', 'structured', 'crawl')", () => ({ rows: [source] })],
+    ['INSERT INTO items', () => {
+      const err = new Error('duplicate key value violates unique constraint "idx_items_source_url_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+  ]);
+  try {
+    const results = await runDueCollections();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, true, 'a raced duplicate must not fail the whole collection run');
+    assert.equal(results[0].count, 0);
+    assert.ok(!calls.some((c) => c.text.includes('status = \'Published\'')));
+  } finally {
+    restoreFetch();
+    restore();
+  }
+}));

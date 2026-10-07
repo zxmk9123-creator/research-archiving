@@ -119,11 +119,26 @@ async function collectSource(source) {
       const acquisition = await acquireRssArticleContent(fi.link);
       console.log(`rss_acquisition source=${source.id} url=${fi.link} stage=${acquisition.stage}`);
 
-      const { rows } = await pool.query(
-        `INSERT INTO items (title, source_url, published_at, source_id, type, summary)
-         VALUES ($1,$2,$3,$4,'뉴스',$5) RETURNING id`,
-        [fi.title, fi.link, toDateOnly(fi.pubDate), source.id, fi.description]
-      );
+      let rows;
+      try {
+        ({ rows } = await pool.query(
+          `INSERT INTO items (title, source_url, published_at, source_id, type, summary)
+           VALUES ($1,$2,$3,$4,'뉴스',$5) RETURNING id`,
+          [fi.title, fi.link, toDateOnly(fi.pubDate), source.id, fi.description]
+        ));
+      } catch (err) {
+        // 23505 = unique_violation on items.source_url — another, overlapping
+        // collection run (e.g. the hourly scheduler and a manual "지금 수집"
+        // firing close together) already inserted this exact URL between
+        // our dedup SELECT above and this INSERT. The DB constraint is the
+        // authoritative guard here; treat it exactly like the existing-URL
+        // check above, not a failure.
+        if (err.code === '23505') {
+          existingUrls.add(fi.link);
+          continue;
+        }
+        throw err;
+      }
       await matchCompanies(rows[0].id, `${fi.title} ${fi.description || ''}`);
 
       // Fire-and-forget: AI drafting must never block or fail RSS collection.

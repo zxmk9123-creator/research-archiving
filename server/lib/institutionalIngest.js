@@ -85,6 +85,14 @@ async function collectInstitutionSource(source) {
         existingUrls.add(candidate.link);
         recentTitles.push(candidate.title);
       } catch (err) {
+        // 23505 = unique_violation on items.source_url — an overlapping
+        // collection run already inserted this exact URL between our
+        // dedup check above and this INSERT; the DB constraint is the
+        // authoritative guard. Not a real failure.
+        if (err.code === '23505') {
+          existingUrls.add(candidate.link);
+          continue;
+        }
         failed++;
         details.push({ title: candidate.title, link: candidate.link, stage: 'insert', error: err.message });
         continue;

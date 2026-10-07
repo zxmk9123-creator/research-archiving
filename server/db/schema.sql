@@ -661,3 +661,39 @@ CREATE TABLE IF NOT EXISTS ai_search_logs (
   question_fingerprint TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ai_search_logs_created_at ON ai_search_logs(created_at);
+
+-- Exact-URL dedup, made reliable at the DB level. Production investigation
+-- (confirmed via the live items table) found two genuine exact-duplicate
+-- source_url pairs — ids [233,234] (barchart.com futures quote) and
+-- [237,238] (newsnow.co.uk palm oil feed), both pairs inserted ~2-100ms
+-- apart under the same source_id. The application-level
+-- "SELECT ... WHERE source_url = $1" dedup check every ingestion path
+-- already does (collector.js, webDiscoveryIngest.js,
+-- institutionalIngest.js, structuredDataIngest.js) is a classic
+-- check-then-insert race: it only protects against a URL already
+-- committed by an EARLIER, already-finished run — it cannot stop two
+-- overlapping discovery operations (e.g. the hourly scheduler and a
+-- manual "지금 수집"/backfill run, or two candidates resolving to the
+-- same URL within one query's own result set) from both passing the
+-- SELECT before either INSERT commits. A plain UNIQUE index is the
+-- authoritative fix (Postgres treats NULL source_url values as mutually
+-- distinct, so non-URL-bearing items are unaffected); each ingestion
+-- path now catches the resulting 23505 unique-violation and treats it
+-- as "someone else just inserted this" rather than a real failure.
+--
+-- Cleanup runs BEFORE the constraint is added, and only ever removes a
+-- row that is a byte-for-byte source_url duplicate of a lower-id row
+-- from the SAME investigation — never a guess, never based on content/
+-- title similarity. Both known duplicate pairs are Draft/ai_status=failed
+-- with no sectors/usages/Published state on either twin, so the higher-
+-- id row carries nothing the lower-id row doesn't already have; this is
+-- safe to run on a fresh/already-clean database too (the DELETE simply
+-- matches zero rows). Child rows (item_sectors/item_usages/
+-- item_companies/picks) cascade via their existing ON DELETE CASCADE.
+DELETE FROM items a
+USING items b
+WHERE a.source_url IS NOT NULL
+  AND a.source_url = b.source_url
+  AND a.id > b.id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_items_source_url_unique ON items(source_url);
