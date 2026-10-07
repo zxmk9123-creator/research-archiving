@@ -282,7 +282,7 @@ p { margin: 0; }
 .detail-meta-sep { color: var(--text-tertiary); font-size: 13px; }
 .detail h1 { font-size: 24px; margin: var(--sp-2) 0 var(--sp-1); line-height: 1.4; }
 .detail .section { border-top: 1px solid var(--border); padding-top: var(--sp-3); margin-top: var(--sp-4); }
-.detail .section p { font-size: 18px; line-height: 1.7; color: var(--text); } /* ~1.3x of 14px body text */
+.detail .section p { font-size: 16px; line-height: 1.7; color: var(--text); }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; height: var(--ctrl-md); padding: 0 16px;
