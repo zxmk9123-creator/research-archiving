@@ -242,6 +242,26 @@ WHERE method = 'crawl' AND name IN (
   'Web Discovery: Wilmar Cargill palm oil investment expansion'
 ) AND is_daily_discovery IS DISTINCT FROM true;
 
+-- Fourth Discovery Query Registry expansion: corporate deal/investment/
+-- project coverage was thin — the existing company queries (IR/earnings,
+-- annual report) skew toward disclosure documents, not deal announcements
+-- (JV formation, M&A, plant construction/FID) themselves. These 2 add that
+-- intent explicitly, with the first biased toward biofuel/SAF (named-case
+-- examples requested: Mitsubishi Corp x ADM SAF partnership, LanzaJet's
+-- Australian SAF plant) and the second covering the same deal/investment/
+-- project intent across the rest of the oils-and-fats value chain (palm,
+-- soy, sunflower/rapeseed, UCO/renewable diesel feedstocks), so biofuel/SAF
+-- isn't the only sector tracked for this kind of news. Same idempotent
+-- pattern, same crawl/is_daily_discovery=true/7-day convention; existing
+-- queries/pipeline behavior untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: SAF biofuel company investment plant partnership deal', 'SAF sustainable aviation fuel biofuel company investment plant construction partnership deal'),
+  ('Web Discovery: edible oil renewable diesel company M&A joint venture project', 'palm soybean sunflower edible oil renewable diesel UCO feedstock company merger acquisition joint venture investment project announcement')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
   id SERIAL PRIMARY KEY,

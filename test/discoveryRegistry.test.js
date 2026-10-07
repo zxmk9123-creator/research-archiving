@@ -103,9 +103,42 @@ test('discovery registry: the third expansion does not duplicate any pre-existin
   }
 });
 
+// --- Fourth expansion: corporate deal/investment/project coverage
+// (JV formation, M&A, plant construction/FID), biased first toward
+// biofuel/SAF and then across the rest of the oils-and-fats value chain —
+// distinct from the existing IR/earnings/annual-report queries, which skew
+// toward disclosure documents rather than deal announcements. ---
+
+const FOURTH_EXPANSION_QUERY_NAMES = [
+  'Web Discovery: SAF biofuel company investment plant partnership deal',
+  'Web Discovery: edible oil renewable diesel company M&A joint venture project',
+];
+
+test('discovery registry: the fourth expansion (SAF/biofuel and cross-sector company deals) is seeded as crawl + is_daily_discovery', () => {
+  for (const name of FOURTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected schema.sql to seed "${name}"`);
+  }
+  const fourthSeedBlock = schemaSql.slice(
+    schemaSql.indexOf(FOURTH_EXPANSION_QUERY_NAMES[0]) - 500,
+    schemaSql.indexOf(FOURTH_EXPANSION_QUERY_NAMES[FOURTH_EXPANSION_QUERY_NAMES.length - 1]) + 500
+  );
+  assert.match(fourthSeedBlock, /'crawl', 7, 'B', true/);
+  assert.match(fourthSeedBlock, /WHERE NOT EXISTS \(SELECT 1 FROM sources s WHERE s\.name = v\.name\)/);
+});
+
+test('discovery registry: the fourth expansion does not duplicate any pre-existing, second-, or third-expansion query name', () => {
+  const allPriorNames = [...PRE_EXISTING_QUERY_NAMES, ...NEW_RESEARCH_QUERY_NAMES, ...THIRD_EXPANSION_QUERY_NAMES];
+  for (const name of FOURTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(!allPriorNames.includes(name), `"${name}" must be new, not a pre-existing query`);
+  }
+  for (const name of allPriorNames) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected prior query "${name}" to still be present unchanged`);
+  }
+});
+
 test('discovery registry: the Query Registry stays bounded (not dozens of queries)', () => {
-  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length;
-  assert.equal(totalQueries, 23);
+  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length;
+  assert.equal(totalQueries, 25);
   assert.ok(totalQueries < 30, 'the registry should stay bounded enough to control API cost/search volume');
 });
 
@@ -116,7 +149,7 @@ test('discovery registry: getDueSources/collectDailyDiscoveryNow select generica
   // by method/is_daily_discovery/frequency columns, so every new row above
   // is automatically picked up by both the hourly scheduler and the daily
   // job without needing its own code path.
-  for (const name of NEW_RESEARCH_QUERY_NAMES) {
+  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES]) {
     assert.ok(!collectorJs.includes(name), 'collector.js must not special-case a query name');
     assert.ok(!dailyDiscoveryJs.includes(name), 'dailyDiscovery.js must not special-case a query name');
   }
