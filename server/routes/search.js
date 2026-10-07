@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -6,6 +7,35 @@ const pool = require('../db/pool');
 const provider = require('../lib/ai/provider');
 
 const router = express.Router();
+
+// Operational telemetry for /api/search, persisted to PostgreSQL
+// (ai_search_logs — see schema.sql) so it survives app restart/redeploy,
+// unlike the console.error calls below which only ever reached process
+// stdout. Metadata only: never the raw question or the AI's answer — see
+// questionFingerprint() for the one-way hash used to correlate repeats.
+// A telemetry write failure is logged but never allowed to fail or delay
+// the actual user-facing response.
+function questionFingerprint(question) {
+  return crypto.createHash('sha256').update(question).digest('hex').slice(0, 32);
+}
+
+async function recordSearchTelemetry(fields) {
+  try {
+    await pool.query(
+      `INSERT INTO ai_search_logs (
+         request_id, operation, outcome, http_status, latency_ms,
+         candidate_count, source_count, provider, failure_type, is_followup, question_fingerprint
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        fields.requestId, 'ai_search', fields.outcome, fields.httpStatus, fields.latencyMs,
+        fields.candidateCount ?? null, fields.sourceCount ?? null, fields.provider ?? null,
+        fields.failureType ?? null, Boolean(fields.isFollowup), fields.questionFingerprint ?? null,
+      ]
+    );
+  } catch (err) {
+    console.error('ai-search telemetry write failed:', err.message);
+  }
+}
 
 // Bounded candidate set — never send the whole table to the LLM.
 const MAX_CANDIDATES = 8;
@@ -91,45 +121,70 @@ function buildHistoryBlock(history) {
 const INSUFFICIENT_MESSAGE = '현재 보유한 Research Center 자료로는 이 질문에 답변하기에 근거가 부족합니다. 관련 자료가 추가되면 다시 질문해 주세요.';
 
 router.post('/', async (req, res) => {
+  const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+  const isFollowup = Array.isArray(req.body.history) && req.body.history.length > 0;
+
+  // Not logged to ai_search_logs — an empty query never reaches retrieval
+  // or the provider, so there's no operation to report telemetry for
+  // (existing callers/tests rely on this guard touching the DB at all).
   const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
   if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
+  const fingerprint = questionFingerprint(question);
 
   let candidates;
   try {
     candidates = await retrieveCandidates(question);
   } catch (err) {
     console.error('ai-search retrieval failed:', err.message);
-    return res.status(500).json({ error: '검색 중 오류가 발생했습니다.' });
+    const httpStatus = 500;
+    await recordSearchTelemetry({ requestId, outcome: 'retrieval_error', httpStatus, latencyMs: Date.now() - startedAt, isFollowup, questionFingerprint: fingerprint });
+    return res.status(httpStatus).json({ error: '검색 중 오류가 발생했습니다.' });
   }
 
   if (!candidates.length) {
-    return res.json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
+    const httpStatus = 200;
+    await recordSearchTelemetry({
+      requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
+      candidateCount: 0, sourceCount: 0, isFollowup, questionFingerprint: fingerprint,
+    });
+    return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
   }
 
   const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}`;
 
   let text;
+  let providerName;
   try {
     const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user });
     text = result.text;
+    providerName = result.provider;
   } catch (err) {
     // Never leak provider credentials/internal error details to the browser.
     console.error('ai-search provider failed:', err.message);
-    return res.status(502).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
+    const httpStatus = 502;
+    await recordSearchTelemetry({
+      requestId, outcome: 'provider_error', httpStatus, latencyMs: Date.now() - startedAt,
+      candidateCount: candidates.length, failureType: err.failureType || null, isFollowup, questionFingerprint: fingerprint,
+    });
+    return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
-  res.json({
-    answer: text,
-    insufficient: false,
-    sources: candidates.map((c) => ({
-      id: c.id,
-      title: c.title,
-      source: c.source_name || null,
-      published_at: c.published_at,
-    })),
+  const sources = candidates.map((c) => ({
+    id: c.id,
+    title: c.title,
+    source: c.source_name || null,
+    published_at: c.published_at,
+  }));
+  const httpStatus = 200;
+  await recordSearchTelemetry({
+    requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
+    candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
+    isFollowup, questionFingerprint: fingerprint,
   });
+  res.json({ answer: text, insufficient: false, sources });
 });
 
 module.exports = router;
@@ -138,3 +193,4 @@ module.exports.buildMaterialsBlock = buildMaterialsBlock;
 module.exports.buildHistoryBlock = buildHistoryBlock;
 module.exports.INSUFFICIENT_MESSAGE = INSUFFICIENT_MESSAGE;
 module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
+module.exports.questionFingerprint = questionFingerprint;

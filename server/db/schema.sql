@@ -620,3 +620,26 @@ WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'vegetable oil tanker freigh
 INSERT INTO sources (name, publisher, url, method, frequency_days, owner, trust_grade)
 SELECT 'Web Discovery: Wilmar Cargill palm oil investment expansion', NULL, 'Wilmar Cargill palm oil investment expansion', 'crawl', 7, 'poc-web-discovery', 'B'
 WHERE NOT EXISTS (SELECT 1 FROM sources WHERE url = 'Wilmar Cargill palm oil investment expansion' AND method = 'crawl');
+
+-- AI Research Search operational telemetry (PostgreSQL-backed, so it
+-- survives app restart/redeploy — console/process logs do not). Exactly
+-- one row per POST /api/search request, written in server/routes/search.js.
+-- Deliberately metadata-only: never the raw question, the AI's answer, or
+-- any provider credential — question_fingerprint is a one-way SHA-256
+-- hash (for correlating repeat questions), not the question itself.
+CREATE TABLE IF NOT EXISTS ai_search_logs (
+  id SERIAL PRIMARY KEY,
+  request_id UUID NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  operation TEXT NOT NULL DEFAULT 'ai_search',
+  outcome TEXT NOT NULL CHECK (outcome IN ('success', 'insufficient_evidence', 'invalid_request', 'retrieval_error', 'provider_error')),
+  http_status INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  candidate_count INTEGER,
+  source_count INTEGER,
+  provider TEXT,
+  failure_type TEXT,
+  is_followup BOOLEAN NOT NULL DEFAULT false,
+  question_fingerprint TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_search_logs_created_at ON ai_search_logs(created_at);

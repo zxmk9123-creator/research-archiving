@@ -189,6 +189,132 @@ test('POST /: AI provider failure returns a generic 502 without leaking provider
   }
 });
 
+test('POST /: a successful request writes exactly one ai_search_logs row, with metadata only — no raw question/answer', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
+  ]);
+  const restoreProvider = mockProvider(async () => ({ text: '답변 본문입니다.', provider: 'freellmapi' }));
+  try {
+    await withServer(async (base) => {
+      const question = '팜유 가격이 왜 올랐어?';
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      assert.equal(res.status, 200);
+
+      const logCalls = calls.filter((c) => c.text.includes('INSERT INTO ai_search_logs'));
+      assert.equal(logCalls.length, 1);
+      const params = logCalls[0].params;
+      const serialized = JSON.stringify(params);
+      assert.ok(!serialized.includes(question), 'raw question must never be persisted');
+      assert.ok(!serialized.includes('답변 본문입니다'), 'raw answer must never be persisted');
+      // outcome, http_status, latency_ms, candidate_count, source_count,
+      // provider, failure_type, is_followup, question_fingerprint — see
+      // the INSERT column order in recordSearchTelemetry().
+      assert.equal(params[1], 'ai_search');
+      assert.equal(params[2], 'success');
+      assert.equal(params[3], 200);
+      assert.ok(typeof params[4] === 'number' && params[4] >= 0);
+      assert.equal(params[5], 1); // candidate_count
+      assert.equal(params[6], 1); // source_count
+      assert.equal(params[7], 'freellmapi');
+      assert.equal(params[9], false); // is_followup
+      assert.equal(typeof params[10], 'string');
+      assert.equal(params[10].length, 32); // one-way hash, not the raw question
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('POST /: insufficient-evidence requests also get exactly one terminal ai_search_logs row', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  const restoreProvider = mockProvider(async () => { throw new Error('should not be called'); });
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '존재하지않는아주희귀한질문어휘조합' }),
+      });
+      const logCalls = calls.filter((c) => c.text.includes('INSERT INTO ai_search_logs'));
+      assert.equal(logCalls.length, 1);
+      assert.equal(logCalls[0].params[2], 'insufficient_evidence');
+      assert.equal(logCalls[0].params[3], 200);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('POST /: provider failures also get exactly one terminal ai_search_logs row, with the failure type but no credential text', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
+  ]);
+  const restoreProvider = mockProvider(async () => {
+    const err = new Error('AI provider request failed (401): Bearer sk-secret-abc123');
+    err.failureType = 'auth';
+    throw err;
+  });
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 가격이 왜 올랐어?' }),
+      });
+      const logCalls = calls.filter((c) => c.text.includes('INSERT INTO ai_search_logs'));
+      assert.equal(logCalls.length, 1);
+      assert.equal(logCalls[0].params[2], 'provider_error');
+      assert.equal(logCalls[0].params[3], 502);
+      assert.equal(logCalls[0].params[8], 'auth'); // failure_type
+      assert.ok(!JSON.stringify(logCalls[0].params).includes('sk-secret-abc123'));
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('POST /: retrieval failures also get exactly one terminal ai_search_logs row', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => { throw new Error('connection reset'); }],
+  ]);
+  const restoreProvider = mockProvider(async () => { throw new Error('should not be called'); });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 가격이 왜 올랐어?' }),
+      });
+      assert.equal(res.status, 500);
+      const logCalls = calls.filter((c) => c.text.includes('INSERT INTO ai_search_logs'));
+      assert.equal(logCalls.length, 1);
+      assert.equal(logCalls[0].params[2], 'retrieval_error');
+      assert.equal(logCalls[0].params[3], 500);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('questionFingerprint: one-way hash, stable for the same question, different for different questions', () => {
+  const a = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
+  const b = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
+  const c = searchRouter.questionFingerprint('다른 질문입니다');
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.ok(!a.includes('팜유'));
+});
+
 test('SYSTEM_PROMPT instructs the model never to emit citation markers — the app owns citations', () => {
   const prompt = searchRouter.SYSTEM_PROMPT;
   assert.match(prompt, /Do NOT output any citation marker/);
