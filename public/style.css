@@ -184,26 +184,31 @@ p { margin: 0; }
 .ai-answer-list li { margin-bottom: 6px; }
 .ai-answer-p:last-child, .ai-answer-list:last-child { margin-bottom: 0; }
 
-/* Sources: visually distinct but restrained — numbered rows, no per-item
-   card/border. Built only from the `sources` the server already returned
-   (real DB rows), never parsed out of the model's own text. */
+/* Sources: compact citation chips, not a vertical list — identify the
+   evidence (publisher + title) without reproducing dates/URLs/descriptions.
+   Built only from the `sources` the server already returned (real DB
+   rows), never parsed out of the model's own text. */
 .ai-search-sources { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border); max-width: 780px; }
 .ai-search-sources-label {
   font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--text-tertiary); margin-bottom: var(--sp-2);
 }
-.ai-search-sources-list { list-style: none; margin: 0; padding: 0; counter-reset: ai-source; display: flex; flex-direction: column; gap: 4px; }
-.ai-search-sources-list li { counter-increment: ai-source; }
-.ai-search-sources-list a {
-  display: flex; align-items: baseline; gap: 10px; padding: 7px 4px; border-radius: var(--radius-sm);
-  text-decoration: none; color: var(--text); transition: background .15s var(--ease);
+.ai-source-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-source-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); text-decoration: none; transition: background .15s var(--ease), border-color .15s var(--ease);
 }
-.ai-search-sources-list a:hover { background: var(--action-soft); }
-.ai-search-sources-list a::before {
-  content: counter(ai-source, decimal-leading-zero); flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--action);
+.ai-source-chip:hover, .ai-source-chip:focus-visible {
+  background: var(--action-soft); border-color: var(--action);
 }
-.ai-source-title { font-size: 14px; font-weight: 500; flex: 1 1 auto; }
-.ai-source-meta { font-size: 12.5px; color: var(--text-tertiary); flex: 0 0 auto; }
-.ai-search-sources-list a::after { content: '→'; color: var(--text-tertiary); font-size: 13px; }
+.ai-source-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--action-soft); }
+.ai-source-chip-pub { flex: 0 0 auto; font-size: 12.5px; font-weight: 700; color: var(--action-hover); white-space: nowrap; }
+.ai-source-chip-pub::after { content: '·'; margin-left: 6px; color: var(--text-tertiary); font-weight: 400; }
+.ai-source-chip-title {
+  flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ai-source-chip-link { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-search.is-searching::before { animation: none; opacity: .6; }
@@ -211,7 +216,7 @@ p { margin: 0; }
 }
 @media (max-width: 640px) {
   .ai-search form { flex-direction: column; }
-  .ai-source-meta { display: block; margin-top: 2px; }
+  .ai-source-chip { max-width: calc(100vw - 64px); }
 }
 
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
