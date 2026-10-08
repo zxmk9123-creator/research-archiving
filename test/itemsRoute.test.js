@@ -243,3 +243,52 @@ test('PATCH /:id: returns 404 for a nonexistent item without running the classif
     restore();
   }
 });
+
+// Production incident: a duplicate source_url hit idx_items_source_url_unique
+// as an unhandled pg error, which crashed the whole Node process (not just
+// this request) — every other request then got a 502 "Application failed
+// to respond" until the container restarted. Registering the same URL twice
+// (e.g. retrying "AI 초안 작성" after an earlier attempt already saved it) is
+// routine and must stay a normal 409, never take the app down.
+test('POST /: a duplicate source_url returns 409 instead of throwing (crashing the process)', async () => {
+  const { calls, restore } = mockPool([
+    ['INSERT INTO items', () => {
+      const err = new Error('duplicate key value violates unique constraint "idx_items_source_url_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Dup', source_url: 'https://example.org/already-saved', type: '뉴스' }),
+      });
+      assert.equal(res.status, 409);
+      const body = await res.json();
+      assert.match(body.error, /이미 등록된/);
+      assert.ok(!calls.some((c) => c.text.includes('SELECT') && c.text.includes('item_sectors')), 'must not proceed to tagging after the insert failed');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('POST /: a non-constraint insert failure returns 500 instead of crashing the process', async () => {
+  const { restore } = mockPool([
+    ['INSERT INTO items', () => { throw new Error('connection terminated unexpectedly'); }],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'X', source_url: 'https://example.org/x', type: '뉴스' }),
+      });
+      assert.equal(res.status, 500);
+    });
+  } finally {
+    restore();
+  }
+});

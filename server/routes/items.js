@@ -142,12 +142,32 @@ router.post('/', async (req, res) => {
   if (!title || !source_url || !type) {
     return res.status(400).json({ error: 'title, source_url, type required' });
   }
-  const { rows } = await pool.query(
-    `INSERT INTO items (title, source_url, pdf_url, published_at, source_id, type, summary, insight, attribution, thumbnail_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [title, source_url, pdf_url || null, published_at || null, source_id || null, type, summary || null, insight || null, attribution || null, thumbnail_url || null]
-  );
-  const item = rows[0];
+  let item;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO items (title, source_url, pdf_url, published_at, source_id, type, summary, insight, attribution, thumbnail_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [title, source_url, pdf_url || null, published_at || null, source_id || null, type, summary || null, insight || null, attribution || null, thumbnail_url || null]
+    );
+    item = rows[0];
+  } catch (err) {
+    // idx_items_source_url_unique — an unhandled constraint violation here
+    // previously crashed the whole Node process (unhandled rejection),
+    // returning a 502 "Application failed to respond" to every request
+    // against the app until Railway restarted the container. A duplicate
+    // source_url is routine (double-click, retry on the same URL after an
+    // earlier attempt already saved it) and must stay a normal 409, never
+    // take the app down.
+    if (err.code === '23505') {
+      return res.status(409).json({ error: '이미 등록된 원문 URL입니다. 기존 Draft를 목록에서 확인하세요.' });
+    }
+    // Any other insert failure: respond with 500 rather than rethrowing —
+    // Express 4 does not catch a rejected async handler, so an uncaught
+    // throw here is exactly the same whole-process crash this fix exists
+    // to prevent, just for a different error.
+    console.error('POST /items insert failed:', err);
+    return res.status(500).json({ error: 'failed to save item' });
+  }
   await setTags(item.id, sector_ids, usage_ids);
   await matchCompanies(item.id, `${title} ${summary || ''}`);
   const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [item.id]);
