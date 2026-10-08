@@ -343,6 +343,33 @@ FROM (VALUES
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Seventh Discovery Query Registry expansion: adds Archive-relevant angles
+-- no prior query covers at all — regulatory disclosure filings (distinct
+-- from the "strategic report annual filing" framing in the fifth/sixth
+-- expansions, which skews toward press-release-style company reports
+-- rather than SEC/regulatory filings themselves), plantation-level
+-- agronomy/yield research (distinct from macro production/supply/demand),
+-- biodiesel/RFS blending-mandate policy (distinct from the SAF-specific
+-- deal query in the fourth expansion), demand-side structural analysis
+-- for the two largest importing markets (every prior query is supply-side/
+-- exporter-framed), derivatives/futures market structure (distinct from
+-- the news-framed price/spread queries), and climate-change crop-yield
+-- impact studies (not covered by any prior query). Same idempotent
+-- pattern, same is_archive_discovery=true/is_daily_discovery=true
+-- convention; existing queries and pipeline behavior are otherwise
+-- untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery, is_archive_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true, true
+FROM (VALUES
+  ('Archive Discovery: edible oil company SEC filing regulatory disclosure', 'ADM Bunge Cargill Wilmar SEC filing 10-K annual report edible oil segment'),
+  ('Archive Discovery: palm oil plantation agronomy yield research', 'oil palm plantation agronomy yield productivity research study'),
+  ('Archive Discovery: biodiesel renewable fuel standard blending mandate policy', 'biodiesel renewable fuel standard RFS blending mandate policy analysis'),
+  ('Archive Discovery: China India edible oil import demand structural analysis', 'China India edible oil palm soybean import demand structural analysis'),
+  ('Archive Discovery: vegetable oil futures options derivatives market structure', 'CBOT MDEX vegetable oil futures options derivatives market structure analysis'),
+  ('Archive Discovery: climate change oilseed crop yield impact study', 'climate change impact oilseed palm soybean crop yield study research')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
   id SERIAL PRIMARY KEY,

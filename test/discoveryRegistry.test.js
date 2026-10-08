@@ -231,10 +231,46 @@ test('discovery registry: the sixth expansion does not duplicate any pre-existin
   }
 });
 
+// --- Seventh expansion: angles no prior query covers at all — regulatory
+// disclosure filings (distinct from the press-release-style "strategic
+// report annual filing" framing already in the registry), plantation-
+// level agronomy/yield research, biodiesel/RFS blending-mandate policy,
+// demand-side structural analysis for the two largest importing markets
+// (every prior query is supply-side/exporter-framed), derivatives/futures
+// market structure, and climate-change crop-yield impact studies. ---
+
+const SEVENTH_EXPANSION_QUERY_NAMES = [
+  'Archive Discovery: edible oil company SEC filing regulatory disclosure',
+  'Archive Discovery: palm oil plantation agronomy yield research',
+  'Archive Discovery: biodiesel renewable fuel standard blending mandate policy',
+  'Archive Discovery: China India edible oil import demand structural analysis',
+  'Archive Discovery: vegetable oil futures options derivatives market structure',
+  'Archive Discovery: climate change oilseed crop yield impact study',
+];
+
+test('discovery registry: the seventh expansion (regulatory/agronomy/policy/demand-side/derivatives/climate) is seeded as crawl + is_daily_discovery + is_archive_discovery', () => {
+  for (const name of SEVENTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected schema.sql to seed "${name}"`);
+  }
+  const seventhSeedBlock = schemaSql.slice(
+    schemaSql.indexOf(SEVENTH_EXPANSION_QUERY_NAMES[0]) - 500,
+    schemaSql.indexOf(SEVENTH_EXPANSION_QUERY_NAMES[SEVENTH_EXPANSION_QUERY_NAMES.length - 1]) + 500
+  );
+  assert.match(seventhSeedBlock, /'crawl', 7, 'B', true, true/);
+  assert.match(seventhSeedBlock, /WHERE NOT EXISTS \(SELECT 1 FROM sources s WHERE s\.name = v\.name\)/);
+});
+
+test('discovery registry: the seventh expansion does not duplicate any pre-existing query name', () => {
+  const allPriorNames = [...PRE_EXISTING_QUERY_NAMES, ...NEW_RESEARCH_QUERY_NAMES, ...THIRD_EXPANSION_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES, ...SIXTH_EXPANSION_QUERY_NAMES];
+  for (const name of SEVENTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(!allPriorNames.includes(name), `"${name}" must be new, not a pre-existing query`);
+  }
+});
+
 test('discovery registry: the Query Registry stays bounded (not dozens of queries)', () => {
-  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length + FIFTH_EXPANSION_QUERY_NAMES.length + SIXTH_EXPANSION_QUERY_NAMES.length;
-  assert.equal(totalQueries, 40);
-  assert.ok(totalQueries < 50, 'the registry should stay bounded enough to control API cost/search volume');
+  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length + FIFTH_EXPANSION_QUERY_NAMES.length + SIXTH_EXPANSION_QUERY_NAMES.length + SEVENTH_EXPANSION_QUERY_NAMES.length;
+  assert.equal(totalQueries, 46);
+  assert.ok(totalQueries < 55, 'the registry should stay bounded enough to control API cost/search volume');
 });
 
 test('discovery registry: getDueSources/collectDailyDiscoveryNow select generically on is_daily_discovery — no per-query-name code exists', () => {
@@ -244,7 +280,7 @@ test('discovery registry: getDueSources/collectDailyDiscoveryNow select generica
   // by method/is_daily_discovery/frequency columns, so every new row above
   // is automatically picked up by both the hourly scheduler and the daily
   // job without needing its own code path.
-  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES, ...SIXTH_EXPANSION_QUERY_NAMES]) {
+  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES, ...SIXTH_EXPANSION_QUERY_NAMES, ...SEVENTH_EXPANSION_QUERY_NAMES]) {
     assert.ok(!collectorJs.includes(name), 'collector.js must not special-case a query name');
     assert.ok(!dailyDiscoveryJs.includes(name), 'dailyDiscovery.js must not special-case a query name');
   }
