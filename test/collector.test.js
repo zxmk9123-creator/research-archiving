@@ -396,6 +396,18 @@ test('acquireRssArticleContent: a successfully extracted, substantive page descr
   }
 });
 
+test('acquireRssArticleContent: prefers the fuller body_text over the short og:description when both are present', async () => {
+  const bodyText = '인도네시아 정부는 국내 공급 안정을 위해 팜유 수출세를 톤당 50달러 인상한다고 발표했다. 분석가들은 이번 조치가 간접적인 토지 이용 변화에 따른 경제적 비용 논쟁을 다시 불러일으킬 수 있다고 지적했다.';
+  const restore = mockExtractMetadata(async () => ({ title: 't', summary: 'Palm oil export tax raised', body_text: bodyText, thumbnail_url: null, published_at: null }));
+  try {
+    const result = await acquireRssArticleContent('https://example.com/article-with-body');
+    assert.equal(result.stage, 'acquired');
+    assert.equal(result.extractedText, bodyText);
+  } finally {
+    restore();
+  }
+});
+
 test('acquireRssArticleContent: a page fetch failure is reported as acquisition_failed, not treated as acquired content', async () => {
   const restore = mockExtractMetadata(async () => { throw new Error('fetch failed: 403'); });
   try {

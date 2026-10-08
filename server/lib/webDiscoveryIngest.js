@@ -128,6 +128,14 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       }
 
       const extractedText = meta.summary || candidate.title;
+      // The relevance pre-filter above keeps using the short og:description
+      // (cheap, keeps the filter's calibration unchanged); the AI draft call
+      // below gets the fuller <p> body text when extractMetadata() found
+      // one — og:description alone is often a one-line teaser that omits a
+      // deeper point the article actually makes (e.g. an economic argument
+      // buried a few paragraphs in), which was starving ai_summary/ai_insight
+      // of real material to work from.
+      const aiDraftText = meta.body_text || extractedText;
       if (!isRelevantToOilFatsScope(candidate.title, extractedText)) {
         filtered++;
         details.push({ title: candidate.title, link: candidate.link, stage: 'filtered' });
@@ -173,7 +181,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         details.push({ title: candidate.title, link: candidate.link, itemId, stage: 'acquisition_fallback_used', fallbackUrl });
       }
 
-      const draftResult = await generateAiDraftForItem(itemId, undefined, extractedText);
+      const draftResult = await generateAiDraftForItem(itemId, undefined, aiDraftText);
       if (!draftResult.ok) {
         failed++;
         details.push({ title: candidate.title, link: candidate.link, itemId, stage: 'ai_screening_failed', error: draftResult.error });

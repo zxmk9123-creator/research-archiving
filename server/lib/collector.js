@@ -56,8 +56,14 @@ async function acquireRssArticleContent(url) {
   } catch (err) {
     return { extractedText: undefined, stage: 'acquisition_failed', error: err.message };
   }
-  if (meta.summary && meta.summary.trim().length >= MIN_ACQUIRED_CONTENT_CHARS) {
-    return { extractedText: meta.summary, stage: 'acquired' };
+  // Prefer the fuller <p> body text when extractMetadata() found one — the
+  // same og:description-is-too-thin-for-AI issue Web Discovery had (a
+  // one-line teaser omits a point the article makes further in), not RSS-
+  // specific. Falls back to meta.summary unchanged when body_text wasn't
+  // extractable (e.g. a page with no <p> tags).
+  const content = meta.body_text || meta.summary;
+  if (content && content.trim().length >= MIN_ACQUIRED_CONTENT_CHARS) {
+    return { extractedText: content, stage: 'acquired' };
   }
   return { extractedText: undefined, stage: 'insufficient_content' };
 }
