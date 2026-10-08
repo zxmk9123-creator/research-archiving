@@ -1323,9 +1323,9 @@ async function renderReview() {
             <div class="review-section-title">활용처</div>
             <div class="chiplist" id="d-usages">${usageChips}</div>
           </div>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;align-items:center">
             <button class="btn primary btn-publish" id="d-publish" style="flex:1;width:auto">자료 발행</button>
-            <button class="btn" id="d-delete" type="button" style="flex:0 0 auto;white-space:nowrap">삭제</button>
+            <button class="btn" id="d-delete" type="button" style="flex:0 0 auto;white-space:nowrap;height:var(--ctrl-lg);margin-top:var(--sp-4)">삭제</button>
           </div>
         </div>
       </div>
