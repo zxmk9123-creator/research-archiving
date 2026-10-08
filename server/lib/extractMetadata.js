@@ -47,6 +47,9 @@ function isBotBlockPage(title) {
 // to work from. No HTML-parser dependency, same convention as the rest of
 // this file: strip script/style blocks, then concatenate <p> text content.
 const MAX_BODY_TEXT_CHARS = 6000;
+// Hard cap on how much raw HTML the regexes in this file ever scan — see the
+// comment at its use site in extractMetadata() for why.
+const MAX_HTML_CHARS = 500_000;
 
 function stripTags(fragment) {
   return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
@@ -70,7 +73,17 @@ async function extractMetadata(url) {
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const html = await res.text();
+  const rawHtml = await res.text();
+  // Production incident: an unbounded-size page fed into the regexes below
+  // (matchMeta, extractBodyText) froze the whole Node process for minutes —
+  // GET / (a static file, no DB query) took 4+ minutes to respond while a
+  // collection run was fetching real-world pages, some apparently large or
+  // malformed enough to blow up [\s\S]*? backtracking across the full
+  // document. og:meta tags and the first article paragraphs always appear
+  // near the top of a real page, so truncating well before any regex runs
+  // bounds the worst case without losing anything these regexes would have
+  // found anyway.
+  const html = rawHtml.slice(0, MAX_HTML_CHARS);
 
   const titleTag = html.match(/<title[^>]*>([^<]*)<\/title>/i);
   const title = decodeEntities(matchMeta(html, 'og:title') || (titleTag ? titleTag[1].trim() : null));

@@ -110,3 +110,25 @@ test('extractMetadata: falls back to <title> tag when og:title is absent, apostr
     restore();
   }
 });
+
+// Production incident: an unbounded-size/malformed page froze the whole
+// Node process for minutes (GET / itself, a static file with no DB query,
+// took 4+ minutes to respond) while extractMetadata()'s regexes scanned a
+// huge real-world HTML document during a collection run. Truncating the
+// HTML before any regex touches it bounds the worst case regardless of
+// page size or adversarial structure.
+
+test('extractMetadata: a very large page (well past the truncation cap) still extracts quickly instead of hanging', async () => {
+  const filler = '<div>' + 'x'.repeat(2_000_000) + '</div>'; // ~2MB, past MAX_HTML_CHARS
+  const html = `<html><head><meta property="og:title" content="Large page title"></head><body><p>${'A'.repeat(100)}</p>${filler}</body></html>`;
+  const restore = mockFetchHtml(html);
+  try {
+    const start = Date.now();
+    const meta = await extractMetadata('https://example.org/huge');
+    const elapsedMs = Date.now() - start;
+    assert.equal(meta.title, 'Large page title');
+    assert.ok(elapsedMs < 2000, `expected fast extraction on a large page, took ${elapsedMs}ms`);
+  } finally {
+    restore();
+  }
+});
