@@ -11,6 +11,35 @@ async function api(path, opts) {
   return res.json();
 }
 
+// AI draft generation can legitimately take well over a minute (FreeLLMAPI's
+// own cascade budget is up to 135s — see provider.js), which routinely
+// outlasts the hosting platform's gateway timeout. The gateway then cuts the
+// browser's connection with a 502 ("Application failed to respond") even
+// though the server is still running and will finish the generation and
+// write it to the item a little later. ai_status flips to 'pending' almost
+// immediately (before the slow provider call), so once the POST is fired,
+// polling the item directly sidesteps the gateway's timeout entirely — this
+// surfaces the real outcome instead of a raw gateway error for what is
+// actually still in-progress work.
+async function triggerAiDraftAndPoll(id, body) {
+  const postPromise = api(`/items/${id}/ai-draft`, {
+    method: 'POST',
+    body: body ? JSON.stringify(body) : undefined,
+  }).catch((err) => ({ __error: err }));
+  const postResult = await postPromise;
+
+  const deadlineAt = Date.now() + 160000;
+  let item = await api(`/items/${id}`);
+  while (item.ai_status === 'pending' && Date.now() < deadlineAt) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    item = await api(`/items/${id}`);
+  }
+  if (postResult && postResult.__error && item.ai_status !== 'completed' && item.ai_status !== 'failed') {
+    throw postResult.__error;
+  }
+  return item;
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -1176,13 +1205,10 @@ async function renderReview() {
           return;
         }
         btn.disabled = true;
-        status.textContent = 'AI 초안 작성 중...';
+        status.textContent = 'AI 초안 작성 중... (최대 2-3분 소요될 수 있습니다)';
         try {
           const created = await api('/items', { method: 'POST', body: JSON.stringify(currentFormPayload()) });
-          await api(`/items/${created.id}/ai-draft`, {
-            method: 'POST',
-            body: JSON.stringify({ extracted_text: extractedBodyText || undefined }),
-          });
+          await triggerAiDraftAndPoll(created.id, { extracted_text: extractedBodyText || undefined });
           await loadDraft(created.id);
           const applyTextBtn = document.getElementById('ai-apply-text-btn');
           if (applyTextBtn) applyTextBtn.click();
@@ -1348,7 +1374,7 @@ async function renderReview() {
         aiRetryBtn.disabled = true;
         aiRetryBtn.textContent = '생성 중...';
         try {
-          await api(`/items/${id}/ai-draft`, { method: 'POST' });
+          await triggerAiDraftAndPoll(id);
         } catch (err) {
           // sanitized message already; just surface it and let the reload show state
         }
