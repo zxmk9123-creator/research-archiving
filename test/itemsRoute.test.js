@@ -341,6 +341,35 @@ test('POST /:id/ai-draft: re-extracts body text from item.source_url when no ext
   }
 }));
 
+test('POST /:id/ai-draft: responds immediately instead of waiting for generation to finish', () => withoutFreeLlmApiKey(async () => {
+  // The slow part (re-extraction, then the AI call) used to run before the
+  // response was sent, so a reviewer clicking the button waited out the
+  // whole generation — now it's kicked off in the background and the
+  // response reflects ai_status='pending' right away; the frontend already
+  // polls the item afterward (triggerAiDraftAndPoll in app.js).
+  const { restore } = mockPool([
+    ['SELECT id, status, ai_status, source_url FROM items WHERE id', () => ({ rows: [{ id: 22, status: 'Draft', ai_status: 'not_requested', source_url: 'https://example.org/article' }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 22, ai_status: 'pending' })] })],
+  ]);
+  const restoreFetch = mockExternalFetch(() => new Promise((resolve) => {
+    setTimeout(() => resolve({ ok: true, status: 200, text: async () => '<html></html>' }), 300);
+  }));
+  try {
+    await withServer(async (base) => {
+      const start = Date.now();
+      const res = await fetch(`${base}/22/ai-draft`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const elapsedMs = Date.now() - start;
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.item.ai_status, 'pending');
+      assert.ok(elapsedMs < 150, `expected an immediate response, took ${elapsedMs}ms (background fetch takes 300ms)`);
+    });
+  } finally {
+    restoreFetch();
+    restore();
+  }
+}));
+
 test('POST /:id/ai-draft: skips re-extraction when extracted_text is already provided in the request', () => withoutFreeLlmApiKey(async () => {
   const { restore } = mockPool([
     ['SELECT id, status, ai_status, source_url FROM items WHERE id', () => ({ rows: [{ id: 21, status: 'Draft', ai_status: 'not_requested', source_url: 'https://example.org/article' }] })],

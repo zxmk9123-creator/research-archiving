@@ -110,30 +110,51 @@ router.post('/:id/ai-draft', async (req, res) => {
     return res.status(409).json({ error: 'AI 초안 생성이 이미 진행 중입니다.' });
   }
 
-  // Richer source material than item.summary alone — same principle
-  // wherever an AI draft is (re)generated, manual or collected: the fuller
-  // <p> body text beats a one-line og:description/RSS-teaser summary,
-  // because a deeper point the article makes (e.g. an economic argument a
-  // few paragraphs in) is otherwise invisible to the model. The manual-
-  // registration form already has this from its own metadata-extraction
-  // step and sends it directly; a retry/regenerate on an existing item
-  // (collected automatically or manually) has no such client-side value to
-  // send, so re-extract it from the item's own source_url here instead.
-  // Best-effort: a failed re-fetch (dead link, blocked, no body text found)
-  // just falls through to the existing summary-based behavior, unchanged.
-  let extractedText = req.body.extracted_text || undefined;
-  if (!extractedText && item.source_url) {
-    try {
-      const meta = await extractMetadata(item.source_url);
-      extractedText = meta.body_text || undefined;
-    } catch (err) {
-      // Not fatal — generateAiDraftForItem falls back to item.summary.
-    }
-  }
+  // Flip to pending synchronously (so a double-click / concurrent request
+  // is rejected by the check above, same as before) and respond right
+  // away — the slow part (re-extracting body text from source_url when the
+  // caller didn't already send it, then the AI call itself, anywhere from a
+  // few seconds to well over a minute) now runs in the background instead
+  // of making the button wait it out. The frontend already polls the
+  // item's ai_status after this call (triggerAiDraftAndPoll in app.js,
+  // added earlier for a gateway-timeout issue) regardless of what this
+  // response contains, so this was previously wasted architecture — the
+  // route still made the client wait out the whole generation before that
+  // polling ever got a chance to start.
+  await pool.query(`UPDATE items SET ai_status = 'pending', ai_error = NULL WHERE id = $1`, [item.id]);
 
-  const result = await generateAiDraftForItem(item.id, undefined, extractedText);
+  const providedText = req.body.extracted_text || undefined;
+  (async () => {
+    // Richer source material than item.summary alone — same principle
+    // wherever an AI draft is (re)generated, manual or collected: the
+    // fuller <p> body text beats a one-line og:description/RSS-teaser
+    // summary, because a deeper point the article makes (e.g. an economic
+    // argument a few paragraphs in) is otherwise invisible to the model.
+    // The manual-registration form already has this from its own
+    // metadata-extraction step and sends it directly; a retry/regenerate
+    // on an existing item has no such client-side value to send, so
+    // re-extract it from the item's own source_url here instead.
+    // Best-effort: a failed re-fetch (dead link, blocked, no body text
+    // found) just falls through to the existing summary-based behavior.
+    let extractedText = providedText;
+    if (!extractedText && item.source_url) {
+      try {
+        const meta = await extractMetadata(item.source_url);
+        extractedText = meta.body_text || undefined;
+      } catch (err) {
+        // Not fatal — generateAiDraftForItem falls back to item.summary.
+      }
+    }
+    await generateAiDraftForItem(item.id, undefined, extractedText);
+  })().catch((err) => {
+    // generateAiDraftForItem itself never throws (see aiDraft.js), so this
+    // only catches something going wrong in the re-extraction wrapper
+    // above — never let it become an unhandled rejection.
+    console.error(`background ai-draft generation failed for item ${item.id}:`, err);
+  });
+
   const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [item.id]);
-  res.json({ ok: result.ok, error: result.error, item: full[0] });
+  res.json({ ok: true, pending: true, item: full[0] });
 });
 
 async function setTags(itemId, sectorIds = [], usageIds = []) {
