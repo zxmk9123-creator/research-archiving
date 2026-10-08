@@ -1,13 +1,20 @@
 // Lightweight metadata extraction (og:*, <title>, meta description) — no HTML parser dependency.
+//
+// The content capture matches back to the SAME quote character the
+// attribute actually opened with (via the \1 backreference), not "any quote
+// character" — a title/description containing an apostrophe (e.g.
+// `content="Indonesia's palm oil exports rise"`) previously truncated at
+// that apostrophe because [^"']* treats ' and " as equivalent terminators
+// regardless of which one the attribute is actually quoted with.
 function matchMeta(html, prop) {
   const re = new RegExp(
-    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']*)["']`,
+    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=(["'])([\\s\\S]*?)\\1`,
     'i'
   );
   const m = html.match(re) || html.match(
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${prop}["']`, 'i')
+    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+(?:property|name)=["']${prop}["']`, 'i')
   );
-  return m ? m[1].trim() : null;
+  return m ? m[2].trim() : null;
 }
 
 function decodeEntities(str) {

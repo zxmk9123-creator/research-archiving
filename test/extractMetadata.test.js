@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isBotBlockPage, extractBodyText } = require('../server/lib/extractMetadata');
+const { isBotBlockPage, extractBodyText, extractMetadata } = require('../server/lib/extractMetadata');
+
+function mockFetchHtml(html) {
+  const original = global.fetch;
+  global.fetch = async () => ({ ok: true, status: 200, text: async () => html });
+  return () => { global.fetch = original; };
+}
 
 // Regression for the production finding: a bot-block/CAPTCHA interstitial
 // (Radware, Akamai "Client Challenge", Cloudflare) returns HTTP 200 with a
@@ -62,4 +68,45 @@ test('extractBodyText: strips script/style content and HTML tags from paragraph 
 
 test('extractBodyText: returns null when there is no usable paragraph content', () => {
   assert.equal(extractBodyText('<html><body><div>no p tags here</div></body></html>'), null);
+});
+
+// Production bug: a title/description containing an apostrophe (common in
+// possessives, e.g. "Indonesia's exports...") was truncated right at that
+// apostrophe — [^"']* treated ' and " as interchangeable terminators
+// regardless of which quote character the attribute actually used.
+
+test('extractMetadata: og:title content is not truncated by an apostrophe inside a double-quoted attribute', async () => {
+  const restore = mockFetchHtml(`<html><head>
+    <meta property="og:title" content="Indonesia's palm oil exports rise 12% in September">
+  </head><body><p>${'x'.repeat(50)}</p></body></html>`);
+  try {
+    const meta = await extractMetadata('https://example.org/a');
+    assert.equal(meta.title, "Indonesia's palm oil exports rise 12% in September");
+  } finally {
+    restore();
+  }
+});
+
+test('extractMetadata: og:description content is not truncated by a double quote inside a single-quoted attribute', async () => {
+  const restore = mockFetchHtml(`<html><head>
+    <meta property='og:description' content='Analysts called it a "record" month for exports'>
+  </head><body><p>${'x'.repeat(50)}</p></body></html>`);
+  try {
+    const meta = await extractMetadata('https://example.org/b');
+    assert.equal(meta.summary, 'Analysts called it a "record" month for exports');
+  } finally {
+    restore();
+  }
+});
+
+test('extractMetadata: falls back to <title> tag when og:title is absent, apostrophe included', async () => {
+  const restore = mockFetchHtml(`<html><head>
+    <title>Cargill's Q3 earnings beat expectations</title>
+  </head><body><p>${'x'.repeat(50)}</p></body></html>`);
+  try {
+    const meta = await extractMetadata('https://example.org/c');
+    assert.equal(meta.title, "Cargill's Q3 earnings beat expectations");
+  } finally {
+    restore();
+  }
 });
