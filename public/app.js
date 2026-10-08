@@ -1323,7 +1323,10 @@ async function renderReview() {
             <div class="review-section-title">활용처</div>
             <div class="chiplist" id="d-usages">${usageChips}</div>
           </div>
-          <button class="btn primary btn-publish" id="d-publish">자료 발행</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn primary btn-publish" id="d-publish">자료 발행</button>
+            <button class="btn" id="d-delete" type="button">삭제</button>
+          </div>
         </div>
       </div>
     `;
@@ -1408,6 +1411,12 @@ async function renderReview() {
           status: 'Published',
         }),
       });
+      renderReview();
+    };
+
+    document.getElementById('d-delete').onclick = async () => {
+      if (!confirm('이 Draft를 삭제할까요? 되돌릴 수 없습니다.')) return;
+      await api(`/items/${id}`, { method: 'DELETE' });
       renderReview();
     };
   }
