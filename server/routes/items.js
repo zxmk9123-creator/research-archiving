@@ -110,7 +110,12 @@ router.post('/:id/ai-draft', async (req, res) => {
     return res.status(409).json({ error: 'AI 초안 생성이 이미 진행 중입니다.' });
   }
 
-  const result = await generateAiDraftForItem(item.id);
+  // Optional: richer source material (e.g. the body text already pulled by
+  // the manual-registration form's metadata extraction) than item.summary
+  // alone would give the prompt. Omitted, this call behaves exactly as
+  // before — every existing caller (collector fire-and-forget, plain retry)
+  // is unaffected.
+  const result = await generateAiDraftForItem(item.id, undefined, req.body.extracted_text || undefined);
   const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [item.id]);
   res.json({ ok: result.ok, error: result.error, item: full[0] });
 });

@@ -1122,6 +1122,12 @@ async function renderReview() {
       `;
       bindChips(document.getElementById('d-sectors'), []);
       bindChips(document.getElementById('d-usages'), []);
+      // body_text (article paragraph text, not shown in any field) is kept
+      // only so the AI 초안 작성 button below can give the model something
+      // more substantial to work from than the often one-line og:description
+      // — that thinness was the root cause of weak title/summary/insight
+      // output, not the AI prompt itself.
+      let extractedBodyText = null;
       document.getElementById('d-extract').onclick = async () => {
         const url = document.getElementById('d-url').value;
         if (!url) return;
@@ -1133,6 +1139,7 @@ async function renderReview() {
           if (meta.summary) document.getElementById('d-summary').value = meta.summary;
           if (meta.thumbnail_url) document.getElementById('d-thumb').value = meta.thumbnail_url;
           if (meta.published_at) document.getElementById('d-date').value = meta.published_at;
+          extractedBodyText = meta.body_text || null;
           status.textContent = '메타데이터를 가져왔습니다. 확인 후 필요하면 수정하세요.';
         } catch (err) {
           status.textContent = `자동 추출 실패: ${err.message} — 직접 입력해주세요.`;
@@ -1172,8 +1179,13 @@ async function renderReview() {
         status.textContent = 'AI 초안 작성 중...';
         try {
           const created = await api('/items', { method: 'POST', body: JSON.stringify(currentFormPayload()) });
-          await api(`/items/${created.id}/ai-draft`, { method: 'POST' });
+          await api(`/items/${created.id}/ai-draft`, {
+            method: 'POST',
+            body: JSON.stringify({ extracted_text: extractedBodyText || undefined }),
+          });
           await loadDraft(created.id);
+          const applyTextBtn = document.getElementById('ai-apply-text-btn');
+          if (applyTextBtn) applyTextBtn.click();
           const applyAllBtn = document.getElementById('ai-apply-all-btn');
           if (applyAllBtn) applyAllBtn.click();
         } catch (err) {
@@ -1240,13 +1252,14 @@ async function renderReview() {
           <div class="review-section">
             <div class="review-section-title">AI 인사이트</div>
             <p class="review-body-text review-insight-text">${item.ai_insight || ''}</p>
+            <button class="btn-text" id="ai-apply-text-btn" type="button">핵심요약·인사이트 반영 →</button>
           </div>
           <div class="review-divider"></div>
           <div class="review-section">
             <div class="review-section-title">분류 제안</div>
             <div class="chiplist">${sectorChipsAi}</div>
             <div class="chiplist" style="margin-top:6px">${usageChipsAi}</div>
-            <button class="btn-text" id="ai-apply-all-btn" type="button">AI 제안 전체 적용</button>
+            <button class="btn-text" id="ai-apply-all-btn" type="button">분류 제안 전체 적용</button>
           </div>`;
       }
       // not_requested
@@ -1305,11 +1318,20 @@ async function renderReview() {
         if (chip) chip.classList.add('active');
       };
     });
+    // Text (핵심요약/인사이트) and classification (섹터/활용처) are reflected
+    // into the right-hand editable pane by two separate buttons — each
+    // readable as its own action, and each individually re-runnable (e.g.
+    // applying classification without overwriting an already-edited summary).
+    const applyTextBtn = document.getElementById('ai-apply-text-btn');
+    if (applyTextBtn) {
+      applyTextBtn.onclick = () => {
+        if (item.ai_summary) document.getElementById('d-summary').value = item.ai_summary;
+        if (item.ai_insight) document.getElementById('d-insight').value = item.ai_insight;
+      };
+    }
     const applyAllBtn = document.getElementById('ai-apply-all-btn');
     if (applyAllBtn) {
       applyAllBtn.onclick = () => {
-        if (item.ai_summary) document.getElementById('d-summary').value = item.ai_summary;
-        if (item.ai_key_takeaway) document.getElementById('d-insight').value = item.ai_key_takeaway;
         (item.ai_suggested_sectors || []).forEach((sid) => {
           const chip = document.querySelector(`#d-sectors [data-sector="${sid}"]`);
           if (chip) chip.classList.add('active');

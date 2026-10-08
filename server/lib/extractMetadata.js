@@ -33,6 +33,30 @@ function isBotBlockPage(title) {
   return BOT_BLOCK_TITLE_RE.test((title || '').trim());
 }
 
+// og:description is often a one-sentence teaser (or absent entirely), which
+// starves the AI draft prompt of real material — the weak-summary/insight
+// complaint traces back to this, not to the AI prompt itself. Pulling the
+// actual <p> body text gives generateAiDraftForItem() something substantive
+// to work from. No HTML-parser dependency, same convention as the rest of
+// this file: strip script/style blocks, then concatenate <p> text content.
+const MAX_BODY_TEXT_CHARS = 6000;
+
+function stripTags(fragment) {
+  return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+
+function extractBodyText(html) {
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const paragraphs = [...cleaned.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((m) => stripTags(m[1]))
+    .filter((text) => text.length > 40); // drop nav/caption/boilerplate fragments
+  if (!paragraphs.length) return null;
+  const joined = paragraphs.join('\n\n');
+  return joined.slice(0, MAX_BODY_TEXT_CHARS);
+}
+
 async function extractMetadata(url) {
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
@@ -51,13 +75,15 @@ async function extractMetadata(url) {
     matchMeta(html, 'og:published_time') ||
     matchMeta(html, 'date')
   );
+  const body_text = extractBodyText(html);
 
   return {
     title: title || null,
     summary: summary || null,
     thumbnail_url: thumbnail_url || null,
     published_at: published_at ? published_at.slice(0, 10) : null,
+    body_text,
   };
 }
 
-module.exports = { extractMetadata, isBotBlockPage };
+module.exports = { extractMetadata, isBotBlockPage, extractBodyText };
