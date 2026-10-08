@@ -1385,18 +1385,30 @@ async function renderReview() {
       };
     }
 
+    // Updates the verdict buttons/status text in place rather than calling
+    // loadDraft(id) — a full reload re-fetches the item and rebuilds the
+    // right-hand pane from its (unsaved) server values, wiping out whatever
+    // the reviewer had just typed into 핵심 요약/인사이트 or selected in
+    // 섹터/활용처 before those are persisted by "자료 발행". This flag is
+    // reviewer metadata only; it doesn't need the rest of the form to reload.
+    function setReviewerEligibleUi(confirmBtn, overrideBtn, eligible) {
+      confirmBtn.classList.toggle('is-selected', eligible === true);
+      overrideBtn.classList.toggle('is-selected', eligible === false);
+      const statusEl = confirmBtn.parentElement.querySelector('.review-status-text');
+      if (statusEl) statusEl.textContent = '확인 완료';
+    }
     const reviewerConfirmBtn = document.getElementById('reviewer-eligible-confirm-btn');
     if (reviewerConfirmBtn) {
       reviewerConfirmBtn.onclick = async () => {
         await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: true }) });
-        loadDraft(id);
+        setReviewerEligibleUi(reviewerConfirmBtn, document.getElementById('reviewer-eligible-override-btn'), true);
       };
     }
     const reviewerOverrideBtn = document.getElementById('reviewer-eligible-override-btn');
     if (reviewerOverrideBtn) {
       reviewerOverrideBtn.onclick = async () => {
         await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: false }) });
-        loadDraft(id);
+        setReviewerEligibleUi(document.getElementById('reviewer-eligible-confirm-btn'), reviewerOverrideBtn, false);
       };
     }
 
