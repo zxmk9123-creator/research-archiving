@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { searchWeb, MAX_RESULTS } = require('../server/lib/adapters/webSearch');
+const { searchWeb, MAX_RESULTS, _resetKeyStateForTests } = require('../server/lib/adapters/webSearch');
 
 function mockFetch(handler) {
   const original = global.fetch;
@@ -12,9 +12,26 @@ function withApiKey(key, fn) {
   const prev = process.env.BRAVE_SEARCH_API_KEY;
   if (key === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
   else process.env.BRAVE_SEARCH_API_KEY = key;
+  _resetKeyStateForTests();
   return Promise.resolve().then(fn).finally(() => {
     if (prev === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
     else process.env.BRAVE_SEARCH_API_KEY = prev;
+    _resetKeyStateForTests();
+  });
+}
+
+function withApiKeys(keys, fn) {
+  const prevMulti = process.env.BRAVE_SEARCH_API_KEYS;
+  const prevSingle = process.env.BRAVE_SEARCH_API_KEY;
+  process.env.BRAVE_SEARCH_API_KEYS = keys.join(',');
+  delete process.env.BRAVE_SEARCH_API_KEY;
+  _resetKeyStateForTests();
+  return Promise.resolve().then(fn).finally(() => {
+    if (prevMulti === undefined) delete process.env.BRAVE_SEARCH_API_KEYS;
+    else process.env.BRAVE_SEARCH_API_KEYS = prevMulti;
+    if (prevSingle === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = prevSingle;
+    _resetKeyStateForTests();
   });
 }
 
@@ -107,5 +124,87 @@ test('searchWeb: passes options.freshness through as the Brave freshness param',
     assert.match(requestedUrl, /freshness=pw/);
   } finally {
     restore();
+  }
+}));
+
+// --- Multi-key rotation: a free-tier Brave key's monthly quota runs out
+// (HTTP 402) well before the registry's daily query volume does, so a
+// second (third, ...) account's key keeps Web Discovery running instead of
+// every query failing until the next billing cycle. ---
+
+test('searchWeb: BRAVE_SEARCH_API_KEYS (comma-separated) rotates to the next key when the first returns 402', () => withApiKeys(['key-a', 'key-b'], async () => {
+  const seenKeys = [];
+  const restore = mockFetch(async (url, init) => {
+    const key = init.headers['X-Subscription-Token'];
+    seenKeys.push(key);
+    if (key === 'key-a') return { ok: false, status: 402 };
+    return braveResponse([{ title: 'Found via key-b', url: 'https://example.org/b' }]);
+  });
+  try {
+    const results = await searchWeb('q');
+    assert.deepEqual(seenKeys, ['key-a', 'key-b']);
+    assert.deepEqual(results, [{ title: 'Found via key-b', link: 'https://example.org/b' }]);
+  } finally {
+    restore();
+  }
+}));
+
+test('searchWeb: a later call starts from the last key that worked, not from the front of the list every time', () => withApiKeys(['key-a', 'key-b'], async () => {
+  const seenKeys = [];
+  const restore = mockFetch(async (url, init) => {
+    const key = init.headers['X-Subscription-Token'];
+    seenKeys.push(key);
+    if (key === 'key-a') return { ok: false, status: 402 };
+    return braveResponse([]);
+  });
+  try {
+    await searchWeb('first query'); // key-a exhausted, falls through to key-b
+    await searchWeb('second query'); // should go straight to key-b, no retry of key-a
+    assert.deepEqual(seenKeys, ['key-a', 'key-b', 'key-b']);
+  } finally {
+    restore();
+  }
+}));
+
+test('searchWeb: once ALL configured keys are exhausted, throws immediately without a network call', () => withApiKeys(['key-a', 'key-b'], async () => {
+  let callCount = 0;
+  const restore = mockFetch(async () => { callCount++; return { ok: false, status: 402 }; });
+  try {
+    await assert.rejects(() => searchWeb('q'), /search failed: 402/);
+    assert.equal(callCount, 2, 'both keys should have been tried exactly once each');
+    callCount = 0;
+    await assert.rejects(() => searchWeb('q'), /all .* exhausted/);
+    assert.equal(callCount, 0, 'a known-exhausted set of keys must not trigger another network call');
+  } finally {
+    restore();
+  }
+}));
+
+test('searchWeb: a non-402 failure (e.g. 429) on one key still throws immediately — only 402 triggers rotation', () => withApiKeys(['key-a', 'key-b'], async () => {
+  const seenKeys = [];
+  const restore = mockFetch(async (url, init) => {
+    seenKeys.push(init.headers['X-Subscription-Token']);
+    return { ok: false, status: 429 };
+  });
+  try {
+    await assert.rejects(() => searchWeb('q'), /search failed: 429/);
+    assert.deepEqual(seenKeys, ['key-a'], 'a transient rate-limit on one key must not be treated as exhaustion of that key or trigger rotation');
+  } finally {
+    restore();
+  }
+}));
+
+test('searchWeb: BRAVE_SEARCH_API_KEYS takes precedence over BRAVE_SEARCH_API_KEY when both are set', () => withApiKey('single-key', async () => {
+  process.env.BRAVE_SEARCH_API_KEYS = 'multi-key-a';
+  _resetKeyStateForTests();
+  let seenKey;
+  const restore = mockFetch(async (url, init) => { seenKey = init.headers['X-Subscription-Token']; return braveResponse([]); });
+  try {
+    await searchWeb('q');
+    assert.equal(seenKey, 'multi-key-a');
+  } finally {
+    restore();
+    delete process.env.BRAVE_SEARCH_API_KEYS;
+    _resetKeyStateForTests();
   }
 }));
