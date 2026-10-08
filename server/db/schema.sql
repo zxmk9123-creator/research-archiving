@@ -315,6 +315,34 @@ FROM (VALUES
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Sixth Discovery Query Registry expansion: broadens Archive Discovery
+-- into the dimensions the fifth expansion still left thin or at zero —
+-- confirmed in production, the major-player/competitor query from the
+-- fifth expansion returned zero archived items (the ADM/Bunge/Cargill/
+-- Wilmar framing skewed toward news mentions, not profile/analysis
+-- pages), so this adds a differently-framed company-profile query rather
+-- than repeating it. Also adds government/international-organization
+-- statistics (FAO/USDA/OECD, distinct from the single-publisher USDA/IGC
+-- queries already in the registry), geopolitical/structural trade-risk
+-- analysis (not covered by any prior query), open datasets/statistical
+-- databases, and an academic-repository query scoped to specific
+-- economics preprint domains (repec/NBER) rather than the existing
+-- generic "working paper academic research" phrase. Same idempotent
+-- pattern, same is_archive_discovery=true/is_daily_discovery=true
+-- convention; existing queries and pipeline behavior are otherwise
+-- untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery, is_archive_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true, true
+FROM (VALUES
+  ('Archive Discovery: edible oil company profile SWOT business analysis', 'ADM Bunge Cargill Wilmar company profile SWOT business analysis report'),
+  ('Archive Discovery: palm oil producer strategic report annual filing', 'Wilmar IOI KLK Sime Darby strategic report annual filing analysis'),
+  ('Archive Discovery: government international organization edible oil statistics', 'FAO USDA OECD edible oil palm soybean statistics report dataset'),
+  ('Archive Discovery: geopolitical risk edible oil trade structural analysis', 'geopolitical risk edible oil palm soybean trade sanctions structural analysis'),
+  ('Archive Discovery: edible oil dataset statistical database', 'edible oil palm soybean production trade dataset statistical database open data'),
+  ('Archive Discovery: vegetable oil economics working paper repository', 'vegetable oil palm soybean economics working paper site:repec.org OR site:nber.org OR site:ideas.repec.org')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Watchlist companies: items whose title/summary mention these are auto-tagged.
 CREATE TABLE IF NOT EXISTS companies (
   id SERIAL PRIMARY KEY,

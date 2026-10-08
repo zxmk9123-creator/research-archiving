@@ -194,10 +194,47 @@ test('discovery registry: is_archive_discovery column exists and backfills the 8
   }
 });
 
+// --- Sixth expansion: broadens Archive Discovery into dimensions the
+// fifth expansion left thin or at zero — confirmed in production, the
+// fifth expansion's major-player/competitor query returned zero archived
+// items, so this adds a differently-framed company-profile query rather
+// than repeating it, plus government/international-organization
+// statistics, geopolitical/structural trade-risk analysis, open datasets,
+// and an academic-repository query scoped to specific economics preprint
+// domains (repec/NBER). ---
+
+const SIXTH_EXPANSION_QUERY_NAMES = [
+  'Archive Discovery: edible oil company profile SWOT business analysis',
+  'Archive Discovery: palm oil producer strategic report annual filing',
+  'Archive Discovery: government international organization edible oil statistics',
+  'Archive Discovery: geopolitical risk edible oil trade structural analysis',
+  'Archive Discovery: edible oil dataset statistical database',
+  'Archive Discovery: vegetable oil economics working paper repository',
+];
+
+test('discovery registry: the sixth expansion (broader Archive Discovery) is seeded as crawl + is_daily_discovery + is_archive_discovery', () => {
+  for (const name of SIXTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(schemaSql.includes(`'${name}'`), `expected schema.sql to seed "${name}"`);
+  }
+  const sixthSeedBlock = schemaSql.slice(
+    schemaSql.indexOf(SIXTH_EXPANSION_QUERY_NAMES[0]) - 500,
+    schemaSql.indexOf(SIXTH_EXPANSION_QUERY_NAMES[SIXTH_EXPANSION_QUERY_NAMES.length - 1]) + 500
+  );
+  assert.match(sixthSeedBlock, /'crawl', 7, 'B', true, true/);
+  assert.match(sixthSeedBlock, /WHERE NOT EXISTS \(SELECT 1 FROM sources s WHERE s\.name = v\.name\)/);
+});
+
+test('discovery registry: the sixth expansion does not duplicate any pre-existing query name', () => {
+  const allPriorNames = [...PRE_EXISTING_QUERY_NAMES, ...NEW_RESEARCH_QUERY_NAMES, ...THIRD_EXPANSION_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES];
+  for (const name of SIXTH_EXPANSION_QUERY_NAMES) {
+    assert.ok(!allPriorNames.includes(name), `"${name}" must be new, not a pre-existing query`);
+  }
+});
+
 test('discovery registry: the Query Registry stays bounded (not dozens of queries)', () => {
-  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length + FIFTH_EXPANSION_QUERY_NAMES.length;
-  assert.equal(totalQueries, 34);
-  assert.ok(totalQueries < 40, 'the registry should stay bounded enough to control API cost/search volume');
+  const totalQueries = PRE_EXISTING_QUERY_NAMES.length + NEW_RESEARCH_QUERY_NAMES.length + THIRD_EXPANSION_QUERY_NAMES.length + FOURTH_EXPANSION_QUERY_NAMES.length + FIFTH_EXPANSION_QUERY_NAMES.length + SIXTH_EXPANSION_QUERY_NAMES.length;
+  assert.equal(totalQueries, 40);
+  assert.ok(totalQueries < 50, 'the registry should stay bounded enough to control API cost/search volume');
 });
 
 test('discovery registry: getDueSources/collectDailyDiscoveryNow select generically on is_daily_discovery — no per-query-name code exists', () => {
@@ -207,7 +244,7 @@ test('discovery registry: getDueSources/collectDailyDiscoveryNow select generica
   // by method/is_daily_discovery/frequency columns, so every new row above
   // is automatically picked up by both the hourly scheduler and the daily
   // job without needing its own code path.
-  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES]) {
+  for (const name of [...NEW_RESEARCH_QUERY_NAMES, ...FOURTH_EXPANSION_QUERY_NAMES, ...FIFTH_EXPANSION_QUERY_NAMES, ...SIXTH_EXPANSION_QUERY_NAMES]) {
     assert.ok(!collectorJs.includes(name), 'collector.js must not special-case a query name');
     assert.ok(!dailyDiscoveryJs.includes(name), 'dailyDiscovery.js must not special-case a query name');
   }
