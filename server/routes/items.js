@@ -100,7 +100,7 @@ router.get('/:id/related', async (req, res) => {
 // explicitly retry even after 'completed'; concurrent 'pending' is rejected
 // so double-clicking can't fire two overlapping generations for one item.
 router.post('/:id/ai-draft', async (req, res) => {
-  const { rows } = await pool.query('SELECT id, status, ai_status FROM items WHERE id = $1', [req.params.id]);
+  const { rows } = await pool.query('SELECT id, status, ai_status, source_url FROM items WHERE id = $1', [req.params.id]);
   const item = rows[0];
   if (!item) return res.status(404).json({ error: 'not found' });
   if (item.status !== 'Draft') {
@@ -110,12 +110,28 @@ router.post('/:id/ai-draft', async (req, res) => {
     return res.status(409).json({ error: 'AI 초안 생성이 이미 진행 중입니다.' });
   }
 
-  // Optional: richer source material (e.g. the body text already pulled by
-  // the manual-registration form's metadata extraction) than item.summary
-  // alone would give the prompt. Omitted, this call behaves exactly as
-  // before — every existing caller (collector fire-and-forget, plain retry)
-  // is unaffected.
-  const result = await generateAiDraftForItem(item.id, undefined, req.body.extracted_text || undefined);
+  // Richer source material than item.summary alone — same principle
+  // wherever an AI draft is (re)generated, manual or collected: the fuller
+  // <p> body text beats a one-line og:description/RSS-teaser summary,
+  // because a deeper point the article makes (e.g. an economic argument a
+  // few paragraphs in) is otherwise invisible to the model. The manual-
+  // registration form already has this from its own metadata-extraction
+  // step and sends it directly; a retry/regenerate on an existing item
+  // (collected automatically or manually) has no such client-side value to
+  // send, so re-extract it from the item's own source_url here instead.
+  // Best-effort: a failed re-fetch (dead link, blocked, no body text found)
+  // just falls through to the existing summary-based behavior, unchanged.
+  let extractedText = req.body.extracted_text || undefined;
+  if (!extractedText && item.source_url) {
+    try {
+      const meta = await extractMetadata(item.source_url);
+      extractedText = meta.body_text || undefined;
+    } catch (err) {
+      // Not fatal — generateAiDraftForItem falls back to item.summary.
+    }
+  }
+
+  const result = await generateAiDraftForItem(item.id, undefined, extractedText);
   const { rows: full } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [item.id]);
   res.json({ ok: result.ok, error: result.error, item: full[0] });
 });

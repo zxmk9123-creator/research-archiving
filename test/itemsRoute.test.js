@@ -292,3 +292,74 @@ test('POST /: a non-constraint insert failure returns 500 instead of crashing th
     restore();
   }
 });
+
+// Re-extraction on regenerate: a retry/regenerate for an item collected
+// automatically (no client-side extracted_text to send, unlike the manual-
+// registration form) should still get the fuller <p> body text rather than
+// being stuck on whatever thin summary was stored at collection time —
+// same principle, applied uniformly regardless of how the item arrived.
+function mockExternalFetch(externalHandler) {
+  const original = global.fetch;
+  global.fetch = async (url, ...rest) => {
+    if (String(url).includes('127.0.0.1')) return original(url, ...rest);
+    return externalHandler(url, ...rest);
+  };
+  return () => { global.fetch = original; };
+}
+
+function withoutFreeLlmApiKey(fn) {
+  const prev = process.env.FREELLMAPI_API_KEY;
+  delete process.env.FREELLMAPI_API_KEY;
+  return Promise.resolve().then(fn).finally(() => {
+    if (prev !== undefined) process.env.FREELLMAPI_API_KEY = prev;
+  });
+}
+
+test('POST /:id/ai-draft: re-extracts body text from item.source_url when no extracted_text is given', () => withoutFreeLlmApiKey(async () => {
+  const { restore } = mockPool([
+    ['SELECT id, status, ai_status, source_url FROM items WHERE id', () => ({ rows: [{ id: 20, status: 'Draft', ai_status: 'not_requested', source_url: 'https://example.org/article' }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 20 })] })],
+  ]);
+  let fetchedUrl;
+  const restoreFetch = mockExternalFetch(async (url) => {
+    fetchedUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => '<html><head><title>t</title></head><body><p>' + 'A'.repeat(60) + '</p></body></html>',
+    };
+  });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/20/ai-draft`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      assert.equal(res.status, 200);
+      assert.equal(fetchedUrl, 'https://example.org/article');
+    });
+  } finally {
+    restoreFetch();
+    restore();
+  }
+}));
+
+test('POST /:id/ai-draft: skips re-extraction when extracted_text is already provided in the request', () => withoutFreeLlmApiKey(async () => {
+  const { restore } = mockPool([
+    ['SELECT id, status, ai_status, source_url FROM items WHERE id', () => ({ rows: [{ id: 21, status: 'Draft', ai_status: 'not_requested', source_url: 'https://example.org/article' }] })],
+    ['FROM items i', () => ({ rows: [itemRow({ id: 21 })] })],
+  ]);
+  let externalFetchCalled = false;
+  const restoreFetch = mockExternalFetch(async () => { externalFetchCalled = true; return { ok: true, status: 200, text: async () => '<html></html>' }; });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/21/ai-draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ extracted_text: 'already have the body text client-side' }),
+      });
+      assert.equal(res.status, 200);
+      assert.equal(externalFetchCalled, false, 'must not re-fetch when extracted_text was already sent');
+    });
+  } finally {
+    restoreFetch();
+    restore();
+  }
+}));
