@@ -1423,14 +1423,32 @@ async function renderReview() {
           status: 'Published',
         }),
       });
-      renderReview();
+      advancePastCurrentDraft();
     };
 
     document.getElementById('d-delete').onclick = async () => {
       if (!confirm('이 Draft를 삭제할까요? 되돌릴 수 없습니다.')) return;
       await api(`/items/${id}`, { method: 'DELETE' });
-      renderReview();
+      advancePastCurrentDraft();
     };
+
+    // Removes the just-published/deleted item from the in-memory drafts
+    // list and dropdown, then moves to whichever item now sits at the same
+    // position (the "next" item) — rather than renderReview(), which
+    // re-fetches the full Draft list and always lands back on the first
+    // (highest-priority) one, forcing the reviewer to re-find where they
+    // were after every single publish.
+    function advancePastCurrentDraft() {
+      const idx = drafts.findIndex((d) => String(d.id) === String(id));
+      if (idx !== -1) drafts.splice(idx, 1);
+      const opt = select.querySelector(`option[value="${id}"]`);
+      if (opt) opt.remove();
+      if (!drafts.length) {
+        renderReview();
+        return;
+      }
+      selectDraftAt(Math.min(idx, drafts.length - 1));
+    }
   }
 
   const select = document.getElementById('draft-select');
