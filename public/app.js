@@ -1112,7 +1112,11 @@ async function renderReview() {
             <div class="form-row"><label>인사이트</label><textarea id="d-insight" rows="4"></textarea></div>
             <div class="form-row"><label>섹터</label><div class="chiplist" id="d-sectors">${sectorChips}</div></div>
             <div class="form-row"><label>활용처</label><div class="chiplist" id="d-usages">${usageChips}</div></div>
-            <button class="btn primary" id="d-save">Draft 저장</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn" id="d-ai-draft" type="button">AI 초안 작성</button>
+              <button class="btn primary" id="d-save">Draft 저장</button>
+            </div>
+            <div class="meta" id="d-ai-draft-status"></div>
           </div>
         </div>
       `;
@@ -1134,23 +1138,48 @@ async function renderReview() {
           status.textContent = `자동 추출 실패: ${err.message} — 직접 입력해주세요.`;
         }
       };
+      function currentFormPayload() {
+        return {
+          title: document.getElementById('d-title').value,
+          source_url: document.getElementById('d-url').value,
+          thumbnail_url: document.getElementById('d-thumb').value || null,
+          type: document.getElementById('d-type').value,
+          source_id: document.getElementById('d-source').value || null,
+          published_at: document.getElementById('d-date').value || null,
+          summary: document.getElementById('d-summary').value,
+          insight: document.getElementById('d-insight').value,
+          sector_ids: getActive(document.getElementById('d-sectors'), 'sector'),
+          usage_ids: getActive(document.getElementById('d-usages'), 'usage'),
+        };
+      }
       document.getElementById('d-save').onclick = async () => {
-        await api('/items', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: document.getElementById('d-title').value,
-            source_url: document.getElementById('d-url').value,
-            thumbnail_url: document.getElementById('d-thumb').value || null,
-            type: document.getElementById('d-type').value,
-            source_id: document.getElementById('d-source').value || null,
-            published_at: document.getElementById('d-date').value || null,
-            summary: document.getElementById('d-summary').value,
-            insight: document.getElementById('d-insight').value,
-            sector_ids: getActive(document.getElementById('d-sectors'), 'sector'),
-            usage_ids: getActive(document.getElementById('d-usages'), 'usage'),
-          }),
-        });
+        await api('/items', { method: 'POST', body: JSON.stringify(currentFormPayload()) });
         renderReview();
+      };
+      // Creates the Draft row (AI generation needs an existing item id),
+      // runs AI draft generation against it, then reopens it via loadDraft
+      // so the normal AI box renders — then auto-applies the suggestions
+      // (same effect as clicking "AI 제안 전체 적용") so summary/insight/
+      // sector/usage are filled in from one click, per the requested flow.
+      document.getElementById('d-ai-draft').onclick = async () => {
+        const btn = document.getElementById('d-ai-draft');
+        const status = document.getElementById('d-ai-draft-status');
+        if (!document.getElementById('d-title').value || !document.getElementById('d-url').value) {
+          status.textContent = '제목과 원문 URL을 먼저 입력하세요.';
+          return;
+        }
+        btn.disabled = true;
+        status.textContent = 'AI 초안 작성 중...';
+        try {
+          const created = await api('/items', { method: 'POST', body: JSON.stringify(currentFormPayload()) });
+          await api(`/items/${created.id}/ai-draft`, { method: 'POST' });
+          await loadDraft(created.id);
+          const applyAllBtn = document.getElementById('ai-apply-all-btn');
+          if (applyAllBtn) applyAllBtn.click();
+        } catch (err) {
+          status.textContent = `AI 초안 작성 실패: ${err.message}`;
+          btn.disabled = false;
+        }
       };
       return;
     }
