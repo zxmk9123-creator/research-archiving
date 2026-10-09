@@ -366,20 +366,27 @@ function renderAnswerHtml(rawAnswer) {
   return `<div class="ai-answer">${blocks.map(renderAnswerBlock).join('')}</div>`;
 }
 
-// Compact citation chips — source/title/link indicator only, no dates/URLs/
-// descriptions (those stay one click away on the Detail page). Publisher,
-// title and the #/detail/<id> href all come only from the DB rows the
-// server already returned (never parsed out of the model's text) — see
+// Compact citation chips — title/link indicator only, no dates/URLs/
+// descriptions (those stay one click away on the Detail page). The title
+// and the #/detail/<id> href come only from the DB rows the server already
+// returned (never parsed out of the model's text) — see
 // server/routes/search.js, which builds `sources` from the same retrieved
 // rows sent to the LLM. The full title is also set as a `title` attribute
 // so truncation never hides it from a hovering/focused user.
+//
+// `s.source` (the collection-method/source-status label — e.g. "Web
+// Discovery: ...", or null rendered as "미확인") deliberately isn't shown
+// here: it's an internal ingestion-pipeline label, not something that
+// identifies the article/report to a reader, and for Archive Discovery
+// queries it can be a long internal query description rather than a
+// publisher name. The field itself is untouched server-side (still part
+// of the API response) — this is a display-only change.
 function aiSearchSourcesHtml(sources) {
   if (!sources || !sources.length) return '';
   return `<div class="ai-search-sources">
     <div class="ai-search-sources-label">SOURCES · ${sources.length}</div>
     <div class="ai-source-chips">${sources.map((s) => `
       <a class="ai-source-chip" href="#/detail/${s.id}" title="${escapeHtml(s.title)}">
-        <span class="ai-source-chip-pub">${escapeHtml(s.source || '미확인')}</span>
         <span class="ai-source-chip-title">${escapeHtml(s.title)}</span>
         <span class="ai-source-chip-link" aria-hidden="true">↗</span>
       </a>`).join('')}</div>

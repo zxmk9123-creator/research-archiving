@@ -199,25 +199,29 @@ p { margin: 0; }
 .ai-answer-p:last-child, .ai-answer-list:last-child { margin-bottom: 0; }
 
 /* Sources: compact citation chips, not a vertical list — identify the
-   evidence (publisher + title) without reproducing dates/URLs/descriptions.
+   evidence by title only (no collection-method/source-status label — see
+   aiSearchSourcesHtml()), without reproducing dates/URLs/descriptions.
    Built only from the `sources` the server already returned (real DB
    rows), never parsed out of the model's own text. */
 .ai-search-sources { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border); max-width: 780px; }
 .ai-search-sources-label {
   font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--text-tertiary); margin-bottom: var(--sp-2);
 }
-.ai-source-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* flex-wrap on the row + min-width: 0 on every chip lets a chip shrink
+   below its content's natural width instead of forcing the row (and the
+   page) wider — the combination text-overflow:ellipsis needs to actually
+   take effect instead of just sitting unused on an overflowing box. */
+.ai-source-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .ai-source-chip {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px;
   padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--surface); text-decoration: none; transition: background .15s var(--ease), border-color .15s var(--ease);
+  background: var(--surface); text-decoration: none; overflow: hidden;
+  transition: background .15s var(--ease), border-color .15s var(--ease);
 }
 .ai-source-chip:hover, .ai-source-chip:focus-visible {
   background: var(--action-soft); border-color: var(--action);
 }
 .ai-source-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--action-soft); }
-.ai-source-chip-pub { flex: 0 0 auto; font-size: 12.5px; font-weight: 700; color: var(--action-hover); white-space: nowrap; }
-.ai-source-chip-pub::after { content: '·'; margin-left: 6px; color: var(--text-tertiary); font-weight: 400; }
 .ai-source-chip-title {
   flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
