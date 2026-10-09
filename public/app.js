@@ -323,7 +323,7 @@ let aiSearchHistory = [];
 function aiSearchHtml() {
   return `<section class="ai-search" id="ai-search">
     <form id="ai-search-form">
-      <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off">
+      <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off" required>
       <button type="submit" class="btn">검색</button>
     </form>
     <div id="ai-search-result"></div>
@@ -418,14 +418,24 @@ function bindAiSearchForm() {
     const resultEl = document.getElementById('ai-search-result');
     const submitBtn = form.querySelector('button[type="submit"]');
     const question = input.value.trim();
-    if (!question) {
-      resultEl.innerHTML = '<p class="meta">질문을 입력해 주세요.</p>';
-      return;
-    }
+    if (!question) return;
     // Disable duplicate submissions while a request is already in flight.
     if (submitBtn.disabled) return;
-    resultEl.innerHTML = '<p class="ai-search-status"></p>';
-    const statusEl = resultEl.querySelector('.ai-search-status');
+
+    // Each question becomes its own turn, appended below any earlier ones —
+    // a follow-up's question and answer stay visible alongside the turns
+    // before it, instead of each new answer replacing the last one.
+    const isFollowup = aiSearchHistory.length > 0;
+    const turnEl = document.createElement('div');
+    turnEl.className = 'ai-search-turn';
+    turnEl.innerHTML = `
+      <div class="ai-search-turn-q">${isFollowup ? '<span class="ai-search-turn-followup-tag">follow-up</span>' : ''}${escapeHtml(question)}</div>
+      <div class="ai-search-turn-body"><p class="ai-search-status"></p></div>
+    `;
+    resultEl.appendChild(turnEl);
+    turnEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const bodyEl = turnEl.querySelector('.ai-search-turn-body');
+    const statusEl = turnEl.querySelector('.ai-search-status');
     submitBtn.disabled = true;
     startAiSearchStatus(moduleEl, statusEl);
     try {
@@ -436,18 +446,18 @@ function bindAiSearchForm() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        resultEl.innerHTML = `<p class="meta">${escapeHtml(body.error || 'AI 검색 중 오류가 발생했습니다.')}</p>`;
+        bodyEl.innerHTML = `<p class="meta">${escapeHtml(body.error || 'AI 검색 중 오류가 발생했습니다.')}</p>`;
         return;
       }
       aiSearchHistory.push({ role: 'user', content: question });
       aiSearchHistory.push({ role: 'assistant', content: body.answer });
-      resultEl.innerHTML = `
+      bodyEl.innerHTML = `
         ${renderAnswerHtml(body.answer)}
         ${aiSearchSourcesHtml(body.sources)}
       `;
       input.value = '';
     } catch (err) {
-      resultEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
+      bodyEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
     } finally {
       stopAiSearchStatus(moduleEl);
       submitBtn.disabled = false;

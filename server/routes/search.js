@@ -57,8 +57,30 @@ function extractKeywords(q) {
   )).slice(0, 12);
 }
 
-async function retrieveCandidates(question) {
-  const keywords = extractKeywords(question);
+// A context-dependent follow-up ("그 요인을 더 자세히 설명해줘", "그럼 수출량은?")
+// typically yields very few real keywords of its own once pronouns/
+// demonstratives/generic follow-up phrasing are stripped out — tokenizing
+// it alone would retrieve nothing relevant even though the user clearly
+// means "more about what we were just discussing". Below this threshold,
+// the most recent prior user turn's text is folded in for retrieval only
+// (the original question is still what's shown to the LLM and the user) —
+// a deterministic, no-extra-LLM-call resolution, not a rewrite.
+const MIN_OWN_RETRIEVAL_KEYWORDS = 3;
+
+function resolveRetrievalQuery(question, history) {
+  const ownKeywords = extractKeywords(question);
+  if (ownKeywords.length >= MIN_OWN_RETRIEVAL_KEYWORDS || !Array.isArray(history) || !history.length) {
+    return question;
+  }
+  const priorUserTurns = history.filter((t) => t && t.role === 'user' && typeof t.content === 'string');
+  const lastUserTurn = priorUserTurns[priorUserTurns.length - 1];
+  if (!lastUserTurn) return question;
+  return `${lastUserTurn.content} ${question}`;
+}
+
+async function retrieveCandidates(question, history) {
+  const retrievalQuery = resolveRetrievalQuery(question, history);
+  const keywords = extractKeywords(retrievalQuery);
   if (!keywords.length) return [];
   const params = [];
   const keywordClauses = keywords.map((kw) => {
@@ -134,7 +156,7 @@ router.post('/', async (req, res) => {
 
   let candidates;
   try {
-    candidates = await retrieveCandidates(question);
+    candidates = await retrieveCandidates(question, req.body.history);
   } catch (err) {
     console.error('ai-search retrieval failed:', err.message);
     const httpStatus = 500;
@@ -189,6 +211,7 @@ router.post('/', async (req, res) => {
 
 module.exports = router;
 module.exports.extractKeywords = extractKeywords;
+module.exports.resolveRetrievalQuery = resolveRetrievalQuery;
 module.exports.buildMaterialsBlock = buildMaterialsBlock;
 module.exports.buildHistoryBlock = buildHistoryBlock;
 module.exports.INSUFFICIENT_MESSAGE = INSUFFICIENT_MESSAGE;

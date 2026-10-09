@@ -166,6 +166,20 @@ p { margin: 0; }
 }
 .ai-search input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
 .ai-search-result { position: relative; margin-top: var(--sp-3); }
+
+/* Each question/answer is its own turn, stacked in order — a follow-up's
+   answer appends below the ones before it instead of replacing them. */
+.ai-search-turn { margin-bottom: var(--sp-5); }
+.ai-search-turn + .ai-search-turn { padding-top: var(--sp-5); border-top: 1px solid var(--border); }
+.ai-search-turn-q {
+  font-size: 14px; font-weight: 700; color: var(--text-secondary); margin-bottom: var(--sp-2);
+  max-width: 780px;
+}
+.ai-search-turn-followup-tag {
+  display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--action-hover); background: var(--action-soft); vertical-align: middle;
+}
 .ai-search-status {
   margin: 0; font-size: 14px; color: var(--action-hover); font-weight: 500;
 }

@@ -363,3 +363,64 @@ test('POST /: conversation history is folded into the provider prompt as prior t
     restoreProvider();
   }
 });
+
+// --- Follow-up retrieval resolution: a context-dependent follow-up ("그
+//요인을 더 자세히 설명해줘") has almost no retrieval signal of its own, so
+// without folding in the prior turn, retrieval would find nothing relevant
+// even though the user is clearly still asking about the same topic. ---
+
+test('resolveRetrievalQuery: a low-signal follow-up is combined with the most recent prior user turn', () => {
+  const history = [
+    { role: 'user', content: '팜유 가격이 왜 올랐어?' },
+    { role: 'assistant', content: '인도네시아 수출 정책 변화 때문입니다.' },
+  ];
+  const resolved = searchRouter.resolveRetrievalQuery('더 자세히 설명해줘', history);
+  assert.match(resolved, /팜유 가격이 왜 올랐어/);
+  assert.match(resolved, /더 자세히 설명해줘/);
+});
+
+test('resolveRetrievalQuery: a question with enough of its own keywords is left unchanged, even with history present', () => {
+  const history = [
+    { role: 'user', content: '팜유 가격이 왜 올랐어?' },
+    { role: 'assistant', content: '인도네시아 수출 정책 변화 때문입니다.' },
+  ];
+  const resolved = searchRouter.resolveRetrievalQuery('대두유 수입 관세율 변경 내용을 알려줘', history);
+  assert.equal(resolved, '대두유 수입 관세율 변경 내용을 알려줘');
+});
+
+test('resolveRetrievalQuery: no history (first question) always returns the question unchanged', () => {
+  assert.equal(searchRouter.resolveRetrievalQuery('더 자세히', []), '더 자세히');
+  assert.equal(searchRouter.resolveRetrievalQuery('더 자세히', undefined), '더 자세히');
+});
+
+test('POST /: a low-signal follow-up still retrieves relevant materials by folding in the prior turn for retrieval', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
+  ]);
+  const restoreProvider = mockProvider(async () => ({ text: '후속 답변입니다.', provider: 'freellmapi' }));
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          question: '더 자세히 설명해줘',
+          history: [
+            { role: 'user', content: '팜유 가격이 왜 올랐어?' },
+            { role: 'assistant', content: '인도네시아 수출 정책 변화 때문입니다.' },
+          ],
+        }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.insufficient, false);
+      assert.equal(body.sources.length, 1);
+      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      // "팜유" from the prior turn must be among the ILIKE params used for retrieval.
+      assert.ok(selectCall.params.some((p) => p.includes('팜유')));
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
