@@ -424,3 +424,65 @@ test('POST /: a low-signal follow-up still retrieves relevant materials by foldi
     restoreProvider();
   }
 });
+
+// Production incident: an item clearly on-topic for a specific multi-
+// keyword question (a Shell/SAF long-term purchase deal) never reached the
+// chatbot. Root cause, confirmed directly against production data: ORDER BY
+// published_at DESC NULLS LAST was the ONLY sort key — this item's
+// published_at happened to be NULL (sorts dead last), and ~26 other items
+// shared just the one keyword "SAF" with a real published_at, so LIMIT 8
+// cut it off entirely regardless of how relevant it actually was (it
+// matched 4-5 of the question's 5 keywords; the competing items matched
+// only 1). mockPool returns canned rows and can't exercise real SQL
+// ordering, so — consistent with how every other retrieval test in this
+// file verifies behavior — these assert on the generated SQL/params
+// directly rather than on which rows a mock "returns".
+
+test('retrieveCandidates SQL: ranks by a computed per-keyword relevance score before published_at', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '쉘 SAF 장기 구매 계약' }),
+      });
+      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      assert.ok(selectCall);
+      // relevance_score (a CASE WHEN per keyword, summed) is the primary
+      // sort key; published_at only breaks ties among equally-relevant rows.
+      assert.match(selectCall.text, /ORDER BY \(.*CASE WHEN.*\) DESC, i\.published_at DESC NULLS LAST/s);
+      // One CASE WHEN per extracted keyword (saf/장기/구매/계약 — "쉘" alone
+      // is 1 char and dropped by extractKeywords' length >= 2 filter).
+      const caseWhenCount = (selectCall.text.match(/CASE WHEN/g) || []).length;
+      assert.equal(caseWhenCount, 4);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('retrieveCandidates SQL: the relevance expression reuses the same bound params as the WHERE clause (no duplicate params)', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 수출 정책 변화' }),
+      });
+      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      assert.ok(selectCall);
+      // 4 keywords (팜유/수출/정책/변화) -> 4 bound params, even though each
+      // $N now appears twice in the query text (once for scoring, once in
+      // WHERE) — reusing the same placeholder, not adding new ones.
+      assert.equal(selectCall.params.length, 4);
+    });
+  } finally {
+    restore();
+  }
+});

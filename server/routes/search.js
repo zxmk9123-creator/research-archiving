@@ -91,12 +91,24 @@ async function retrieveCandidates(question, history) {
       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $${idx})
       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $${idx}))`;
   });
+  // Production incident: a clearly on-topic item (a Shell/SAF long-term
+  // purchase deal, matching 4-5 of a 5-keyword question) never reached the
+  // chatbot because ORDER BY published_at DESC NULLS LAST alone ranked
+  // every single-keyword match (e.g. anything mentioning "SAF") above it —
+  // this item's published_at happened to be NULL, which NULLS LAST sorts
+  // dead last, and with ~26 other items sharing just the one keyword "SAF",
+  // LIMIT 8 cut it off entirely regardless of how relevant it actually was.
+  // relevance_score (how many distinct keywords actually matched) is now
+  // the primary sort key, with recency only breaking ties among equally
+  // relevant items — a precise multi-keyword question beats a generic
+  // single-keyword coincidence regardless of either item's publish date.
+  const relevanceExpr = keywordClauses.map((clause) => `(CASE WHEN ${clause} THEN 1 ELSE 0 END)`).join(' + ');
   // status = 'Published' only — never Draft/Rejected/unpublished material.
   const { rows } = await pool.query(
     `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
      FROM items i LEFT JOIN sources s ON s.id = i.source_id
      WHERE i.status = 'Published' AND (${keywordClauses.join(' OR ')})
-     ORDER BY i.published_at DESC NULLS LAST
+     ORDER BY (${relevanceExpr}) DESC, i.published_at DESC NULLS LAST
      LIMIT ${MAX_CANDIDATES}`,
     params
   );
