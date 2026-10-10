@@ -151,6 +151,109 @@ UPDATE sources SET sector_links = '[
 ]'::jsonb
 WHERE name = 'UN Comtrade' AND sector_links = '[]'::jsonb;
 
+-- Reference Source Library v3: the v1 catalog (5 sources) covered palm oil
+-- (Malaysia/Indonesia) and global trade/supply statistics only — thin
+-- relative to the sector taxonomy's full commodity/country spread (대두유,
+-- 유채씨유, 해바라기유, and the 비식용유지 group: UCO/UCOME/SAF/Tallow/FAME).
+-- This batch adds authoritative government/intergovernmental statistics
+-- agencies, commodity exchanges, and industry bodies across every major
+-- producing/trading country for each commodity, plus biofuel/SAF-specific
+-- sources for the non-edible group, which v1 had none of at all.
+--
+-- URLs here are each institution's own stable top-level section (not a
+-- deep report/dashboard sub-path) specifically because a deep link is far
+-- more likely to 404 after a site reorganizes — this batch deliberately
+-- trades a little convenience for durability. These could not be
+-- live-verified from this session's network-restricted environment
+-- (egress is allow-listed and blocks most external domains); last_verified_at
+-- is left NULL rather than claiming a check that didn't happen. Treat
+-- last_verified_at IS NULL as "needs a human spot-check", same meaning the
+-- column already has for any future entry no one has confirmed yet.
+INSERT INTO sources (name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+SELECT * FROM (VALUES
+  ('FAOSTAT', 'Food and Agriculture Organization of the UN', 'https://www.fao.org/faostat/en/#data', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유','기타 식용유지'],
+   '세계 식용유 생산·공급·교역 공식 통계(Food Balance, Production, Trade), 국가별/품목별',
+   ARRAY['web','CSV','API'], 'Annual', '품목별 글로벌 공급구조 교차검증용 1차 출처', NULL::date, false),
+  ('OECD Agriculture', 'OECD', 'https://www.oecd.org/en/topics/agriculture.html', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   'OECD-FAO Agricultural Outlook 등 향후 10년 농산물·유지종자 수급 전망',
+   ARRAY['web','PDF'], 'Annual', '중장기 수급 전망 비교용 2차 출처', NULL::date, false),
+  ('World Bank Commodity Markets', 'World Bank', 'https://www.worldbank.org/en/research/commodity-markets', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '월간 원자재 가격 데이터(Pink Sheet), 유지종자·식물성유 포함',
+   ARRAY['web','XLSX'], 'Monthly', '국제 유지 가격 벤치마크 교차검증', NULL::date, false),
+  ('International Grains Council (IGC)', 'International Grains Council', 'https://www.igc.int/en/default.aspx', 'manual', 'reference-library', 'B', true,
+   '업계단체 통계', 'Global', ARRAY['대두유','유채씨유','해바라기유'],
+   '세계 곡물·유지종자 수급 전망 및 가격 보고서(GMR)',
+   ARRAY['web','PDF'], 'Monthly', '곡물 연계 유지종자 수급 전망 보조 출처', NULL::date, false),
+  ('USDA FAS GAIN Reports', 'USDA Foreign Agricultural Service', 'https://fas.usda.gov/data/gain-reports', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '국가별 농업무역 현지분석 보고서(Oilseeds Annual 등 포함)',
+   ARRAY['web','PDF'], '수시', '국가별 유지종자 생산·정책 현지분석 1차 출처', NULL::date, false),
+  ('CME Group — Soybean Oil Futures', 'CME Group', 'https://www.cmegroup.com/markets/agriculture/oilseeds/soybean-oil.html', 'manual', 'reference-library', 'A', true,
+   '거래소/가격데이터', 'US', ARRAY['대두유'],
+   '대두유 선물(ZL) 가격·거래량 데이터',
+   ARRAY['web','API'], 'Daily', '대두유 선물가 벤치마크', NULL::date, false),
+  ('Euronext Commodities', 'Euronext', 'https://www.euronext.com/en/products/commodities', 'manual', 'reference-library', 'A', true,
+   '거래소/가격데이터', 'EU', ARRAY['유채씨유'],
+   '유채씨(Rapeseed) 선물 가격·거래량 데이터',
+   ARRAY['web'], 'Daily', '유채씨유 가격 벤치마크', NULL::date, false),
+  ('ICE Futures — Canola', 'Intercontinental Exchange', 'https://www.ice.com/products/251/Canola-Futures', 'manual', 'reference-library', 'A', true,
+   '거래소/가격데이터', 'Canada', ARRAY['유채씨유'],
+   '캐놀라(유채씨) 선물 가격·거래량',
+   ARRAY['web'], 'Daily', '캐나다 캐놀라 가격 벤치마크', NULL::date, false),
+  ('Canola Council of Canada', 'Canola Council of Canada', 'https://www.canolacouncil.org/markets-stats/', 'manual', 'reference-library', 'B', true,
+   '업계단체 통계', 'Canada', ARRAY['유채씨유'],
+   '캐나다 캐놀라 생산·압착·수출 통계',
+   ARRAY['web'], 'Weekly', '캐나다 유채씨유 공급측 동향', NULL::date, false),
+  ('Statistics Canada — Agriculture', 'Statistics Canada', 'https://www150.statcan.gc.ca/n1/en/subjects/agriculture_and_food', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Canada', ARRAY['유채씨유'],
+   '캐나다 유지종자 생산·재고 공식 통계',
+   ARRAY['web','CSV'], 'Monthly', '캐나다 공급측 통계 교차검증', NULL::date, false),
+  ('CONAB', 'Companhia Nacional de Abastecimento (Brazil)', 'https://www.conab.gov.br/info-agro/safras', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Brazil', ARRAY['대두유'],
+   '브라질 대두 생산·수확 전망 공식 통계',
+   ARRAY['web','PDF','XLSX'], 'Monthly', '브라질 대두유 원료(대두) 공급측 1차 출처', NULL::date, false),
+  ('Bolsa de Comercio de Rosario (BCR)', 'Bolsa de Comercio de Rosario', 'https://www.bcr.com.ar/', 'manual', 'reference-library', 'B', true,
+   '거래소/업계단체 통계', 'Argentina', ARRAY['대두유'],
+   '아르헨티나 대두 생산·수출 전망 및 가격 동향',
+   ARRAY['web'], 'Weekly', '아르헨티나 대두유 공급측 보조 출처', NULL::date, false),
+  ('China Customs Statistics', 'General Administration of Customs, China', 'http://english.customs.gov.cn/', 'manual', 'reference-library', 'B', true,
+   '정부/국제기구 통계', 'China', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '중국 품목별 수출입 통관 통계',
+   ARRAY['web'], 'Monthly', '중국 유지 수입 동향 확인', NULL::date, false),
+  ('Statistics Indonesia (BPS)', 'Badan Pusat Statistik', 'https://www.bps.go.id/en', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Indonesia', ARRAY['팜유'],
+   '인도네시아 품목별 생산·수출입 공식 통계',
+   ARRAY['web','CSV'], 'Monthly', '인도네시아 팜유 공급측 공식 통계 교차검증', NULL::date, false),
+  ('EU Oilseeds and Protein Crops Market Observatory', 'European Commission', 'https://agriculture.ec.europa.eu/data-and-analysis/markets/overviews/market-observatories/oilseeds-and-protein-crops_en', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'EU', ARRAY['유채씨유','대두유','해바라기유'],
+   'EU 유지종자·단백질작물 시장 동향 및 가격',
+   ARRAY['web','XLSX'], 'Monthly', 'EU 유지종자 수급·가격 모니터링', NULL::date, false),
+  ('Eurostat Energy Statistics', 'Eurostat', 'https://ec.europa.eu/eurostat/web/energy/data/main-tables', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'EU', ARRAY['UCO','UCOME','FAME','Tallow'],
+   'EU 바이오연료·바이오에너지 공급 통계',
+   ARRAY['web','CSV'], 'Annual', 'EU 비식용유지(UCO/FAME) 원료 수급 통계', NULL::date, false),
+  ('US EPA — Renewable Fuel Standard', 'US Environmental Protection Agency', 'https://www.epa.gov/fuels-registration-reporting-and-compliance-help/rfs-annual-rules', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'US', ARRAY['UCO','UCOME','SAF','Tallow','FAME'],
+   '미국 재생연료 의무혼합(RFS) 규정 및 RIN 데이터',
+   ARRAY['web','PDF'], '수시', '미국 비식용유지 수요(바이오디젤/SAF) 정책 1차 출처', NULL::date, false),
+  ('IATA — Sustainable Aviation Fuel', 'International Air Transport Association', 'https://www.iata.org/en/programs/environment/sustainable-aviation-fuels/', 'manual', 'reference-library', 'A', true,
+   '업계단체 통계', 'Global', ARRAY['SAF'],
+   '글로벌 SAF 생산·수요 전망 및 정책 동향',
+   ARRAY['web','PDF'], '수시', 'SAF 시장 동향 1차 출처', NULL::date, false),
+  ('ITC Trade Map', 'International Trade Centre', 'https://www.trademap.org/Index.aspx', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유','기타 비식용유지'],
+   '품목별 국가간 교역 통계(HS 코드), UN Comtrade 가공 데이터',
+   ARRAY['web'], 'Monthly', '교역 흐름 분석 보조 출처(Comtrade 보완)', NULL::date, false),
+  ('WTO Statistics', 'World Trade Organization', 'https://stats.wto.org/', 'manual', 'reference-library', 'A', true,
+   '정부/국제기구 통계', 'Global', ARRAY['팜유','대두유','유채씨유','해바라기유'],
+   '글로벌 무역 통계 및 관세 데이터',
+   ARRAY['web'], 'Quarterly', '관세·무역정책 분석 보조 출처', NULL::date, false)
+) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Standing invariant, not a one-time cleanup: a source used for automated
 -- RSS/Web Discovery/institutional/structured ingestion is an OPERATIONAL
 -- source, never a Reference Source Library entry, even if someone later
