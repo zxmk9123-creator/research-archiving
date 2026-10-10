@@ -821,9 +821,22 @@ function sectorLinksHtml(sectorLinks) {
   ).join(' ');
 }
 
-function referenceSourcesTable(sources) {
+// Distinct 지역/품목 values actually present among Reference Sources —
+// drives the filter dropdowns below so they only ever offer choices that
+// can return a result, rather than a fixed static list that drifts out of
+// sync with what's actually been catalogued.
+function referenceFilterOptions(sources) {
   const refs = sources.filter((s) => s.is_reference);
-  if (!refs.length) return '<p class="meta">등록된 Reference Source가 없습니다.</p>';
+  const regions = Array.from(new Set(refs.map((s) => s.region).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const commodities = Array.from(new Set(refs.flatMap((s) => s.commodities || []))).sort((a, b) => a.localeCompare(b));
+  return { regions, commodities };
+}
+
+function referenceSourcesTable(sources, filters = {}) {
+  let refs = sources.filter((s) => s.is_reference);
+  if (filters.region) refs = refs.filter((s) => s.region === filters.region);
+  if (filters.commodity) refs = refs.filter((s) => (s.commodities || []).includes(filters.commodity));
+  if (!refs.length) return '<p class="meta">조건에 맞는 Reference Source가 없습니다.</p>';
   return `<table class="sources-table">
     <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>섹터별 링크</th><th>접근형식</th><th>업데이트 주기</th><th>RSS</th><th>최종 검증일</th><th>비고</th><th></th></tr>
     ${refs.map((s) => `<tr>
@@ -868,6 +881,10 @@ async function renderSources(query = {}) {
     `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/sources?view=${t.key}">${t.label}</a>`
   ).join('');
 
+  const refFilterOptions = referenceFilterOptions(sources);
+  const refRegionOpts = refFilterOptions.regions.map((r) => `<option value="${r}" ${query.region === r ? 'selected' : ''}>${r}</option>`).join('');
+  const refCommodityOpts = refFilterOptions.commodities.map((c) => `<option value="${c}" ${query.commodity === c ? 'selected' : ''}>${c}</option>`).join('');
+
   app.innerHTML = `
     <h1>Sources</h1>
     <p class="page-lede">${view === 'reference' ? '자동 수집 대상이 아니더라도 참고 가치가 높은 유지 시장 리서치/통계 출처를 기록합니다.' : 'RSS 수집 소스 상태를 관리합니다.'}</p>
@@ -882,7 +899,14 @@ async function renderSources(query = {}) {
         <td>${s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
         <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
       </tr>`).join('')}
-    </table>` : referenceSourcesTable(sources)}
+    </table>` : `
+    <div class="filters" id="ref-filters">
+      <select id="ref-f-region"><option value="">지역 전체</option>${refRegionOpts}</select>
+      <select id="ref-f-commodity"><option value="">품목 전체</option>${refCommodityOpts}</select>
+      <button class="btn" id="ref-f-clear">초기화</button>
+    </div>
+    <div id="ref-sources-result">${referenceSourcesTable(sources, { region: query.region, commodity: query.commodity })}</div>
+    `}
 
     <details class="section" id="s-form-section">
       <summary id="s-form-summary">소스 추가</summary>
@@ -937,19 +961,30 @@ async function renderSources(query = {}) {
       if (resultText) document.getElementById('collect-all-result').textContent = resultText;
     };
   }
-  document.querySelectorAll('[data-delete-source]').forEach((btn) => {
-    btn.onclick = async () => {
-      if (!confirm('이 소스를 삭제하시겠습니까? 기존에 수집된 자료는 유지됩니다.')) return;
-      try {
-        await api(`/sources/${btn.dataset.deleteSource}`, { method: 'DELETE' });
-      } catch (err) {
-        alert(`삭제 실패: ${err.message}`);
-        return;
-      }
-      renderSources(query);
+  // Reference Sources 지역/품목 필터 — re-renders only the result table
+  // in place (no refetch, no hash navigation) so narrowing down a long
+  // list stays instant.
+  const refRegionSel = document.getElementById('ref-f-region');
+  const refCommoditySel = document.getElementById('ref-f-commodity');
+  const refClearBtn = document.getElementById('ref-f-clear');
+  if (refRegionSel && refCommoditySel) {
+    const applyRefFilters = () => {
+      document.getElementById('ref-sources-result').innerHTML = referenceSourcesTable(sources, {
+        region: refRegionSel.value,
+        commodity: refCommoditySel.value,
+      });
+      bindReferenceSourceRowActions();
     };
-  });
-
+    refRegionSel.onchange = applyRefFilters;
+    refCommoditySel.onchange = applyRefFilters;
+    if (refClearBtn) {
+      refClearBtn.onclick = () => {
+        refRegionSel.value = '';
+        refCommoditySel.value = '';
+        applyRefFilters();
+      };
+    }
+  }
   const sectorLinksContainer = document.getElementById('s-sector-links');
   function addSectorLinkRow(link) {
     sectorLinksContainer.insertAdjacentHTML('beforeend', sectorLinkRowHtml(link));
@@ -984,35 +1019,55 @@ async function renderSources(query = {}) {
     sectorLinksContainer.innerHTML = '';
   }
 
-  document.querySelectorAll('[data-edit-source]').forEach((btn) => {
-    btn.onclick = () => {
-      const s = sources.find((row) => String(row.id) === btn.dataset.editSource);
-      if (!s) return;
-      document.getElementById('s-form-section').open = true;
-      document.getElementById('s-edit-id').value = s.id;
-      document.getElementById('s-form-summary').textContent = `소스 편집 — ${s.name}`;
-      document.getElementById('s-add').textContent = '저장';
-      document.getElementById('s-cancel-edit').style.display = '';
-      document.getElementById('s-name').value = s.name || '';
-      document.getElementById('s-method').value = s.method || 'manual';
-      document.getElementById('s-url').value = s.url || '';
-      document.getElementById('s-owner').value = s.owner || '';
-      document.getElementById('s-freq').value = s.frequency_days || 1;
-      document.getElementById('s-is-reference').checked = Boolean(s.is_reference);
-      document.getElementById('s-type').value = s.source_type || '';
-      document.getElementById('s-region').value = s.region || '';
-      document.getElementById('s-commodities').value = (s.commodities || []).join(',');
-      document.getElementById('s-coverage').value = s.coverage_note || '';
-      document.getElementById('s-access-format').value = (s.access_format || []).join(',');
-      document.getElementById('s-update-freq').value = s.update_frequency || '';
-      document.getElementById('s-rss-available').checked = Boolean(s.rss_available);
-      document.getElementById('s-last-verified').value = s.last_verified_at ? s.last_verified_at.slice(0, 10) : '';
-      document.getElementById('s-usage-note').value = s.usage_note || '';
-      sectorLinksContainer.innerHTML = '';
-      (s.sector_links || []).forEach((link) => addSectorLinkRow(link));
-      document.getElementById('s-form-section').scrollIntoView({ behavior: 'smooth' });
-    };
-  });
+  // Shared between the initial render and the Reference Sources filter's
+  // in-place re-render (filtering replaces #ref-sources-result's innerHTML,
+  // which drops any listeners bound to the old nodes) — re-wires both
+  // 편집/삭제 against whatever [data-edit-source]/[data-delete-source]
+  // buttons currently exist in the DOM.
+  function bindReferenceSourceRowActions() {
+    document.querySelectorAll('[data-delete-source]').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('이 소스를 삭제하시겠습니까? 기존에 수집된 자료는 유지됩니다.')) return;
+        try {
+          await api(`/sources/${btn.dataset.deleteSource}`, { method: 'DELETE' });
+        } catch (err) {
+          alert(`삭제 실패: ${err.message}`);
+          return;
+        }
+        renderSources(query);
+      };
+    });
+    document.querySelectorAll('[data-edit-source]').forEach((btn) => {
+      btn.onclick = () => {
+        const s = sources.find((row) => String(row.id) === btn.dataset.editSource);
+        if (!s) return;
+        document.getElementById('s-form-section').open = true;
+        document.getElementById('s-edit-id').value = s.id;
+        document.getElementById('s-form-summary').textContent = `소스 편집 — ${s.name}`;
+        document.getElementById('s-add').textContent = '저장';
+        document.getElementById('s-cancel-edit').style.display = '';
+        document.getElementById('s-name').value = s.name || '';
+        document.getElementById('s-method').value = s.method || 'manual';
+        document.getElementById('s-url').value = s.url || '';
+        document.getElementById('s-owner').value = s.owner || '';
+        document.getElementById('s-freq').value = s.frequency_days || 1;
+        document.getElementById('s-is-reference').checked = Boolean(s.is_reference);
+        document.getElementById('s-type').value = s.source_type || '';
+        document.getElementById('s-region').value = s.region || '';
+        document.getElementById('s-commodities').value = (s.commodities || []).join(',');
+        document.getElementById('s-coverage').value = s.coverage_note || '';
+        document.getElementById('s-access-format').value = (s.access_format || []).join(',');
+        document.getElementById('s-update-freq').value = s.update_frequency || '';
+        document.getElementById('s-rss-available').checked = Boolean(s.rss_available);
+        document.getElementById('s-last-verified').value = s.last_verified_at ? s.last_verified_at.slice(0, 10) : '';
+        document.getElementById('s-usage-note').value = s.usage_note || '';
+        sectorLinksContainer.innerHTML = '';
+        (s.sector_links || []).forEach((link) => addSectorLinkRow(link));
+        document.getElementById('s-form-section').scrollIntoView({ behavior: 'smooth' });
+      };
+    });
+  }
+  bindReferenceSourceRowActions();
   document.getElementById('s-cancel-edit').onclick = () => resetForm();
 
   document.getElementById('s-add').onclick = async () => {

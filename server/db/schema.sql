@@ -254,6 +254,21 @@ SELECT * FROM (VALUES
 ) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Reference Source Library v4: a Ukraine crop-production infographic,
+-- explicitly requested with the understanding that the link may error —
+-- attached anyway rather than withheld pending verification. Ukraine is the
+-- world's top sunflower oil exporter, so this is tagged 해바라기유 even
+-- though the underlying infographic covers Ukrainian agriculture broadly
+-- (grains included), not sunflower/oilseeds alone.
+INSERT INTO sources (name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+SELECT * FROM (VALUES
+  ('USDA FAS — Ukraine Agricultural Production and Trade', 'USDA Foreign Agricultural Service', 'https://fas.usda.gov/data/ukraine-agricultural-production-and-trade', 'manual', 'reference-library', 'B', true,
+   '정부/국제기구 통계(인포그래픽)', 'Ukraine', ARRAY['해바라기유'],
+   '우크라이나 농작물(해바라기씨 포함) 생산·교역 현황 인포그래픽',
+   ARRAY['web','PDF'], '수시', '우크라이나 해바라기유 원료 공급 동향 참고 — 링크 미검증, 접속 오류 가능성 있음', NULL::date, false)
+) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Standing invariant, not a one-time cleanup: a source used for automated
 -- RSS/Web Discovery/institutional/structured ingestion is an OPERATIONAL
 -- source, never a Reference Source Library entry, even if someone later
