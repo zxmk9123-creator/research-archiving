@@ -186,6 +186,14 @@ p { margin: 0; }
   font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   color: var(--action-hover); background: var(--action-soft); vertical-align: middle;
 }
+/* Mirrors ai-search-turn-followup-tag's shape/sizing, but neutral rather
+   than brand-blue — the opening question of a conversation, not a signal
+   to pay extra attention to like a follow-up is. */
+.ai-search-turn-initial-tag {
+  display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text-tertiary); background: var(--surface-sunken); vertical-align: middle;
+}
 .ai-search-status {
   margin: 0; font-size: 14px; color: var(--action-hover); font-weight: 500;
 }

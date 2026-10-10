@@ -436,7 +436,7 @@ function bindAiSearchForm() {
     const turnEl = document.createElement('div');
     turnEl.className = 'ai-search-turn';
     turnEl.innerHTML = `
-      <div class="ai-search-turn-q">${isFollowup ? '<span class="ai-search-turn-followup-tag">follow-up</span>' : ''}${escapeHtml(question)}</div>
+      <div class="ai-search-turn-q">${isFollowup ? '<span class="ai-search-turn-followup-tag">follow-up</span>' : '<span class="ai-search-turn-initial-tag">초두 질문</span>'}${escapeHtml(question)}</div>
       <div class="ai-search-turn-body"><p class="ai-search-status"></p></div>
     `;
     resultEl.appendChild(turnEl);
