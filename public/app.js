@@ -1663,11 +1663,14 @@ function updateActiveNavTab(path) {
 // (over the top-level tabs) and the Review-page tour (over that page's own
 // controls, in the order a reviewer actually uses them): dims the page and
 // spotlights the current target (via .onboard-highlight's giant box-shadow
-// spread) alongside a small card with a usage tip, a "다음" button to
-// advance and a "건너뛰기" button to exit early. A step whose target isn't
-// in the DOM (e.g. Review has no drafts yet) is skipped rather than ending
-// the tour early. Marks `seenKey` once shown or skipped so it never
-// reappears in that browser.
+// spread) alongside a small card with a usage tip, "이전"/"다음" to step
+// back and forth and "건너뛰기" to exit early. Each step scrolls its target
+// into view first (smooth), since Review's controls run down the page and
+// aren't all on-screen at once — the card's position then tracks the
+// target while that scroll (or any later resize/scroll) is in flight. A
+// step whose target isn't in the DOM (e.g. Review has no drafts yet) is
+// skipped rather than ending the tour early. Marks `seenKey` once shown or
+// skipped so it never reappears in that browser.
 function runSpotlightTour(steps, seenKey) {
   if (localStorage.getItem(seenKey)) return;
 
@@ -1677,20 +1680,34 @@ function runSpotlightTour(steps, seenKey) {
   card.className = 'onboard-card';
   document.body.appendChild(card);
 
+  function positionCard() {
+    if (!highlightedEl) return;
+    const r = highlightedEl.getBoundingClientRect();
+    card.style.top = `${r.bottom + window.scrollY + 10}px`;
+    const cardWidth = Math.min(360, window.innerWidth - 32);
+    card.style.left = `${Math.max(8, Math.min(window.innerWidth - cardWidth - 8, r.left + window.scrollX - 20))}px`;
+  }
+  window.addEventListener('scroll', positionCard, { passive: true });
+  window.addEventListener('resize', positionCard);
+
   function finish() {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
+    window.removeEventListener('scroll', positionCard);
+    window.removeEventListener('resize', positionCard);
     card.remove();
     localStorage.setItem(seenKey, '1');
   }
 
-  function renderStep() {
+  function renderStep(direction) {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
+    if (step < 0) { finish(); return; }
     if (step >= steps.length) { finish(); return; }
     const s = steps[step];
     const target = document.querySelector(s.selector);
-    if (!target) { step += 1; renderStep(); return; }
+    if (!target) { step += direction < 0 ? -1 : 1; renderStep(direction); return; }
     target.classList.add('onboard-highlight');
     highlightedEl = target;
+    const isFirst = step === 0;
     const isLast = step === steps.length - 1;
     card.innerHTML = `
       <h3>${s.title}</h3>
@@ -1698,24 +1715,28 @@ function runSpotlightTour(steps, seenKey) {
       <div class="onboard-card-footer">
         <span class="onboard-step-count">${step + 1} / ${steps.length}</span>
         <div class="onboard-actions">
+          <button type="button" class="btn" id="onboard-prev" ${isFirst ? 'disabled' : ''}>이전</button>
           <button type="button" class="btn" id="onboard-skip">건너뛰기</button>
           <button type="button" class="btn primary" id="onboard-next">${isLast ? '시작하기' : '다음'}</button>
         </div>
       </div>
     `;
-    const r = target.getBoundingClientRect();
-    card.style.top = `${r.bottom + window.scrollY + 10}px`;
-    const cardWidth = Math.min(360, window.innerWidth - 32);
-    card.style.left = `${Math.max(8, Math.min(window.innerWidth - cardWidth - 8, r.left + window.scrollX - 20))}px`;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    positionCard();
+    document.getElementById('onboard-prev').onclick = () => {
+      if (isFirst) return;
+      step -= 1;
+      renderStep(-1);
+    };
     document.getElementById('onboard-skip').onclick = finish;
     document.getElementById('onboard-next').onclick = () => {
       if (isLast) { finish(); return; }
       step += 1;
-      renderStep();
+      renderStep(1);
     };
   }
 
-  renderStep();
+  renderStep(1);
 }
 
 const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
