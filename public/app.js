@@ -1114,6 +1114,13 @@ function reviewPriority(d) {
   return 2;
 }
 
+// 리뷰어가 아직 적합/비적합을 확정하지 않은 항목 — "판단 미완료" 그룹을
+// 상단에 띄우는 기준. reviewer_eligible은 "적합으로 확정"/"비적합으로
+// 확정" 버튼을 눌러야만 true/false가 되고, 그 전까지는 null.
+function isReviewerPending(d) {
+  return d.reviewer_eligible === null || d.reviewer_eligible === undefined;
+}
+
 const MATCH_LABELS = {
   match: '<span class="pill" style="background:#f0fdf4;color:#15803d">일치</span>',
   ai_false_positive: '<span class="pill" style="background:#fef2f2;color:#b91c1c">AI 오탐 (적합→비적합)</span>',
@@ -1130,7 +1137,11 @@ async function renderReview() {
   const [draftsRaw, sectors, usages, sources] = await Promise.all([
     api('/items?status=Draft'), api('/sectors'), api('/usages'), api('/sources'),
   ]);
-  const drafts = [...draftsRaw].sort((a, b) => reviewPriority(a) - reviewPriority(b));
+  const drafts = [...draftsRaw].sort((a, b) => {
+    const pendingDiff = (isReviewerPending(a) ? 0 : 1) - (isReviewerPending(b) ? 0 : 1);
+    if (pendingDiff !== 0) return pendingDiff;
+    return reviewPriority(a) - reviewPriority(b);
+  });
 
   // Comparison view: only Drafts the reviewer has actually confirmed/
   // overridden (reviewer_eligible is not null) are shown — an unreviewed
@@ -1161,7 +1172,16 @@ async function renderReview() {
     <p class="page-lede">AI 초안을 확인하고 발행 여부를 결정합니다.</p>
     <div class="review-toolbar">
       <select id="draft-select">
-        ${drafts.map((d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`).join('') || '<option>Draft 없음</option>'}
+        ${(() => {
+          const draftOptionHtml = (d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`;
+          const pendingDrafts = drafts.filter(isReviewerPending);
+          const completedDrafts = drafts.filter((d) => !isReviewerPending(d));
+          if (!drafts.length) return '<option>Draft 없음</option>';
+          return [
+            pendingDrafts.length ? `<optgroup label="판단 미완료 (${pendingDrafts.length})">${pendingDrafts.map(draftOptionHtml).join('')}</optgroup>` : '',
+            completedDrafts.length ? `<optgroup label="판단 완료 (${completedDrafts.length})">${completedDrafts.map(draftOptionHtml).join('')}</optgroup>` : '',
+          ].join('');
+        })()}
       </select>
       <button class="btn" id="prev-draft-btn" type="button">← 이전</button>
       <button class="btn" id="next-draft-btn" type="button">다음 →</button>
