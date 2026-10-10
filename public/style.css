@@ -171,7 +171,8 @@ p { margin: 0; }
   border-radius: var(--radius-card); background: var(--surface); color: var(--text); font-size: 15px;
 }
 .ai-search input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
-.ai-search-result { position: relative; margin-top: var(--sp-6); }
+.ai-search-result { position: relative; }
+.ai-search-result:not(:empty) { margin-top: var(--sp-8); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 
 /* Each question/answer is its own turn, stacked in order — a follow-up's
    answer appends below the ones before it instead of replacing them. */
