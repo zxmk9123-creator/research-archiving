@@ -284,6 +284,28 @@ SELECT * FROM (VALUES
 ) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Reference Source Library v6: 기후솔루션(Solutions for Our Climate,
+-- forourclimate.org) and Marex — both prompted by three user-supplied
+-- example URLs that were directly archived as items (see the eighth
+-- Discovery Registry expansion above for the two new recurring-acquisition
+-- queries these examples also motivated). Unlike v4/v5, this session's own
+-- extractMetadata() call against the production service actually fetched
+-- these pages successfully (network access on this environment is
+-- restricted, but the production container's isn't), so last_verified_at
+-- is set to today — a genuine check, not a placeholder.
+INSERT INTO sources (name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+SELECT * FROM (VALUES
+  ('기후솔루션 (Solutions for Our Climate)', 'Solutions for Our Climate', 'https://forourclimate.org/ko/research', 'manual', 'reference-library', 'A', true,
+   'NGO/싱크탱크 리서치', 'Korea', ARRAY['팜유','UCO','UCOME','SAF','FAME'],
+   '한국 바이오연료·SAF 공급망의 ESG/지속가능성 리스크 국문 리서치(팜유 원료 추적성, 간접 토지이용변화 등)',
+   ARRAY['web','PDF'], '수시', '한국向 팜유 기반 바이오연료 공급망 리스크 분석 1차 출처 — 국문 자료라 국내 정책 리포트 작성 시 특히 유용', '2026-10-10'::date, false),
+  ('Marex Research', 'Marex', 'https://www.marex.com/news', 'manual', 'reference-library', 'A', true,
+   '거래소/업계단체 통계(브로커 리서치)', 'Global', ARRAY['팜유','대두유'],
+   '상품 브로커의 원자재 시장 리포트 — 기상 요인(엘니뇨 등) 공급 영향 분석 포함',
+   ARRAY['web'], '수시', '기상 변수가 유지 공급에 미치는 영향 분석 보조 출처', '2026-10-10'::date, false)
+) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Standing invariant, not a one-time cleanup: a source used for automated
 -- RSS/Web Discovery/institutional/structured ingestion is an OPERATIONAL
 -- source, never a Reference Source Library entry, even if someone later
@@ -500,6 +522,36 @@ FROM (VALUES
   ('Archive Discovery: China India edible oil import demand structural analysis', 'China India edible oil palm soybean import demand structural analysis'),
   ('Archive Discovery: vegetable oil futures options derivatives market structure', 'CBOT MDEX vegetable oil futures options derivatives market structure analysis'),
   ('Archive Discovery: climate change oilseed crop yield impact study', 'climate change impact oilseed palm soybean crop yield study research')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+-- Eighth Discovery Query Registry expansion: two angles prompted by three
+-- user-supplied, directly-registered examples (Marex's El Niño/Malaysia-
+-- Indonesia palm oil production report, and 기후솔루션(Solutions for Our
+-- Climate)'s Korean-language palm biodiesel supply-chain research) — both
+-- represent a source TYPE the registry had zero queries for, not just a
+-- missing keyword:
+--   - commodity broker/trading house research notes (Marex, StoneX, INTL
+--     FCStone, etc.) specifically framed around weather/climate-driven
+--     supply shocks (El Niño/La Niña) — distinct from the existing
+--     "commodity oil price forecast research institute" query, which
+--     skews toward generic institutional forecasts rather than a broker's
+--     own named research notes.
+--   - Korean-language ESG/climate NGO and think-tank supply-chain risk
+--     research on palm-based biodiesel/SAF (deforestation, land-use
+--     change, traceability) — distinct from the existing "EU
+--     deforestation regulation palm oil EUDR" query, which is about the
+--     regulation itself, not NGO-authored supply-chain investigations,
+--     and distinct from every other query in being Korean-language.
+-- Same idempotent pattern, same is_archive_discovery=true/
+-- is_daily_discovery=true convention (both angles are reusable research
+-- material, not day-to-day news); existing queries and pipeline behavior
+-- are otherwise untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery, is_archive_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true, true
+FROM (VALUES
+  ('Archive Discovery: commodity broker El Nino La Nina palm oil production impact', 'Marex StoneX commodity broker El Nino La Nina palm oil soybean oil production impact report'),
+  ('Archive Discovery: Korean ESG NGO palm biodiesel supply chain research', '팜유 바이오디젤 공급망 지속가능성 리스크 기후 NGO 리서치 보고서')
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
