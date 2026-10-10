@@ -103,22 +103,23 @@ body {
    with the pages they actually came for. */
 .nav-group { display: flex; align-items: center; gap: 2px; }
 .nav-divider { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
-.nav-item { position: relative; display: flex; align-items: center; }
 
-/* "?" info button next to each nav tab — always available (not just on
-   first visit), toggled via nav-tip-bubble in app.js. */
-.nav-info {
-  width: 15px; height: 15px; margin-left: 1px; padding: 0; border: 1px solid var(--border-strong);
-  border-radius: 50%; background: none; color: var(--text-tertiary); font-size: 10px; line-height: 1;
-  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0; transition: color .15s var(--ease), border-color .15s var(--ease);
+/* First-visit onboarding tour (app.js startOnboardingTour) — dims the
+   whole page via a giant box-shadow spread around the step's target
+   element, which sits above the dimmed layer so it reads as "spotlit". */
+.onboard-highlight {
+  position: relative; z-index: 52; border-radius: var(--radius-control);
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 9999px rgba(15, 23, 32, .6);
 }
-.nav-info:hover, .nav-info[aria-expanded="true"] { color: var(--action); border-color: var(--action); }
-.nav-tip-bubble {
-  position: absolute; max-width: 240px; padding: 10px 12px; background: var(--text);
-  color: var(--surface); font-size: 12.5px; line-height: 1.5; border-radius: var(--radius-control);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, .18); z-index: 30;
+.onboard-card {
+  position: absolute; z-index: 53; width: 280px; background: var(--surface); color: var(--text);
+  border-radius: var(--radius-control); box-shadow: 0 12px 32px rgba(0, 0, 0, .28); padding: var(--sp-4);
 }
+.onboard-card h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+.onboard-card p { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.onboard-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.onboard-step-count { font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; }
+.onboard-actions { display: flex; gap: 8px; }
 
 #app { max-width: 1120px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) var(--sp-8); }
 

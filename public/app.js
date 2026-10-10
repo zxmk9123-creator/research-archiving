@@ -1619,39 +1619,66 @@ function updateActiveNavTab(path) {
   });
 }
 
-// "?" info buttons next to each nav tab — a single shared bubble toggled
-// on click (not CSS :hover) so it also works on touch, and closes on any
-// outside click/scroll. Nav markup is static in index.html, so this binds
-// once at startup rather than per-route.
-function initNavTooltips() {
-  const bubble = document.createElement('div');
-  bubble.className = 'nav-tip-bubble';
-  bubble.hidden = true;
-  document.body.appendChild(bubble);
-  let openBtn = null;
-  function close() {
-    bubble.hidden = true;
-    if (openBtn) openBtn.setAttribute('aria-expanded', 'false');
-    openBtn = null;
+// First-visit-only step-by-step tour over the four nav tabs: dims the
+// page and spotlights the current tab (via .onboard-highlight's giant
+// box-shadow spread) alongside a small card with a usage tip, a "다음"
+// button to advance and a "건너뛰기" button to exit early. Shown once
+// per browser (localStorage flag) — not a persistent help affordance,
+// so it does not reappear on later visits.
+const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
+const ONBOARDING_STEPS = [
+  { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
+  { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
+  { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 소스(RSS·기관 등)를 등록하고 관리하는 운영자용 화면입니다.' },
+  { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.' },
+];
+
+function startOnboardingTour() {
+  if (localStorage.getItem(ONBOARDING_SEEN_KEY)) return;
+
+  let step = 0;
+  let highlightedEl = null;
+  const card = document.createElement('div');
+  card.className = 'onboard-card';
+  document.body.appendChild(card);
+
+  function finish() {
+    if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
+    card.remove();
+    localStorage.setItem(ONBOARDING_SEEN_KEY, '1');
   }
-  document.querySelectorAll('.nav-info').forEach((btn) => {
-    btn.setAttribute('aria-expanded', 'false');
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (openBtn === btn) { close(); return; }
-      close();
-      bubble.textContent = btn.dataset.tip;
-      bubble.hidden = false;
-      const r = btn.getBoundingClientRect();
-      bubble.style.top = `${r.bottom + window.scrollY + 6}px`;
-      bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 248, r.left + window.scrollX - 100))}px`;
-      btn.setAttribute('aria-expanded', 'true');
-      openBtn = btn;
-    });
-  });
-  document.addEventListener('click', close);
-  window.addEventListener('scroll', close, { passive: true });
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+  function renderStep() {
+    if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
+    const s = ONBOARDING_STEPS[step];
+    const target = document.querySelector(s.selector);
+    if (!target) { finish(); return; }
+    target.classList.add('onboard-highlight');
+    highlightedEl = target;
+    const isLast = step === ONBOARDING_STEPS.length - 1;
+    card.innerHTML = `
+      <h3>${s.title}</h3>
+      <p>${s.desc}</p>
+      <div class="onboard-card-footer">
+        <span class="onboard-step-count">${step + 1} / ${ONBOARDING_STEPS.length}</span>
+        <div class="onboard-actions">
+          <button type="button" class="btn" id="onboard-skip">건너뛰기</button>
+          <button type="button" class="btn primary" id="onboard-next">${isLast ? '시작하기' : '다음'}</button>
+        </div>
+      </div>
+    `;
+    const r = target.getBoundingClientRect();
+    card.style.top = `${r.bottom + window.scrollY + 10}px`;
+    card.style.left = `${Math.max(8, Math.min(window.innerWidth - 296, r.left + window.scrollX - 20))}px`;
+    document.getElementById('onboard-skip').onclick = finish;
+    document.getElementById('onboard-next').onclick = () => {
+      if (isLast) { finish(); return; }
+      step += 1;
+      renderStep();
+    };
+  }
+
+  renderStep();
 }
 
 async function router() {
@@ -1688,6 +1715,6 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
   if (!location.hash) location.hash = '#/home';
-  initNavTooltips();
+  startOnboardingTour();
   router();
 });
