@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
+const { titleSimilarity } = require('./similarity');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
 // single collection run can create dozens of items at once. Bounding the
@@ -90,34 +91,55 @@ function buildUserPrompt(item, taxonomy, extractedText, feedbackBlock = '') {
 // this pipeline can learn from is a case where a human reviewer's final
 // eligibility call (reviewer_eligible) DISAGREED with the AI's own verdict
 // (ai_eligible) — a correct AI call carries no new information to calibrate
-// from. Bounded to a handful of the most recent disagreements (not an
-// unbounded or weighted history) to keep prompt/token cost predictable and
-// avoid the few-shot block itself skewing future verdicts toward whatever
-// happens to be the single most recent correction. This is in-context
-// calibration, not training: nothing here changes SYSTEM_PROMPT or any
-// stored weights, so a bad correction only affects prompts built after it
-// and is corrected the same way (a later reviewer confirming the right
-// verdict ages the earlier example out of the LIMIT window).
+// from. This is in-context calibration, not training: nothing here changes
+// SYSTEM_PROMPT or any stored weights, so a bad correction only affects
+// prompts built after it, and is corrected the same way any other
+// correction is (a later reviewer confirming the right verdict re-ranks it
+// out once something more similar exists).
 const MAX_FEEDBACK_EXAMPLES = 5;
+// How many recent disagreements to pull before ranking by similarity to the
+// current article — bounds the scoring work and keeps the pool itself
+// reasonably fresh (an old correction may reflect a since-revised
+// SYSTEM_PROMPT), without requiring a real embedding index just to shortlist
+// candidates worth scoring.
+const FEEDBACK_CANDIDATE_POOL_SIZE = 50;
 
-async function getRecentFeedbackExamples() {
+async function getFeedbackCandidatePool() {
   try {
     const { rows } = await pool.query(
-      `SELECT title, ai_eligible, ai_eligibility_reason, reviewer_eligible
+      `SELECT id, title, ai_eligible, ai_eligibility_reason, reviewer_eligible
        FROM items
        WHERE reviewer_eligible IS NOT NULL AND reviewer_eligible IS DISTINCT FROM ai_eligible
        ORDER BY id DESC
        LIMIT $1`,
-      [MAX_FEEDBACK_EXAMPLES]
+      [FEEDBACK_CANDIDATE_POOL_SIZE]
     );
     return rows;
   } catch (err) {
     // Feedback is an enhancement, never a dependency — a query failure here
     // must not block draft generation, so it fails open to "no examples"
     // exactly like a cold-start archive with no review history yet.
-    console.error('getRecentFeedbackExamples failed', sanitizeError(err));
+    console.error('getFeedbackCandidatePool failed', sanitizeError(err));
     return [];
   }
+}
+
+// Topic-weighted selection: rank the candidate pool by title similarity to
+// the article actually being judged (titleSimilarity — the existing
+// bigram-overlap measure in similarity.js, no embedding model/API needed)
+// so the few-shot examples are the corrections most likely to be relevant
+// to THIS article's topic, not just whichever disagreements happened most
+// recently. Ties (including the common case of no similarity at all —
+// score 0 for every candidate) fall back to recency (higher id first), so
+// an archive with few corrections so far still gets the same "most recent
+// disagreements" behavior as before this topic-weighting was added. Pure
+// function — no DB/network access — so it's cheap to unit test in
+// isolation from getFeedbackCandidatePool's query.
+function selectFeedbackExamples(item, candidates, max = MAX_FEEDBACK_EXAMPLES) {
+  return [...candidates]
+    .map((c) => ({ ...c, _score: titleSimilarity(item.title, c.title) }))
+    .sort((a, b) => (b._score - a._score) || (b.id - a.id))
+    .slice(0, max);
 }
 
 function buildFeedbackBlock(examples) {
@@ -127,7 +149,7 @@ function buildFeedbackBlock(examples) {
     const reviewerVerdict = e.reviewer_eligible === true ? 'eligible=true (적합)' : 'eligible=false (비적합)';
     return `${i + 1}. Title: "${e.title}"\n   Your verdict: ${yourVerdict} — reason: ${e.ai_eligibility_reason || '(none given)'}\n   Human reviewer's final call: ${reviewerVerdict}`;
   }).join('\n');
-  return `\n\nRecent reviewer corrections — real cases where your "eligible" verdict was overridden by a human reviewer on final review. Use these only to recalibrate how strictly/loosely you apply the eligibility criteria (A-E) above in borderline cases; do NOT copy their specific topics as a rule, and do NOT let them override this article's own stated facts:\n${lines}`;
+  return `\n\nReviewer corrections — real cases, picked for topical similarity to the article above, where your "eligible" verdict was overridden by a human reviewer on final review. Use these only to recalibrate how strictly/loosely you apply the eligibility criteria (A-E) above in borderline cases; do NOT copy their specific topics as a rule, and do NOT let them override this article's own stated facts:\n${lines}`;
 }
 
 const UNCONFIRMED = '미확보';
@@ -328,7 +350,8 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
   // never started (e.g. getTaxonomy() itself throws first).
   let providerCallStartedAt;
   try {
-    const [taxonomy, feedbackExamples] = await Promise.all([getTaxonomy(), getRecentFeedbackExamples()]);
+    const [taxonomy, feedbackCandidates] = await Promise.all([getTaxonomy(), getFeedbackCandidatePool()]);
+    const feedbackExamples = selectFeedbackExamples(item, feedbackCandidates);
     const userPrompt = buildUserPrompt(item, taxonomy, extractedText, buildFeedbackBlock(feedbackExamples));
     providerCallStartedAt = Date.now();
     const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
@@ -462,6 +485,7 @@ module.exports = {
   getTaxonomy,
   sanitizeError,
   generateAiDraftForItem,
-  getRecentFeedbackExamples,
+  getFeedbackCandidatePool,
+  selectFeedbackExamples,
   buildFeedbackBlock,
 };

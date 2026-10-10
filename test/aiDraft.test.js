@@ -12,7 +12,8 @@ const {
   parseQaDecision,
   applyAiDraftIfEligible,
   generateAiDraftForItem,
-  getRecentFeedbackExamples,
+  getFeedbackCandidatePool,
+  selectFeedbackExamples,
   buildFeedbackBlock,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
@@ -788,47 +789,73 @@ test('buildFeedbackBlock: formats a reviewer correction with both verdicts', () 
   const block = buildFeedbackBlock([
     { title: '팜유 가격 동향', ai_eligible: false, ai_eligibility_reason: '막연한 논평으로 판단', reviewer_eligible: true },
   ]);
-  assert.match(block, /Recent reviewer corrections/);
+  assert.match(block, /Reviewer corrections/);
   assert.match(block, /팜유 가격 동향/);
   assert.match(block, /Your verdict: eligible=false/);
   assert.match(block, /Human reviewer's final call: eligible=true \(적합\)/);
 });
 
-test('getRecentFeedbackExamples: queries only reviewer/AI disagreements, bounded and most-recent-first', async () => {
+test('getFeedbackCandidatePool: queries only reviewer/AI disagreements, bounded and most-recent-first', async () => {
   const { calls, restore } = mockPool([
-    ['SELECT title, ai_eligible', () => ({ rows: [{ title: 'x', ai_eligible: true, reviewer_eligible: false }] })],
+    ['SELECT id, title, ai_eligible', () => ({ rows: [{ id: 9, title: 'x', ai_eligible: true, reviewer_eligible: false }] })],
   ]);
   try {
-    const rows = await getRecentFeedbackExamples();
+    const rows = await getFeedbackCandidatePool();
     assert.equal(rows.length, 1);
-    const call = calls.find((c) => c.text.includes('SELECT title, ai_eligible'));
+    const call = calls.find((c) => c.text.includes('SELECT id, title, ai_eligible'));
     assert.match(call.text, /IS DISTINCT FROM ai_eligible/);
     assert.match(call.text, /ORDER BY id DESC/);
     assert.match(call.text, /LIMIT \$1/);
-    assert.equal(call.params[0], 5);
+    assert.equal(call.params[0], 50);
   } finally {
     restore();
   }
 });
 
-test('getRecentFeedbackExamples: fails open to an empty list rather than throwing', async () => {
+test('getFeedbackCandidatePool: fails open to an empty list rather than throwing', async () => {
   const original = pool.query;
   pool.query = async () => { throw new Error('db unavailable'); };
   try {
-    const rows = await getRecentFeedbackExamples();
+    const rows = await getFeedbackCandidatePool();
     assert.deepEqual(rows, []);
   } finally {
     pool.query = original;
   }
 });
 
-test('generateAiDraftForItem: includes recent reviewer corrections in the prompt sent to the provider', async () => {
+test('selectFeedbackExamples: ranks candidates by title similarity to the current article, not recency', () => {
+  const item = { title: '말레이시아 팜유 수출 관세 인상' };
+  const candidates = [
+    { id: 1, title: '전혀 무관한 콩기름 선물 가격 동향', ai_eligible: true, reviewer_eligible: false },
+    { id: 2, title: '말레이시아 팜유 수출 관세 변경 발표', ai_eligible: false, reviewer_eligible: true },
+  ];
+  const [top] = selectFeedbackExamples(item, candidates, 1);
+  assert.equal(top.id, 2);
+});
+
+test('selectFeedbackExamples: falls back to most-recent-first when nothing is similar', () => {
+  const item = { title: '완전히 다른 주제의 기사' };
+  const candidates = [
+    { id: 5, title: 'AAAA', ai_eligible: true, reviewer_eligible: false },
+    { id: 9, title: 'BBBB', ai_eligible: false, reviewer_eligible: true },
+  ];
+  const [top] = selectFeedbackExamples(item, candidates, 1);
+  assert.equal(top.id, 9);
+});
+
+test('selectFeedbackExamples: respects the max count', () => {
+  const item = { title: 't' };
+  const candidates = [1, 2, 3, 4].map((id) => ({ id, title: `t${id}`, ai_eligible: true, reviewer_eligible: false }));
+  assert.equal(selectFeedbackExamples(item, candidates, 2).length, 2);
+});
+
+test('generateAiDraftForItem: includes reviewer corrections in the prompt sent to the provider', async () => {
   const { restore } = mockPool([
     ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 70, title: '신규 기사', summary: 's' }] })],
     ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
     ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '식용' }] })],
-    ['SELECT title, ai_eligible', () => ({
-      rows: [{ title: '과거 기사', ai_eligible: false, ai_eligibility_reason: '구체성 부족', reviewer_eligible: true }],
+    ['SELECT id, title, ai_eligible', () => ({
+      rows: [{ id: 1, title: '과거 기사', ai_eligible: false, ai_eligibility_reason: '구체성 부족', reviewer_eligible: true }],
     })],
   ]);
   try {
@@ -839,7 +866,7 @@ test('generateAiDraftForItem: includes recent reviewer corrections in the prompt
     };
     const result = await generateAiDraftForItem(70, providerFn);
     assert.equal(result.ok, true);
-    assert.match(capturedUserPrompt, /Recent reviewer corrections/);
+    assert.match(capturedUserPrompt, /Reviewer corrections/);
     assert.match(capturedUserPrompt, /과거 기사/);
   } finally {
     restore();
