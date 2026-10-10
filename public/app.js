@@ -1631,7 +1631,10 @@ async function renderReview() {
   document.getElementById('new-draft').onclick = () => loadDraft(null);
 
   syncNavButtons();
-  if (drafts[0]) loadDraft(drafts[0].id);
+  if (drafts[0]) {
+    await loadDraft(drafts[0].id);
+    startReviewTour();
+  }
 }
 
 function parseHash() {
@@ -1656,23 +1659,17 @@ function updateActiveNavTab(path) {
   });
 }
 
-// First-visit-only step-by-step tour over the four nav tabs: dims the
-// page and spotlights the current tab (via .onboard-highlight's giant
-// box-shadow spread) alongside a small card with a usage tip, a "다음"
-// button to advance and a "건너뛰기" button to exit early. Shown once
-// per browser (localStorage flag) — not a persistent help affordance,
-// so it does not reappear on later visits.
-const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
-const ONBOARDING_STEPS = [
-  { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
-  { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
-  { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
-  { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
-  { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.' },
-];
-
-function startOnboardingTour() {
-  if (localStorage.getItem(ONBOARDING_SEEN_KEY)) return;
+// First-visit-only step-by-step spotlight tour, shared by the nav tour
+// (over the top-level tabs) and the Review-page tour (over that page's own
+// controls, in the order a reviewer actually uses them): dims the page and
+// spotlights the current target (via .onboard-highlight's giant box-shadow
+// spread) alongside a small card with a usage tip, a "다음" button to
+// advance and a "건너뛰기" button to exit early. A step whose target isn't
+// in the DOM (e.g. Review has no drafts yet) is skipped rather than ending
+// the tour early. Marks `seenKey` once shown or skipped so it never
+// reappears in that browser.
+function runSpotlightTour(steps, seenKey) {
+  if (localStorage.getItem(seenKey)) return;
 
   let step = 0;
   let highlightedEl = null;
@@ -1683,22 +1680,23 @@ function startOnboardingTour() {
   function finish() {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
     card.remove();
-    localStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+    localStorage.setItem(seenKey, '1');
   }
 
   function renderStep() {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
-    const s = ONBOARDING_STEPS[step];
+    if (step >= steps.length) { finish(); return; }
+    const s = steps[step];
     const target = document.querySelector(s.selector);
-    if (!target) { finish(); return; }
+    if (!target) { step += 1; renderStep(); return; }
     target.classList.add('onboard-highlight');
     highlightedEl = target;
-    const isLast = step === ONBOARDING_STEPS.length - 1;
+    const isLast = step === steps.length - 1;
     card.innerHTML = `
       <h3>${s.title}</h3>
       <p>${s.desc}</p>
       <div class="onboard-card-footer">
-        <span class="onboard-step-count">${step + 1} / ${ONBOARDING_STEPS.length}</span>
+        <span class="onboard-step-count">${step + 1} / ${steps.length}</span>
         <div class="onboard-actions">
           <button type="button" class="btn" id="onboard-skip">건너뛰기</button>
           <button type="button" class="btn primary" id="onboard-next">${isLast ? '시작하기' : '다음'}</button>
@@ -1719,6 +1717,33 @@ function startOnboardingTour() {
 
   renderStep();
 }
+
+const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
+const ONBOARDING_STEPS = [
+  { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
+  { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
+  { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
+  { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
+  { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.' },
+];
+function startOnboardingTour() { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY); }
+
+// Review-page tour — spotlights that page's own controls in the order a
+// reviewer actually works through them (판단 미완료 draft 고르기 → AI 판단
+// 확인 → 내 판단 확정 → 필요시 요약/분류 수정 → 발행), separate from the
+// review-tip-card above (a persistent reference card) and from the nav
+// tour (which only names the tab). Only fires once a draft is loaded, since
+// most of its targets (#d-summary 등) don't exist until then.
+const REVIEW_TOUR_SEEN_KEY = 'ra_review_tour_seen';
+const REVIEW_TOUR_STEPS = [
+  { selector: '#draft-select', title: 'Draft 선택', desc: '검토할 초안을 여기서 고릅니다. "판단 미완료" 그룹이 위에 먼저 보여요.' },
+  { selector: '.verdict-badge', title: 'AI 판단', desc: 'AI가 내린 적합/비적합 판단과 그 근거를 먼저 확인하세요.' },
+  { selector: '#reviewer-eligible-confirm-btn', title: '내 판단', desc: '적합/비적합으로 직접 확정하세요. 같은 버튼을 한 번 더 누르면 선택이 해제됩니다.' },
+  { selector: '#d-summary', title: '요약 · 인사이트', desc: '필요하면 핵심 요약과 인사이트를 직접 수정할 수 있어요.' },
+  { selector: '#d-sectors', title: '섹터 · 활용처', desc: '적절한 섹터와 활용처를 선택해 분류하세요.' },
+  { selector: '#d-publish', title: '자료 발행', desc: '판단과 분류가 끝나면 발행 버튼을 눌러 공개합니다.' },
+];
+function startReviewTour() { runSpotlightTour(REVIEW_TOUR_STEPS, REVIEW_TOUR_SEEN_KEY); }
 
 async function router() {
   const { path, param, query } = parseHash();
