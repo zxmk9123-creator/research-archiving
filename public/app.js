@@ -894,25 +894,20 @@ function sectorLinkRowHtml(link = {}) {
   </div>`;
 }
 
-async function renderSources(query = {}) {
+// Shared by the Sources tab (view='all') and the 레퍼런스 tab
+// (view='reference') — both manage rows in the same `sources` table
+// (is_reference flag), just scoped to a top-level route each now rather
+// than a view-tab switcher within one page.
+async function renderSourceManager(view, query = {}) {
   const sources = await api('/sources');
-  const view = query.view === 'reference' ? 'reference' : 'all';
-  const viewTabs = [
-    { key: 'all', label: '전체' },
-    { key: 'reference', label: 'Reference Sources' },
-  ];
-  const viewTabsHtml = viewTabs.map((t) =>
-    `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/sources?view=${t.key}">${t.label}</a>`
-  ).join('');
 
   const refFilterOptions = referenceFilterOptions(sources);
   const refRegionOpts = refFilterOptions.regions.map((r) => `<option value="${r}" ${query.region === r ? 'selected' : ''}>${r}</option>`).join('');
   const refCommodityOpts = refFilterOptions.commodities.map((c) => `<option value="${c}" ${query.commodity === c ? 'selected' : ''}>${c}</option>`).join('');
 
   app.innerHTML = `
-    <h1>Sources</h1>
+    <h1>${view === 'reference' ? '레퍼런스' : 'Sources'}</h1>
     <p class="page-lede">${view === 'reference' ? '자동 수집 대상이 아니더라도 참고 가치가 높은 유지 시장 리서치/통계 출처를 기록합니다.' : 'RSS 수집 소스 상태를 관리합니다.'}</p>
-    <div class="archive-tabs">${viewTabsHtml}</div>
     ${view === 'all' ? `<button class="btn primary btn-compact" id="collect-all-btn">전체 자료 지금 수집</button>
     <div class="collect-all-result" id="collect-all-result"></div>
     <table class="sources-table">
@@ -981,7 +976,7 @@ async function renderSources(query = {}) {
       } catch (err) {
         alert(`수집 실패: ${err.message}`);
       }
-      await renderSources(query);
+      await renderSourceManager(view, query);
       if (resultText) document.getElementById('collect-all-result').textContent = resultText;
     };
   }
@@ -1058,7 +1053,7 @@ async function renderSources(query = {}) {
           alert(`삭제 실패: ${err.message}`);
           return;
         }
-        renderSources(query);
+        renderSourceManager(view, query);
       };
     });
     document.querySelectorAll('[data-edit-source]').forEach((btn) => {
@@ -1123,9 +1118,12 @@ async function renderSources(query = {}) {
     } else {
       await api('/sources', { method: 'POST', body: JSON.stringify(payload) });
     }
-    renderSources(query);
+    renderSourceManager(view, query);
   };
 }
+
+async function renderSources(query = {}) { return renderSourceManager('all', query); }
+async function renderReference(query = {}) { return renderSourceManager('reference', query); }
 
 // AI eligibility=false is a reviewer signal, not a filter — every Draft item
 // stays in the dropdown and reviewable, just reordered so items the AI
@@ -1613,6 +1611,7 @@ function updateActiveNavTab(path) {
   // 'detail' has no top-level tab of its own — it's always reached from
   // 자료 (Archive), so it falls back to that tab rather than Home.
   const activeRoute = path === 'archive' || path === 'detail' ? 'archive'
+    : path === 'reference' ? 'reference'
     : path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'home';
   document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === activeRoute);
@@ -1629,7 +1628,8 @@ const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
 const ONBOARDING_STEPS = [
   { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
-  { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 소스(RSS·기관 등)를 등록하고 관리하는 운영자용 화면입니다.' },
+  { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
+  { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
   { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.' },
 ];
 
@@ -1694,6 +1694,7 @@ async function router() {
     else if (path === 'archive') await renderArchive(query);
     else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
+    else if (path === 'reference') await renderReference(query);
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
     else app.innerHTML = '<p>페이지를 찾을 수 없습니다.</p>';
