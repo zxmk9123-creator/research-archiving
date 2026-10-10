@@ -112,7 +112,7 @@ body {
   box-shadow: 0 0 0 4px var(--surface), 0 0 0 9999px rgba(15, 23, 32, .6);
 }
 .onboard-card {
-  position: absolute; z-index: 53; width: 280px; background: var(--surface); color: var(--text);
+  position: absolute; z-index: 53; width: 360px; max-width: calc(100vw - 32px); background: var(--surface); color: var(--text);
   border-radius: var(--radius-control); box-shadow: 0 12px 32px rgba(0, 0, 0, .28); padding: var(--sp-4);
 }
 .onboard-card h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }

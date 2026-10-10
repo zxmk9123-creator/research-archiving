@@ -1669,7 +1669,8 @@ function startOnboardingTour() {
     `;
     const r = target.getBoundingClientRect();
     card.style.top = `${r.bottom + window.scrollY + 10}px`;
-    card.style.left = `${Math.max(8, Math.min(window.innerWidth - 296, r.left + window.scrollX - 20))}px`;
+    const cardWidth = Math.min(360, window.innerWidth - 32);
+    card.style.left = `${Math.max(8, Math.min(window.innerWidth - cardWidth - 8, r.left + window.scrollX - 20))}px`;
     document.getElementById('onboard-skip').onclick = finish;
     document.getElementById('onboard-next').onclick = () => {
       if (isLast) { finish(); return; }
