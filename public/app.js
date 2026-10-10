@@ -1509,20 +1509,26 @@ async function renderReview() {
       confirmBtn.classList.toggle('is-selected', eligible === true);
       overrideBtn.classList.toggle('is-selected', eligible === false);
       const statusEl = confirmBtn.parentElement.querySelector('.review-status-text');
-      if (statusEl) statusEl.textContent = '확인 완료';
+      if (statusEl) statusEl.textContent = eligible === null ? '미확인' : '확인 완료';
     }
+    // Tracks the currently-saved value so a second click on the same button
+    // is recognized as "undo" (-> null) rather than a no-op re-save of the
+    // same verdict.
+    let reviewerEligible = item.reviewer_eligible;
     const reviewerConfirmBtn = document.getElementById('reviewer-eligible-confirm-btn');
-    if (reviewerConfirmBtn) {
-      reviewerConfirmBtn.onclick = async () => {
-        await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: true }) });
-        setReviewerEligibleUi(reviewerConfirmBtn, document.getElementById('reviewer-eligible-override-btn'), true);
-      };
-    }
     const reviewerOverrideBtn = document.getElementById('reviewer-eligible-override-btn');
-    if (reviewerOverrideBtn) {
+    if (reviewerConfirmBtn && reviewerOverrideBtn) {
+      reviewerConfirmBtn.onclick = async () => {
+        const next = reviewerEligible === true ? null : true;
+        await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: next }) });
+        reviewerEligible = next;
+        setReviewerEligibleUi(reviewerConfirmBtn, reviewerOverrideBtn, next);
+      };
       reviewerOverrideBtn.onclick = async () => {
-        await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: false }) });
-        setReviewerEligibleUi(document.getElementById('reviewer-eligible-confirm-btn'), reviewerOverrideBtn, false);
+        const next = reviewerEligible === false ? null : false;
+        await api(`/items/${id}`, { method: 'PATCH', body: JSON.stringify({ reviewer_eligible: next }) });
+        reviewerEligible = next;
+        setReviewerEligibleUi(reviewerConfirmBtn, reviewerOverrideBtn, next);
       };
     }
 
