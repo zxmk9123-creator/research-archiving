@@ -12,6 +12,8 @@ const {
   parseQaDecision,
   applyAiDraftIfEligible,
   generateAiDraftForItem,
+  getRecentFeedbackExamples,
+  buildFeedbackBlock,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
   SYSTEM_PROMPT,
@@ -771,6 +773,74 @@ test('generateAiDraftForItem: a non-provider (application) failure persists ai_f
     const [, failureType, latencyMs] = failedCall.params;
     assert.equal(failureType, null);
     assert.equal(typeof latencyMs, 'number');
+  } finally {
+    restore();
+  }
+});
+
+// --- Feedback loop: calibrating future AI drafts from reviewer corrections ---
+
+test('buildFeedbackBlock: empty examples produce no block', () => {
+  assert.equal(buildFeedbackBlock([]), '');
+});
+
+test('buildFeedbackBlock: formats a reviewer correction with both verdicts', () => {
+  const block = buildFeedbackBlock([
+    { title: '팜유 가격 동향', ai_eligible: false, ai_eligibility_reason: '막연한 논평으로 판단', reviewer_eligible: true },
+  ]);
+  assert.match(block, /Recent reviewer corrections/);
+  assert.match(block, /팜유 가격 동향/);
+  assert.match(block, /Your verdict: eligible=false/);
+  assert.match(block, /Human reviewer's final call: eligible=true \(적합\)/);
+});
+
+test('getRecentFeedbackExamples: queries only reviewer/AI disagreements, bounded and most-recent-first', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT title, ai_eligible', () => ({ rows: [{ title: 'x', ai_eligible: true, reviewer_eligible: false }] })],
+  ]);
+  try {
+    const rows = await getRecentFeedbackExamples();
+    assert.equal(rows.length, 1);
+    const call = calls.find((c) => c.text.includes('SELECT title, ai_eligible'));
+    assert.match(call.text, /IS DISTINCT FROM ai_eligible/);
+    assert.match(call.text, /ORDER BY id DESC/);
+    assert.match(call.text, /LIMIT \$1/);
+    assert.equal(call.params[0], 5);
+  } finally {
+    restore();
+  }
+});
+
+test('getRecentFeedbackExamples: fails open to an empty list rather than throwing', async () => {
+  const original = pool.query;
+  pool.query = async () => { throw new Error('db unavailable'); };
+  try {
+    const rows = await getRecentFeedbackExamples();
+    assert.deepEqual(rows, []);
+  } finally {
+    pool.query = original;
+  }
+});
+
+test('generateAiDraftForItem: includes recent reviewer corrections in the prompt sent to the provider', async () => {
+  const { restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 70, title: '신규 기사', summary: 's' }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '식용' }] })],
+    ['SELECT title, ai_eligible', () => ({
+      rows: [{ title: '과거 기사', ai_eligible: false, ai_eligibility_reason: '구체성 부족', reviewer_eligible: true }],
+    })],
+  ]);
+  try {
+    let capturedUserPrompt = null;
+    const providerFn = async ({ user }) => {
+      capturedUserPrompt = user;
+      return { text: fullResponse(), provider: 'freellmapi' };
+    };
+    const result = await generateAiDraftForItem(70, providerFn);
+    assert.equal(result.ok, true);
+    assert.match(capturedUserPrompt, /Recent reviewer corrections/);
+    assert.match(capturedUserPrompt, /과거 기사/);
   } finally {
     restore();
   }

@@ -74,7 +74,7 @@ function buildTaxonomyBlock(sectors, usages) {
 // description already is — no new instruction needed for this case.
 const MAX_EXTRACTED_TEXT_CHARS = 8000;
 
-function buildUserPrompt(item, taxonomy, extractedText) {
+function buildUserPrompt(item, taxonomy, extractedText, feedbackBlock = '') {
   const material = [
     `Title: ${item.title}`,
     extractedText
@@ -83,7 +83,51 @@ function buildUserPrompt(item, taxonomy, extractedText) {
         ? `Description: ${item.summary}`
         : 'Description: (none available)',
   ].join('\n');
-  return `${material}\n\n${buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages)}`;
+  return `${material}\n\n${buildTaxonomyBlock(taxonomy.sectors, taxonomy.usages)}${feedbackBlock}`;
+}
+
+// Feedback loop: the only signal the Review workflow actually produces that
+// this pipeline can learn from is a case where a human reviewer's final
+// eligibility call (reviewer_eligible) DISAGREED with the AI's own verdict
+// (ai_eligible) — a correct AI call carries no new information to calibrate
+// from. Bounded to a handful of the most recent disagreements (not an
+// unbounded or weighted history) to keep prompt/token cost predictable and
+// avoid the few-shot block itself skewing future verdicts toward whatever
+// happens to be the single most recent correction. This is in-context
+// calibration, not training: nothing here changes SYSTEM_PROMPT or any
+// stored weights, so a bad correction only affects prompts built after it
+// and is corrected the same way (a later reviewer confirming the right
+// verdict ages the earlier example out of the LIMIT window).
+const MAX_FEEDBACK_EXAMPLES = 5;
+
+async function getRecentFeedbackExamples() {
+  try {
+    const { rows } = await pool.query(
+      `SELECT title, ai_eligible, ai_eligibility_reason, reviewer_eligible
+       FROM items
+       WHERE reviewer_eligible IS NOT NULL AND reviewer_eligible IS DISTINCT FROM ai_eligible
+       ORDER BY id DESC
+       LIMIT $1`,
+      [MAX_FEEDBACK_EXAMPLES]
+    );
+    return rows;
+  } catch (err) {
+    // Feedback is an enhancement, never a dependency — a query failure here
+    // must not block draft generation, so it fails open to "no examples"
+    // exactly like a cold-start archive with no review history yet.
+    console.error('getRecentFeedbackExamples failed', sanitizeError(err));
+    return [];
+  }
+}
+
+function buildFeedbackBlock(examples) {
+  if (!examples.length) return '';
+  const lines = examples.map((e, i) => {
+    const yourVerdict = e.ai_eligible === true ? 'eligible=true' : e.ai_eligible === false ? 'eligible=false' : 'eligible=(no verdict)';
+    const reviewerVerdict = e.reviewer_eligible === true ? 'eligible=true (적합)' : 'eligible=false (비적합)';
+    return `${i + 1}. Title: "${e.title}"\n   Your verdict: ${yourVerdict} — reason: ${e.ai_eligibility_reason || '(none given)'}\n   Human reviewer's final call: ${reviewerVerdict}`;
+  }).join('\n');
+  return `\n\nRecent reviewer corrections — real cases where your "eligible" verdict was overridden by a human reviewer on final review. Use these only to recalibrate how strictly/loosely you apply the eligibility criteria (A-E) above in borderline cases; do NOT copy their specific topics as a rule, and do NOT let them override this article's own stated facts:\n${lines}`;
 }
 
 const UNCONFIRMED = '미확보';
@@ -284,8 +328,8 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
   // never started (e.g. getTaxonomy() itself throws first).
   let providerCallStartedAt;
   try {
-    const taxonomy = await getTaxonomy();
-    const userPrompt = buildUserPrompt(item, taxonomy, extractedText);
+    const [taxonomy, feedbackExamples] = await Promise.all([getTaxonomy(), getRecentFeedbackExamples()]);
+    const userPrompt = buildUserPrompt(item, taxonomy, extractedText, buildFeedbackBlock(feedbackExamples));
     providerCallStartedAt = Date.now();
     const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
     const latencyMs = Date.now() - providerCallStartedAt;
@@ -418,4 +462,6 @@ module.exports = {
   getTaxonomy,
   sanitizeError,
   generateAiDraftForItem,
+  getRecentFeedbackExamples,
+  buildFeedbackBlock,
 };
