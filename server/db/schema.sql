@@ -269,6 +269,21 @@ SELECT * FROM (VALUES
 ) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
 
+-- Reference Source Library v5: user-supplied URL (not discovered/guessed by
+-- an agent) — the Ukrainian Agribusiness Club's annual infographic report
+-- on Ukraine's agribusiness sector. Same as v4's Ukraine entry, this
+-- session's network restrictions meant the page itself couldn't be
+-- fetched to confirm its content firsthand, so last_verified_at stays NULL
+-- rather than claiming a check that didn't happen.
+INSERT INTO sources (name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+SELECT * FROM (VALUES
+  ('Ukrainian Agribusiness Infographics Report', 'Ukrainian Agribusiness Club (UCAB) / agribusinessinukraine.com', 'https://agribusinessinukraine.com/the-infographics-report-ukrainian-agribusiness-2025-eng/', 'manual', 'reference-library', 'B', true,
+   '업계단체 통계(인포그래픽)', 'Ukraine', ARRAY['해바라기유'],
+   '우크라이나 농업·애그리비즈니스 부문 연간 인포그래픽 리포트(작물 생산·교역 현황 포함)',
+   ARRAY['web','PDF'], 'Annual', '우크라이나 해바라기유 원료 공급 동향 참고(사용자 제공 링크) — 접속 미검증', NULL::date, false)
+) AS v(name, publisher, url, method, owner, trust_grade, is_reference, source_type, region, commodities, coverage_note, access_format, update_frequency, usage_note, last_verified_at, rss_available)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
 -- Standing invariant, not a one-time cleanup: a source used for automated
 -- RSS/Web Discovery/institutional/structured ingestion is an OPERATIONAL
 -- source, never a Reference Source Library entry, even if someone later
