@@ -502,16 +502,13 @@ async function renderHome() {
   bindAiSearchForm();
 }
 
-async function renderArchive(query = {}, opts = {}) {
-  const mode = opts.mode === 'latest' ? 'latest' : 'all';
-  // Archive / Daily Report toggle — a server-side filter (content_category),
-  // separate from the client-side "view" tabs (전체/내 저장/팀 Pick) below.
-  // Scoped to the 전체 결과 (mode='all') screen only, per the milestone;
-  // 최신 자료 (mode='latest') keeps showing every Published item unchanged.
-  // Daily Report is the default/first result view — entering a sector from
-  // Home (or any link that doesn't specify category) lands here. Archive
-  // stays reachable as an explicit tab/category value, never removed.
-  const category = mode === 'all' ? (query.category === 'archive' ? 'archive' : 'daily_report') : null;
+async function renderArchive(query = {}) {
+  // 최신 자료/전체 결과였던 두 화면을 하나의 "자료" 탭으로 통합했다 — 최신순
+  // 정렬은 그대로 서버가 보장하고(items.js의 published_at DESC), 여기서는
+  // 연/월 구분선만 추가한다. 뉴스(daily_report)/보고서(archive) 탭은 이
+  // 통합 화면 안의 카테고리 필터로 남는다. 기본값은 두 카테고리를 모두
+  // 보여주는 "전체" — 명시적으로 탭을 선택해야 좁혀진다.
+  const category = query.category === 'archive' || query.category === 'daily_report' ? query.category : null;
   const itemsQuery = category ? { ...query, category } : query;
   const [sectors, usages, sources, items, ranking] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(itemsQuery)),
@@ -565,10 +562,11 @@ async function renderArchive(query = {}, opts = {}) {
   ).join('');
 
   const categoryTabs = [
-    { key: 'daily_report', label: 'Daily Report' },
-    { key: 'archive', label: 'Archive' },
+    { key: null, label: '전체' },
+    { key: 'daily_report', label: '뉴스' },
+    { key: 'archive', label: '보고서' },
   ];
-  const categoryTabQuery = (key) => toQuery({ ...query, category: key }).slice(1);
+  const categoryTabQuery = (key) => toQuery({ ...query, category: key || '' }).slice(1);
   const categoryTabsHtml = categoryTabs.map((t) =>
     `<a class="archive-tab ${category === t.key ? 'active' : ''}" href="#/archive?${categoryTabQuery(t.key)}">${t.label}</a>`
   ).join('');
@@ -581,10 +579,10 @@ async function renderArchive(query = {}, opts = {}) {
       </div>`;
 
   app.innerHTML = `
-    <h1>${mode === 'latest' ? '최신 자료' : '전체 결과'}</h1>
-    <p class="page-lede">${mode === 'latest' ? '가장 최근에 발행된 유지 시장 리서치입니다. 아래 필터로 좁혀볼 수 있습니다.' : '오늘 확인해야 할 유지 시장 리서치를 빠르게 찾아보세요.'}</p>
+    <h1>자료</h1>
+    <p class="page-lede">발행된 유지 시장 리서치를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있습니다.</p>
     ${TRUST_GRADE_EXPLANATION_HTML}
-    ${mode === 'all' ? `<div class="archive-tabs category-tabs">${categoryTabsHtml}</div>` : ''}
+    <div class="archive-tabs category-tabs">${categoryTabsHtml}</div>
     <div class="archive-tabs">${viewTabsHtml}</div>
     <div class="archive">
       <div class="archive-search-bar">
@@ -621,10 +619,13 @@ async function renderArchive(query = {}, opts = {}) {
         </table>
       </details>
 
-      <div class="section" style="${mode === 'latest' ? 'margin-top:0' : ''}">
-        <div class="section-header"><h2>${mode === 'latest' ? '최신 자료' : '전체 결과'}</h2><span class="count">${visibleItems.length}개</span></div>
+      <div class="section">
+        <div class="section-header"><h2>자료</h2><span class="count">${visibleItems.length}개</span></div>
         ${emptyState}
-        <div class="grid">${visibleItems.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
+        ${groupByMonth(visibleItems).map((g) => `
+          <div class="archive-month-divider">${g.label}</div>
+          <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
+        `).join('')}
       </div>
     </div>
   `;
@@ -702,7 +703,7 @@ async function renderArchive(query = {}, opts = {}) {
       to: document.getElementById('f-to').value,
       // Preserve whichever Archive/Daily Report tab is currently active —
       // applying a sector/date filter must not silently snap back to Archive.
-      category: mode === 'all' ? category : '',
+      category: category || '',
     }).slice(1);
   };
   document.getElementById('f-clear').onclick = () => { location.hash = '#/archive'; };
@@ -719,6 +720,26 @@ async function renderArchive(query = {}, opts = {}) {
   document.getElementById('f-q').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('f-apply').click();
   });
+}
+
+// Groups already-sorted (published_at DESC) items into consecutive
+// year-month buckets for the merged 자료 tab's date dividers. Assumes the
+// input order from the API is preserved — it only detects where the
+// year-month changes, it never re-sorts.
+function groupByMonth(items) {
+  const groups = [];
+  let currentKey = null;
+  for (const it of items) {
+    const d = it.published_at ? new Date(it.published_at) : null;
+    const valid = d && !isNaN(d.getTime());
+    const key = valid ? `${d.getFullYear()}-${d.getMonth()}` : 'unknown';
+    if (key !== currentKey) {
+      groups.push({ label: valid ? `${d.getFullYear()}년 ${d.getMonth() + 1}월` : '날짜 미확인', items: [] });
+      currentKey = key;
+    }
+    groups[groups.length - 1].items.push(it);
+  }
+  return groups;
 }
 
 function toQuery(obj) {
@@ -1589,14 +1610,48 @@ function parseHash() {
 // separate UI state to keep in sync) — 'detail' has no top-level tab of
 // its own, so it maps back to the Archive tab it was reached from.
 function updateActiveNavTab(path) {
-  // 'home', 'latest', and 'archive' all live under the single "Home"
-  // dropdown nav item now — 'detail' has no top-level tab of its own
-  // either, so it also falls back to 'home' via the same reasoning as
-  // before ('detail' reached from Archive maps back to it).
-  const activeRoute = path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'home';
+  // 'detail' has no top-level tab of its own — it's always reached from
+  // 자료 (Archive), so it falls back to that tab rather than Home.
+  const activeRoute = path === 'archive' || path === 'detail' ? 'archive'
+    : path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'home';
   document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === activeRoute);
   });
+}
+
+// "?" info buttons next to each nav tab — a single shared bubble toggled
+// on click (not CSS :hover) so it also works on touch, and closes on any
+// outside click/scroll. Nav markup is static in index.html, so this binds
+// once at startup rather than per-route.
+function initNavTooltips() {
+  const bubble = document.createElement('div');
+  bubble.className = 'nav-tip-bubble';
+  bubble.hidden = true;
+  document.body.appendChild(bubble);
+  let openBtn = null;
+  function close() {
+    bubble.hidden = true;
+    if (openBtn) openBtn.setAttribute('aria-expanded', 'false');
+    openBtn = null;
+  }
+  document.querySelectorAll('.nav-info').forEach((btn) => {
+    btn.setAttribute('aria-expanded', 'false');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (openBtn === btn) { close(); return; }
+      close();
+      bubble.textContent = btn.dataset.tip;
+      bubble.hidden = false;
+      const r = btn.getBoundingClientRect();
+      bubble.style.top = `${r.bottom + window.scrollY + 6}px`;
+      bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 248, r.left + window.scrollX - 100))}px`;
+      btn.setAttribute('aria-expanded', 'true');
+      openBtn = btn;
+    });
+  });
+  document.addEventListener('click', close);
+  window.addEventListener('scroll', close, { passive: true });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 }
 
 async function router() {
@@ -1609,7 +1664,7 @@ async function router() {
   try {
     if (path === 'home' || path === '') await renderHome();
     else if (path === 'archive') await renderArchive(query);
-    else if (path === 'latest') await renderArchive(query, { mode: 'latest' });
+    else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
@@ -1633,5 +1688,6 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
   if (!location.hash) location.hash = '#/home';
+  initNavTooltips();
   router();
 });

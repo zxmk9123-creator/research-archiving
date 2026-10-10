@@ -17,15 +17,27 @@
     Oil&amp;Fat Research Center
   </div>
   <nav>
-    <div class="nav-dropdown">
-      <a href="#/home" data-route="home">Home</a>
-      <div class="nav-dropdown-menu">
-        <a href="#/latest">최신 자료</a>
-        <a href="#/archive">전체 결과</a>
-      </div>
+    <div class="nav-group" data-group="reader">
+      <span class="nav-item">
+        <a href="#/home" data-route="home">Home</a>
+        <button type="button" class="nav-info" aria-label="Home 설명 보기" data-tip="주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.">?</button>
+      </span>
+      <span class="nav-item">
+        <a href="#/archive" data-route="archive">자료</a>
+        <button type="button" class="nav-info" aria-label="자료 설명 보기" data-tip="발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.">?</button>
+      </span>
     </div>
-    <a href="#/sources" data-route="sources">Sources</a>
-    <a href="#/review" data-route="review">Review</a>
+    <span class="nav-divider" aria-hidden="true"></span>
+    <div class="nav-group" data-group="operate">
+      <span class="nav-item">
+        <a href="#/sources" data-route="sources">Sources</a>
+        <button type="button" class="nav-info" aria-label="Sources 설명 보기" data-tip="자료를 수집하는 소스(RSS·기관 등)를 등록하고 관리하는 운영자용 화면입니다.">?</button>
+      </span>
+      <span class="nav-item">
+        <a href="#/review" data-route="review">Review</a>
+        <button type="button" class="nav-info" aria-label="Review 설명 보기" data-tip="AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.">?</button>
+      </span>
+    </div>
   </nav>
 </header>
 <main id="app"></main>

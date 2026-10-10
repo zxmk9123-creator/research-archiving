@@ -90,30 +90,35 @@ body {
 @media (max-width: 480px) {
   .topbar { padding: 12px 12px; }
   .brand { font-size: 14px; }
-  .topbar nav { gap: 0; }
-  .topbar nav a, .nav-dropdown > a { padding: 6px 8px; font-size: 13px; }
+  .topbar nav { gap: 6px; }
+  .topbar nav a { padding: 6px 8px; font-size: 13px; }
 }
 
 /* Active tab: text color only, per spec — no background/border/underline. */
 .topbar nav a.active { color: var(--action); }
 
-/* Home nav dropdown — hover reveals the two dedicated full-list pages
-   instead of giving them their own top-level nav items. Minimal styling
-   consistent with the rest of the topbar (no shadOw-heavy panel). */
-.nav-dropdown { position: relative; }
-.nav-dropdown-menu {
-  position: absolute; top: 100%; left: 0; margin-top: 2px; min-width: 132px;
-  display: none; flex-direction: column; gap: 2px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, .08); padding: 4px; z-index: 20;
+/* Nav split into two role groups — reader-facing (Home/자료) vs
+   operator-facing (Sources/Review) — separated by a visible divider so
+   a first-time visitor isn't handed curator screens on equal footing
+   with the pages they actually came for. */
+.nav-group { display: flex; align-items: center; gap: 2px; }
+.nav-divider { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+.nav-item { position: relative; display: flex; align-items: center; }
+
+/* "?" info button next to each nav tab — always available (not just on
+   first visit), toggled via nav-tip-bubble in app.js. */
+.nav-info {
+  width: 15px; height: 15px; margin-left: 1px; padding: 0; border: 1px solid var(--border-strong);
+  border-radius: 50%; background: none; color: var(--text-tertiary); font-size: 10px; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: color .15s var(--ease), border-color .15s var(--ease);
 }
-.nav-dropdown:hover .nav-dropdown-menu,
-.nav-dropdown:focus-within .nav-dropdown-menu { display: flex; }
-.nav-dropdown-menu a {
-  padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-secondary);
-  text-decoration: none; font-size: 14px; font-weight: 500;
+.nav-info:hover, .nav-info[aria-expanded="true"] { color: var(--action); border-color: var(--action); }
+.nav-tip-bubble {
+  position: absolute; max-width: 240px; padding: 10px 12px; background: var(--text);
+  color: var(--surface); font-size: 12.5px; line-height: 1.5; border-radius: var(--radius-control);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .18); z-index: 30;
 }
-.nav-dropdown-menu a:hover { background: var(--surface-sunken); color: var(--text); }
 
 #app { max-width: 1120px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) var(--sp-8); }
 
@@ -573,6 +578,13 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 }
 .archive-tabs .archive-tab:hover { color: var(--text); }
 .archive-tabs .archive-tab.active { color: var(--action); border-bottom-color: var(--action); }
+
+/* Year-month divider for the merged 자료 tab's date-grouped list. */
+.archive-month-divider {
+  font-size: 13px; font-weight: 700; color: var(--text-tertiary); margin: var(--sp-5) 0 var(--sp-2);
+  padding-top: var(--sp-2); border-top: 1px solid var(--border);
+}
+.archive-month-divider:first-child { margin-top: 0; padding-top: 0; border-top: none; }
 
 /* Collection failure warning — compact, collapsed by default, no red
    banner. Collapsed height ~44-48px; raw fetch-failed strings never
