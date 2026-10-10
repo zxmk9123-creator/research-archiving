@@ -6,7 +6,19 @@ async function api(path, opts) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    // Admin write routes (requireAuth in server/lib/auth.js) return a JSON
+    // { error } body on 401 — surface that friendly Korean message instead
+    // of the raw response text existing callers' alert(`...: ${err.message}`)
+    // would otherwise show verbatim.
+    const text = await res.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error) message = parsed.error;
+    } catch (err) { /* not JSON — keep raw text */ }
+    throw new Error(message);
+  }
   if (res.status === 204) return null;
   return res.json();
 }
@@ -1800,9 +1812,43 @@ async function router() {
 // (router()'s window.scrollTo(0, 0) on every render) is meant to remove.
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+// Admin login/logout — a single shared password (server/lib/auth.js), no
+// accounts. The button lives in the nav's "operate" group since only
+// Sources/Review writes and collection triggers require it; reading any
+// page (including Sources/Review themselves) stays open to everyone.
+async function refreshAdminAuthUi() {
+  const btn = document.getElementById('nav-admin-auth');
+  if (!btn) return;
+  let authenticated = false;
+  try {
+    const status = await api('/auth/status');
+    authenticated = Boolean(status.authenticated);
+  } catch (err) { /* treat an unreachable status check as logged out */ }
+  btn.textContent = authenticated ? '로그아웃' : '관리자 로그인';
+  btn.onclick = authenticated ? adminLogout : adminLogin;
+}
+
+async function adminLogin() {
+  const password = prompt('관리자 비밀번호를 입력하세요:');
+  if (!password) return;
+  try {
+    await api('/auth/login', { method: 'POST', body: JSON.stringify({ password }) });
+  } catch (err) {
+    alert(`로그인 실패: ${err.message}`);
+    return;
+  }
+  await refreshAdminAuthUi();
+}
+
+async function adminLogout() {
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  await refreshAdminAuthUi();
+}
+
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
   if (!location.hash) location.hash = '#/home';
   startOnboardingTour();
+  refreshAdminAuthUi();
   router();
 });

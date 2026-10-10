@@ -3,11 +3,12 @@ const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata } = require('../lib/extractMetadata');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('../lib/aiDraft');
+const { requireAuth } = require('../lib/auth');
 const { hasValidClassification, deriveContentCategory } = require('../lib/classification');
 
 const router = express.Router();
 
-router.post('/extract-metadata', async (req, res) => {
+router.post('/extract-metadata', requireAuth, async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
   try {
@@ -99,7 +100,7 @@ router.get('/:id/related', async (req, res) => {
 // items — never bulk-regenerating the published archive). A reviewer may
 // explicitly retry even after 'completed'; concurrent 'pending' is rejected
 // so double-clicking can't fire two overlapping generations for one item.
-router.post('/:id/ai-draft', async (req, res) => {
+router.post('/:id/ai-draft', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT id, status, ai_status, source_url FROM items WHERE id = $1', [req.params.id]);
   const item = rows[0];
   if (!item) return res.status(404).json({ error: 'not found' });
@@ -170,7 +171,7 @@ async function setTags(itemId, sectorIds = [], usageIds = []) {
   }
 }
 
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const {
     title, source_url, pdf_url, published_at, source_id, type,
     summary, insight, attribution, thumbnail_url,
@@ -211,7 +212,7 @@ router.post('/', async (req, res) => {
   res.status(201).json(full[0]);
 });
 
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requireAuth, async (req, res) => {
   const id = req.params.id;
   const { rows: existingRows } = await pool.query('SELECT id, type FROM items WHERE id = $1', [id]);
   if (!existingRows[0]) return res.status(404).json({ error: 'not found' });
@@ -263,7 +264,7 @@ router.patch('/:id', async (req, res) => {
   res.json(full[0]);
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const { rows } = await pool.query('DELETE FROM items WHERE id = $1 RETURNING id', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   res.status(204).end();
@@ -281,7 +282,7 @@ router.delete('/:id', async (req, res) => {
 // aiDraft.js the same way a burst of individual retries would; safe to
 // re-run, since generateAiDraftForItem/applyAiDraftIfEligible are both
 // idempotent per item.
-router.post('/review-audit', async (req, res) => {
+router.post('/review-audit', requireAuth, async (req, res) => {
   const { rows: drafts } = await pool.query(
     `SELECT id, title, source_url, summary FROM items WHERE status = 'Draft' ORDER BY id`
   );

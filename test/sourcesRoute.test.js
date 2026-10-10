@@ -3,8 +3,11 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const pool = require('../server/db/pool');
 const sourcesRouter = require('../server/routes/sources');
+const { SESSION_COOKIE, issueSessionToken } = require('../server/lib/auth');
 
-// Same live-server harness convention as itemsRoute.test.js.
+// Same live-server harness convention as itemsRoute.test.js, including the
+// auto-authenticating global fetch wrapper (requireAuth now guards every
+// mutating route here too).
 function withServer(fn) {
   const app = express();
   app.use(express.json());
@@ -12,12 +15,18 @@ function withServer(fn) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, async () => {
       const { port } = server.address();
+      const originalFetch = global.fetch;
+      global.fetch = (url, opts = {}) => originalFetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), Cookie: `${SESSION_COOKIE}=${issueSessionToken()}` },
+      });
       try {
         await fn(`http://127.0.0.1:${port}/api/sources`);
         resolve();
       } catch (err) {
         reject(err);
       } finally {
+        global.fetch = originalFetch;
         server.close();
       }
     });

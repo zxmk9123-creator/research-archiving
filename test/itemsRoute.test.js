@@ -3,11 +3,19 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const pool = require('../server/db/pool');
 const itemsRouter = require('../server/routes/items');
+const { SESSION_COOKIE, issueSessionToken } = require('../server/lib/auth');
 
 // Minimal live-server harness (express + node's own fetch) rather than a
 // new test-framework dependency — the router's PATCH guard for the
 // minimum classification invariant needs to be exercised through the
 // actual HTTP route (where the guard lives), not just its inner helper.
+//
+// requireAuth (server/lib/auth.js) now guards every mutating route, so
+// every request made through fn's base URL carries a valid admin session
+// cookie — injected via a temporary global fetch wrapper rather than
+// editing each call site. issueSessionToken()'s HMAC secret derives from
+// ADMIN_PASSWORD, but sign and verify both run in this same process, so
+// the token is valid regardless of whether that env var is set.
 function withServer(fn) {
   const app = express();
   app.use(express.json());
@@ -15,12 +23,18 @@ function withServer(fn) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, async () => {
       const { port } = server.address();
+      const originalFetch = global.fetch;
+      global.fetch = (url, opts = {}) => originalFetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), Cookie: `${SESSION_COOKIE}=${issueSessionToken()}` },
+      });
       try {
         await fn(`http://127.0.0.1:${port}/api/items`);
         resolve();
       } catch (err) {
         reject(err);
       } finally {
+        global.fetch = originalFetch;
         server.close();
       }
     });

@@ -6,6 +6,7 @@ const { maybeRunDailyDiscovery } = require('./lib/dailyDiscovery');
 const app = express();
 app.use(express.json());
 
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sources', require('./routes/sources'));
 app.use('/api/companies', require('./routes/companies'));
 app.use('/api/items', require('./routes/items'));

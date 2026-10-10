@@ -3,6 +3,7 @@ const pool = require('../db/pool');
 const { collectBySource, runDueCollections, collectAllSourcesNow } = require('../lib/collector');
 const { collectWebDiscoverySource } = require('../lib/webDiscoveryIngest');
 const { collectDailyDiscoveryNow } = require('../lib/dailyDiscovery');
+const { requireAuth } = require('../lib/auth');
 
 const router = express.Router();
 
@@ -14,14 +15,14 @@ const router = express.Router();
 // one-time routes further down, this goes through
 // dailyDiscoverySearchOptions() per source, so is_archive_discovery
 // sources correctly get itemType='보고서' and no freshness bias.
-router.post('/trigger-daily-discovery-now', async (req, res) => {
+router.post('/trigger-daily-discovery-now', requireAuth, async (req, res) => {
   const result = await collectDailyDiscoveryNow();
   console.log(`daily_discovery manual_run_completed ${JSON.stringify(result.totals)}`);
   res.json(result);
 });
 
 // Manual trigger: run all due RSS sources now.
-router.post('/collect', async (req, res) => {
+router.post('/collect', requireAuth, async (req, res) => {
   const results = await runDueCollections();
   res.json({ results });
 });
@@ -29,14 +30,14 @@ router.post('/collect', async (req, res) => {
 // Manual trigger: collect every active RSS source right now, regardless of
 // schedule/frequency_days. Aggregates per-source results — one source
 // failing never stops the others.
-router.post('/collect-all', async (req, res) => {
+router.post('/collect-all', requireAuth, async (req, res) => {
   const { totals, results } = await collectAllSourcesNow();
   console.log(`collect-all: ${JSON.stringify(totals)}`);
   res.json({ totals, results });
 });
 
 // Manual trigger: collect one source right now, regardless of schedule.
-router.post('/:id/collect', async (req, res) => {
+router.post('/:id/collect', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM sources WHERE id = $1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   if (!['rss', 'institution', 'structured', 'crawl'].includes(rows[0].method) || !rows[0].url) {
@@ -59,7 +60,7 @@ router.post('/:id/collect', async (req, res) => {
 // only the search step's date window differs. Safe to call more than once;
 // dedup makes a repeat run a no-op for anything already archived. Intended
 // to be removed after the one-time backfill it was added for.
-router.post('/backfill-7day-discovery', async (req, res) => {
+router.post('/backfill-7day-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
   );
@@ -90,7 +91,7 @@ router.post('/backfill-7day-discovery', async (req, res) => {
 // freshness window passed to collectWebDiscoverySource() differs — same
 // pipeline, same dedup/AI screening/QA/classification/publish rules. Intended
 // to be removed after the one-time backfill it was added for.
-router.post('/backfill-sept2026-discovery', async (req, res) => {
+router.post('/backfill-sept2026-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
   );
@@ -123,7 +124,7 @@ router.post('/backfill-sept2026-discovery', async (req, res) => {
 // collectWebDiscoverySource() in webDiscoveryIngest.js. Same pipeline,
 // same dedup/AI screening/QA/classification/publish rules otherwise.
 // Intended to be removed after the one-time backfill it was added for.
-router.post('/backfill-2026h1-discovery', async (req, res) => {
+router.post('/backfill-2026h1-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
   );
@@ -160,7 +161,7 @@ router.post('/backfill-2026h1-discovery', async (req, res) => {
 // touch sources.frequency_days/is_daily_discovery/is_archive_discovery or
 // the query registry; does not create any new scheduler. Intended to be
 // removed after the one-time backfill it was added for.
-router.post('/backfill-2026fullyear-discovery', async (req, res) => {
+router.post('/backfill-2026fullyear-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
   );
@@ -201,7 +202,7 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const {
     name, publisher, url, method, frequency_days, owner, trust_grade,
     is_reference, source_type, region, commodities, coverage_note,
@@ -235,7 +236,7 @@ const PATCHABLE_SOURCE_FIELDS = [
   'is_reference', 'source_type', 'region', 'commodities', 'coverage_note',
   'access_format', 'update_frequency', 'usage_note', 'last_verified_at', 'rss_available',
 ];
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requireAuth, async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT id FROM sources WHERE id = $1', [req.params.id]);
   if (!existingRows[0]) return res.status(404).json({ error: 'not found' });
 
@@ -264,7 +265,7 @@ router.patch('/:id', async (req, res) => {
 // items.source_id is ON DELETE SET NULL (see schema.sql) — deleting a
 // source never cascades to or removes previously collected items, it only
 // detaches them from this source.
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const { rowCount } = await pool.query('DELETE FROM sources WHERE id = $1', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'not found' });
   res.status(204).end();
