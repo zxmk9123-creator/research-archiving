@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Oil&amp;Fats Research Center">
-  <path d="M16 3 C16 3 7 15.5 7 21 C7 25.9706 11.0294 30 16 30 C20.9706 30 25 25.9706 25 21 C25 15.5 16 3 16 3 Z" fill="#3182f6"/>
-  <path d="M11.5 22.5 C11.5 25 13.5 26.8 16 26.8" fill="none" stroke="#eaf2fe" stroke-width="1.8" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Oil&amp;Fat Research Center">
+  <path d="M16 4 L26.4 10 L26.4 22 L16 28 L5.6 22 L5.6 10 Z" fill="none" stroke="#3182f6" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M10 19 L14.5 14.5 L18 17.5 L23 11" fill="none" stroke="#3182f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="23" cy="11" r="1.6" fill="#3182f6"/>
 </svg>
