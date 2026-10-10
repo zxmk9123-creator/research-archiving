@@ -1169,6 +1169,7 @@ function reviewTipCardHtml() {
     <div class="review-tip-card" id="review-tip-card">
       <button type="button" class="review-tip-close" id="review-tip-close" aria-label="안내 닫기">✕</button>
       <h3>Review 사용 가이드</h3>
+      <p class="review-tip-purpose">AI가 자동으로 수집·판단한 초안은 가끔 틀립니다 — Review는 발행 전 사람이 직접 적합성을 검수해 AI 자동 채집의 판단 정확도를 보장하는 단계입니다.</p>
       <ol>
         <li>상단 드롭다운에서 검토할 Draft를 선택하세요 (판단 미완료가 먼저 보여요).</li>
         <li>AI 판단을 확인하고, "적합으로 확정"/"비적합으로 확정"으로 내 판단을 남기세요 — 같은 버튼을 다시 누르면 선택이 해제됩니다.</li>
@@ -1215,7 +1216,7 @@ async function renderReview() {
 
   app.innerHTML = `
     <h1>Review</h1>
-    <p class="page-lede">AI 초안을 확인하고 발행 여부를 결정합니다.</p>
+    <p class="page-lede">AI가 자동으로 수집·판단한 초안을 발행 전에 사람이 직접 검수해, 적합성 판단의 정확도를 보장하는 화면입니다. AI 판단과 내 판단이 어긋난 항목은 아래 "AI vs 리뷰어 적합성 비교"에서 확인할 수 있습니다.</p>
     ${reviewTipCardHtml()}
     <div class="review-toolbar">
       <select id="draft-select">
@@ -1745,7 +1746,7 @@ const ONBOARDING_STEPS = [
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
-  { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 스크리닝한 초안을 발행 전에 검수·승인하는 운영자용 작업 화면입니다.' },
+  { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 자동 채집·판단한 초안을 발행 전에 사람이 검수해 적합성 판단의 정확도를 보장하는 운영자용 작업 화면입니다.' },
 ];
 function startOnboardingTour() { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY); }
 
