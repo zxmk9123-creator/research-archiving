@@ -1216,7 +1216,7 @@ async function renderReview() {
 
   app.innerHTML = `
     <h1>Review</h1>
-    <p class="page-lede">AI가 자동으로 수집·판단한 초안을 발행 전에 사람이 직접 검수해, 적합성 판단의 정확도를 보장하는 화면입니다. AI 판단과 내 판단이 어긋난 항목은 아래 "AI vs 리뷰어 적합성 비교"에서 확인할 수 있습니다.</p>
+    <p class="page-lede">AI가 자동으로 수집·판단한 초안을 발행 전에 사람이 직접 검수해, 적합성 판단의 정확도를 보장하는 화면입니다.<br>AI 판단과 내 판단이 어긋난 항목은 아래 "AI vs 리뷰어 적합성 비교"에서 확인할 수 있습니다.</p>
     ${reviewTipCardHtml()}
     <div class="review-toolbar">
       <select id="draft-select">
