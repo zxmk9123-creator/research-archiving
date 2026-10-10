@@ -2,7 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata } = require('../lib/extractMetadata');
-const { generateAiDraftForItem } = require('../lib/aiDraft');
+const { generateAiDraftForItem, applyAiDraftIfEligible } = require('../lib/aiDraft');
 const { hasValidClassification, deriveContentCategory } = require('../lib/classification');
 
 const router = express.Router();
@@ -267,6 +267,50 @@ router.delete('/:id', async (req, res) => {
   const { rows } = await pool.query('DELETE FROM items WHERE id = $1 RETURNING id', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   res.status(204).end();
+});
+
+// MANUAL AUDIT TOOL — re-judges every currently-Draft item with the AI
+// pipeline as it stands right now (including the reviewer-feedback
+// calibration block in aiDraft.js, which a Draft sitting unreviewed for a
+// while never benefited from at its original collection time) and
+// auto-publishes whatever now clears applyAiDraftIfEligible's bar. Not on
+// a schedule — a Review workflow operator runs this deliberately to sweep
+// the backlog after a judgment-quality change, same spirit as the existing
+// one-time backfill tools in routes/sources.js. Sequential (not
+// Promise.all) to keep logs readable and respect the AI call limiter in
+// aiDraft.js the same way a burst of individual retries would; safe to
+// re-run, since generateAiDraftForItem/applyAiDraftIfEligible are both
+// idempotent per item.
+router.post('/review-audit', async (req, res) => {
+  const { rows: drafts } = await pool.query(
+    `SELECT id, title, source_url, summary FROM items WHERE status = 'Draft' ORDER BY id`
+  );
+  const results = [];
+  for (const item of drafts) {
+    let extractedText;
+    if (item.source_url) {
+      try {
+        const meta = await extractMetadata(item.source_url);
+        extractedText = meta.body_text || undefined;
+      } catch (err) {
+        // Best-effort, same fallback as POST /:id/ai-draft — falls through
+        // to item.summary inside generateAiDraftForItem.
+      }
+    }
+    const genResult = await generateAiDraftForItem(item.id, undefined, extractedText);
+    if (!genResult.ok) {
+      results.push({ id: item.id, title: item.title, outcome: 'ai_failed', error: genResult.error });
+      continue;
+    }
+    const { archived } = await applyAiDraftIfEligible(item.id);
+    results.push({ id: item.id, title: item.title, outcome: archived ? 'published' : 'still_draft' });
+  }
+  const totals = results.reduce(
+    (acc, r) => ({ ...acc, [r.outcome]: (acc[r.outcome] || 0) + 1 }),
+    { published: 0, still_draft: 0, ai_failed: 0 }
+  );
+  console.log(`review-audit: ${drafts.length} drafts processed — ${JSON.stringify(totals)}`);
+  res.json({ totalDrafts: drafts.length, totals, results });
 });
 
 module.exports = router;
