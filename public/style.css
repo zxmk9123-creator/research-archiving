@@ -131,7 +131,7 @@ h2 { font-size: 20px; font-weight: 700; color: var(--text); margin: 0 0 var(--sp
 h3 { font-size: 17px; font-weight: 700; margin: 0; line-height: 1.5; }
 p { margin: 0; }
 
-.page-lede { font-size: 15px; font-weight: 400; color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 60ch; }
+.page-lede { font-size: 15px; font-weight: 400; color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: 100%; }
 
 /* ---------------------------------------------------------------------
    AI Research Search (Home) — a restrained, B2B-appropriate "active AI"
