@@ -441,6 +441,10 @@ function bindAiSearchForm() {
     `;
     resultEl.appendChild(turnEl);
     turnEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Cleared immediately, not just on success — otherwise the same
+    // question sits visible twice while the request is in flight: once
+    // still in the input box, once in the new turn's question label below.
+    input.value = '';
     const bodyEl = turnEl.querySelector('.ai-search-turn-body');
     const statusEl = turnEl.querySelector('.ai-search-status');
     submitBtn.disabled = true;
@@ -462,7 +466,6 @@ function bindAiSearchForm() {
         ${renderAnswerHtml(body.answer)}
         ${aiSearchSourcesHtml(body.sources)}
       `;
-      input.value = '';
     } catch (err) {
       bodyEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
     } finally {
