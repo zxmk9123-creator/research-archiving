@@ -1155,6 +1155,30 @@ function eligibilityLabel(v) {
   return '-';
 }
 
+// First-visit-only usage guide card for the Review screen specifically —
+// unlike the nav tour (which only names what each top-level tab is), this
+// walks through the actual Review workflow once a user has landed here,
+// since it's the most operationally involved screen. Shown once per
+// browser (localStorage flag), same convention as ONBOARDING_SEEN_KEY, and
+// stays dismissible afterward via its own close button rather than
+// disappearing automatically.
+const REVIEW_TIP_SEEN_KEY = 'ra_review_tip_seen';
+function reviewTipCardHtml() {
+  if (localStorage.getItem(REVIEW_TIP_SEEN_KEY)) return '';
+  return `
+    <div class="review-tip-card" id="review-tip-card">
+      <button type="button" class="review-tip-close" id="review-tip-close" aria-label="안내 닫기">✕</button>
+      <h3>Review 사용 가이드</h3>
+      <ol>
+        <li>상단 드롭다운에서 검토할 Draft를 선택하세요 (판단 미완료가 먼저 보여요).</li>
+        <li>AI 판단을 확인하고, "적합으로 확정"/"비적합으로 확정"으로 내 판단을 남기세요 — 같은 버튼을 다시 누르면 선택이 해제됩니다.</li>
+        <li>필요하면 요약/인사이트/섹터/활용처를 직접 수정하세요.</li>
+        <li>준비되면 "자료 발행"을 눌러 공개합니다.</li>
+      </ol>
+    </div>
+  `;
+}
+
 async function renderReview() {
   const [draftsRaw, sectors, usages, sources] = await Promise.all([
     api('/items?status=Draft'), api('/sectors'), api('/usages'), api('/sources'),
@@ -1192,6 +1216,7 @@ async function renderReview() {
   app.innerHTML = `
     <h1>Review</h1>
     <p class="page-lede">AI 초안을 확인하고 발행 여부를 결정합니다.</p>
+    ${reviewTipCardHtml()}
     <div class="review-toolbar">
       <select id="draft-select">
         ${(() => {
@@ -1212,6 +1237,13 @@ async function renderReview() {
     <div id="review-body"></div>
     ${comparisonSection}
   `;
+  const reviewTipCloseBtn = document.getElementById('review-tip-close');
+  if (reviewTipCloseBtn) {
+    reviewTipCloseBtn.onclick = () => {
+      localStorage.setItem(REVIEW_TIP_SEEN_KEY, '1');
+      document.getElementById('review-tip-card').remove();
+    };
+  }
   const sourceOpts = sources.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
   const sectorChips = sectors.map((s) => `<span class="chip" data-sector="${s.id}">${s.name}</span>`).join('');
   const usageChips = usages.map((u) => `<span class="chip" data-usage="${u.id}">${u.name}</span>`).join('');

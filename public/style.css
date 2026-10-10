@@ -459,6 +459,23 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
 }
 .btn-text-action:hover { color: var(--danger); border-color: var(--danger); background: #fef2f2; }
 
+/* First-visit Review usage-guide card (app.js reviewTipCardHtml) — a
+   dismissible inline card, not a modal/overlay like the nav tour, since
+   it sits inline above the page's own toolbar rather than spotlighting
+   another element. */
+.review-tip-card {
+  position: relative; background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-control); padding: var(--sp-4) var(--sp-5); margin: var(--sp-4) 0;
+}
+.review-tip-card h3 { margin: 0 0 var(--sp-2); font-size: 15px; font-weight: 700; color: var(--text); }
+.review-tip-card ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 4px; }
+.review-tip-card li { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; }
+.review-tip-close {
+  position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; padding: 0; border: none;
+  background: none; color: var(--text-tertiary); font-size: 13px; cursor: pointer; border-radius: 50%;
+}
+.review-tip-close:hover { color: var(--text); background: var(--surface); }
+
 /* Review header toolbar: draft select + prev/next + new-item, one compact
    36px row — not a filter bar, a navigation strip. */
 .review-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-4) 0 var(--sp-5); }
