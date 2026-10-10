@@ -311,7 +311,7 @@ p { margin: 0; }
 /* Pagination dots — one per 3-card slide group. Deliberately tiny and
    unobtrusive: outlined/light by default, filled only for the active
    group, no surrounding chrome. */
-.home-carousel-dots { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.home-carousel-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; max-width: 420px; margin-left: auto; margin-right: auto; }
 .home-carousel-dot {
   width: 7px; height: 7px; padding: 0; border-radius: 50%; cursor: pointer;
   background: none; border: 1.5px solid var(--border-strong);

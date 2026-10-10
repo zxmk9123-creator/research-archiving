@@ -236,12 +236,13 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
   if (!slides.length) {
     return `<div class="home-module">${headerHtml}<p class="meta">표시할 자료가 없습니다.</p></div>`;
   }
-  // One dot per 3-card slide group, for direct navigation — only when
-  // there's more than one slide (nothing to paginate) and the group count
-  // stays small enough that dots remain a compact, scannable index rather
-  // than a second scrollable row; beyond that, the existing arrows remain
-  // the only navigation (still fully functional either way).
-  const showDots = slides.length > 1 && slides.length <= 10;
+  // One dot per 3-card slide group, for direct navigation — shown whenever
+  // there's more than one slide to paginate. No upper cap: a sector with a
+  // large item count (e.g. 31 items / 11 slides) wraps onto a second row
+  // via .home-carousel-dots' flex-wrap instead of silently losing its dot
+  // index — a hidden cap here previously made the module look broken
+  // exactly once a popular sector grew past it.
+  const showDots = slides.length > 1;
   const dotsHtml = showDots
     ? `<div class="home-carousel-dots">${slides.map((_, i) => `<button type="button" class="home-carousel-dot ${i === 0 ? 'is-active' : ''}" aria-label="${i + 1}번째 그룹으로 이동"></button>`).join('')}</div>`
     : '';
