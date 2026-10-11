@@ -382,6 +382,17 @@ function initHomeCarouselDragReorder() {
   document.querySelectorAll('.home-theme-children[data-drag-root]').forEach((container) => {
     const rootId = container.dataset.dragRoot;
     let draggedEl = null;
+    // Without this, dragover/drop over any point that isn't directly over
+    // another .home-module (the gaps between modules, this container's own
+    // padding, a module's non-card whitespace) is an illegal drop target by
+    // default — the browser cancels it and snaps the dragged element back,
+    // which is what "드래그가 안 된다" looks like even though dragstart and
+    // the per-module reordering both fired correctly. Every card in a
+    // module is also an <a href="#/detail/...">, so an illegal drop can
+    // additionally trigger the browser's native "navigate to this link"
+    // action instead of just silently failing.
+    container.addEventListener('dragover', (e) => e.preventDefault());
+    container.addEventListener('drop', (e) => e.preventDefault());
     container.querySelectorAll('.home-module[data-drag-sector]').forEach((mod) => {
       mod.addEventListener('dragstart', (e) => {
         draggedEl = mod;
@@ -1919,6 +1930,14 @@ async function adminLogout() {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   await refreshAdminAuthUi();
 }
+
+// Page-wide safety net for the Home carousel drag-reorder feature: a fast
+// drag can momentarily overshoot .home-theme-children's own bounds (e.g.
+// crossing into the gap between the two theme sections), where nothing
+// else calls preventDefault — without this, that split-second illegal
+// drop target is enough for the browser to reject the whole drop.
+app.addEventListener('dragover', (e) => e.preventDefault());
+app.addEventListener('drop', (e) => e.preventDefault());
 
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
