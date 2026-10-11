@@ -94,7 +94,7 @@ test('searchWeb: throws a clear error when no API key is configured', () => with
 }));
 
 test('searchWeb: throws a clear error on a non-ok API response', () => withApiKey('test-key', async () => {
-  const restore = mockFetch(async () => ({ ok: false, status: 429 }));
+  const restore = mockFetch(async () => ({ ok: false, status: 429, text: async () => '' }));
   try {
     await assert.rejects(() => searchWeb('q'), /search failed: 429/);
   } finally {
@@ -184,7 +184,7 @@ test('searchWeb: a non-402 failure (e.g. 429) on one key still throws immediatel
   const seenKeys = [];
   const restore = mockFetch(async (url, init) => {
     seenKeys.push(init.headers['X-Subscription-Token']);
-    return { ok: false, status: 429 };
+    return { ok: false, status: 429, text: async () => '' };
   });
   try {
     await assert.rejects(() => searchWeb('q'), /search failed: 429/);

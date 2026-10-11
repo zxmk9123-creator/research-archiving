@@ -74,7 +74,11 @@ async function searchWeb(query, options = {}) {
       lastStatus = 402;
       continue;
     }
-    if (!res.ok) throw new Error(`search failed: ${res.status}`);
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '');
+      console.error(`brave search failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+      throw new Error(`search failed: ${res.status}`);
+    }
     lastGoodKeyIndex = keys.indexOf(apiKey);
     const data = await res.json();
 
