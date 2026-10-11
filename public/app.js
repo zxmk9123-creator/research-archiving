@@ -420,10 +420,15 @@ function initHomeCarouselDragReorder() {
 }
 
 // Minimum conversation context for AI Research Search follow-ups — kept
-// in memory only (module-level, not localStorage/sessionStorage), reset on
-// every renderHome() (i.e. every fresh visit to Home). No persistent chat
-// history by design.
+// in memory only (module-level, not localStorage/sessionStorage), so it
+// survives a renderHome() re-render (e.g. Home -> cited article's Detail
+// page -> back to Home) rather than resetting on every visit. A hard page
+// reload clears it naturally, since module state doesn't survive that.
 let aiSearchHistory = [];
+// Rendered turn HTML kept alongside aiSearchHistory so the visible Q&A
+// thread can be restored on the next renderHome(), not just the history
+// array the API call uses for context.
+let aiSearchTurnsHtml = [];
 
 function aiSearchHtml() {
   return `<section class="ai-search" id="ai-search">
@@ -571,6 +576,7 @@ function bindAiSearchForm() {
         ${renderAnswerHtml(body.answer)}
         ${aiSearchSourcesHtml(body.sources)}
       `;
+      aiSearchTurnsHtml.push(turnEl.outerHTML);
     } catch (err) {
       bodyEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
     } finally {
@@ -581,7 +587,6 @@ function bindAiSearchForm() {
 }
 
 async function renderHome() {
-  aiSearchHistory = [];
   const [sectors, items, ranking] = await Promise.all([
     api('/sectors'),
     api('/items?status=Published'),
@@ -606,6 +611,9 @@ async function renderHome() {
   document.querySelectorAll('.home-carousel').forEach((el) => initHomeCarousel(el));
   initHomeCarouselDragReorder();
   bindAiSearchForm();
+  if (aiSearchTurnsHtml.length) {
+    document.getElementById('ai-search-result').innerHTML = aiSearchTurnsHtml.join('');
+  }
 }
 
 async function renderArchive(query = {}) {
