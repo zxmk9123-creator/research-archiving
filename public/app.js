@@ -625,13 +625,6 @@ async function renderArchive(query = {}) {
         </div>
       </div>
 
-      <details class="section">
-        <summary>팀 Pick · 많이 본 자료</summary>
-        <table><tr><th>제목</th><th>유형</th><th>Pick 수</th></tr>
-          ${ranking.map((r) => `<tr><td><a href="#/detail/${r.id}">${r.title}</a></td><td>${r.type}</td><td>${r.pick_count}</td></tr>`).join('') || '<tr><td colspan="3">아직 팀 Pick이 없습니다.</td></tr>'}
-        </table>
-      </details>
-
       <div class="section">
         <div class="section-header"><h2>자료</h2><span class="count">${visibleItems.length}개</span></div>
         ${emptyState}
