@@ -70,6 +70,48 @@ test('extractBodyText: returns null when there is no usable paragraph content', 
   assert.equal(extractBodyText('<html><body><div>no p tags here</div></body></html>'), null);
 });
 
+// Production incident: a g-enews.com article's only <p> tag was its
+// footer copyright/address notice (327 chars, long enough to pass the
+// length filter on its own) — generateAiDraftForItem() then correctly
+// judged the "article" had no real content, because that's genuinely all
+// it was given. The real article text existed on the page but was never
+// captured. Must be filtered out even when it's the only long paragraph.
+test('extractBodyText: a long copyright/address footer paragraph is filtered out, not treated as article content', () => {
+  const html = `<html><body>
+    <p>(우)04004 서울특별시 마포구 월드컵로62 서교동 한림빌딩 2층 | 법인명 : (주)그린미디어 | 제호 : 글로벌이코노믹. Copyright © 2011 글로벌이코노믹. All rights reserved.</p>
+  </body></html>`;
+  assert.equal(extractBodyText(html), null);
+});
+
+// Same production incident: the real article body on g-enews.com was
+// rendered as a single <div itemprop="articleBody"> with <br> line breaks,
+// no <p> tags at all — <p>-based extraction found nothing but the footer
+// above, so this generic (not site-specific) fallback is what actually
+// recovers the article.
+test('extractBodyText: falls back to <br>-separated text when <p> extraction is too thin (common Korean news CMS pattern)', () => {
+  const html = `<html><body>
+    <div itemprop="articleBody">
+      GS칼텍스는 지난 8일 DHL 익스프레스와 협약을 맺고 국내에서 급유하는 항공기에 향후 1년간 순수 SAF 기준 2000t을 공급하기로 했다.<br />
+      HD현대오일뱅크는 2024년 6월 일본 마루베니상사를 통해 전일본공수(ANA)에 SAF를 공급하며 국내 첫 SAF 수출 실적을 냈다.<br />
+    </div>
+    <p>Copyright © 2011 글로벌이코노믹. All rights reserved.</p>
+  </body></html>`;
+  const text = extractBodyText(html);
+  assert.ok(text.includes('GS칼텍스는 지난 8일 DHL 익스프레스와 협약을 맺고'));
+  assert.ok(text.includes('HD현대오일뱅크는 2024년 6월 일본 마루베니상사를 통해'));
+  assert.ok(!text.includes('Copyright'));
+});
+
+test('extractBodyText: a substantial <p>-based article is kept as-is, never replaced by the <br> fallback', () => {
+  const html = `<html><body><article>
+    <p>Palm oil exports from Indonesia rose 12% in September as demand from India strengthened ahead of the festival season, trade data showed on Monday.</p>
+    <p>Analysts at a major trading house said the increase reflects both higher production and a weaker rupiah making Indonesian palm oil more competitive against Malaysian supply this quarter.</p>
+  </article></body></html>`;
+  const text = extractBodyText(html);
+  assert.ok(text.includes('Palm oil exports from Indonesia rose 12%'));
+  assert.ok(text.includes('Analysts at a major trading house'));
+});
+
 // Production bug: a title/description containing an apostrophe (common in
 // possessives, e.g. "Indonesia's exports...") was truncated right at that
 // apostrophe — [^"']* treated ' and " as interchangeable terminators

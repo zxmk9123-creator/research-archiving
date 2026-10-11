@@ -55,13 +55,54 @@ function stripTags(fragment) {
   return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
+// A footer/legal-notice paragraph (copyright line, publisher address,
+// "무단전재 금지") is itself often a real <p>...</p> long enough to pass the
+// length filter below — production incident: a g-enews.com article's
+// extracted "body text" turned out to be nothing but this, 327 characters
+// of copyright notice, with the actual article (confirmed present in the
+// page) never captured at all. Worse than finding no content, because it
+// silently reads as real article text to generateAiDraftForItem(), so the
+// model correctly judged it had no substance — on the wrong input.
+// Filtered out before the length check, not after, so a long boilerplate
+// paragraph still never counts as "substantial".
+const BOILERPLATE_PARAGRAPH_RE = /copyright\s*©|무단\s*(전재|사용|복사|배포)|all rights reserved|저작권법에\s*저촉|^\(우\)\d{5}/i;
+
+function extractParagraphs(regex, cleaned) {
+  return [...cleaned.matchAll(regex)]
+    .map((m) => stripTags(m[1]))
+    .filter((text) => text.length > 40 && !BOILERPLATE_PARAGRAPH_RE.test(text)); // drop nav/caption/boilerplate fragments
+}
+
+// Below this, the <p>-based pool isn't the real article — try the <br>
+// fallback instead of accepting a thin/empty result.
+const MIN_SUBSTANTIAL_BODY_CHARS = 200;
+
 function extractBodyText(html) {
   const cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ');
-  const paragraphs = [...cleaned.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-    .map((m) => stripTags(m[1]))
-    .filter((text) => text.length > 40); // drop nav/caption/boilerplate fragments
+  let paragraphs = extractParagraphs(/<p[^>]*>([\s\S]*?)<\/p>/gi, cleaned);
+
+  // Some Korean news CMS templates render the article body as a single
+  // container with <br> line breaks instead of separate <p> tags — <p>
+  // extraction then finds nothing but nav/footer paragraphs (confirmed in
+  // production on g-enews.com: the real article sat in <br>-separated
+  // lines inside one <div itemprop="articleBody">, with no <p> tags at
+  // all). Generic fallback, not site-specific: whenever the <p> pool is
+  // too thin to plausibly be the article, also try text runs ending in
+  // <br>, and keep whichever pool is actually bigger.
+  if (paragraphs.join('').length < MIN_SUBSTANTIAL_BODY_CHARS) {
+    // split(), not a regex match loop — a lazy quantifier here
+    // (`[^<]{41,}?` before `<br>`) backtracks catastrophically across a
+    // large page with few/no actual <br> tags nearby; splitting is linear
+    // regardless of how the content is shaped.
+    const brParagraphs = cleaned
+      .split(/<br\s*\/?>/gi)
+      .map((segment) => stripTags(segment))
+      .filter((text) => text.length > 40 && !BOILERPLATE_PARAGRAPH_RE.test(text));
+    if (brParagraphs.join('').length > paragraphs.join('').length) paragraphs = brParagraphs;
+  }
+
   if (!paragraphs.length) return null;
   const joined = paragraphs.join('\n\n');
   return joined.slice(0, MAX_BODY_TEXT_CHARS);
