@@ -233,6 +233,22 @@ function hasForeignScriptBleed(text) {
   return typeof text === 'string' && FOREIGN_SCRIPT_PATTERN.test(text);
 }
 
+// who/what/amount/when/where/why/impact is a SINGLE-entity extraction —
+// production incident: a multi-company article (4 refiners, each with
+// their own contract/volume/date) correctly produced a detailed,
+// per-company summary (the single-entity slots don't limit `summary`,
+// which is the model's own free prose), but still got INSIGHT_FALLBACK,
+// because the model naturally left most of the 7 singular fact slots
+// "미확보" — there's no one "who"/"amount" for an article covering 4
+// companies — and countConfirmedFacts() alone can't tell "thin article,
+// nothing to reason from" apart from "fact-dense article, wrong-shaped
+// slots". A long, non-fallback summary is independent evidence that real
+// facts WERE extracted, even when they don't fit the singular slots, so
+// it's accepted as an alternate grounding signal alongside the facts
+// count — thin-article callers (resolveInsight(insight, facts) with no
+// summary argument) are unaffected, since undefined fails this check.
+const MIN_SUBSTANTIAL_SUMMARY_CHARS_FOR_INSIGHT = 150;
+
 // Insight is deliberately the model's own inference (implications, an
 // emerging trend, a point worth monitoring) — unlike buildFactualSummary,
 // there is no fact-only fallback to construct here, since a bare fact is
@@ -240,11 +256,12 @@ function hasForeignScriptBleed(text) {
 // inference from, or an inference that overreaches into an industry/macro
 // claim the article doesn't support, all resolve to the same honest
 // fallback rather than fabricating or keeping an unsupported statement.
-function resolveInsight(modelInsight, facts) {
+function resolveInsight(modelInsight, facts, summary) {
   const trimmed = typeof modelInsight === 'string' ? modelInsight.trim() : '';
   if (!trimmed) return INSIGHT_FALLBACK;
   if (hasForeignScriptBleed(trimmed)) return INSIGHT_FALLBACK;
-  if (countConfirmedFacts(facts) < MIN_CONFIRMED_FACTS_FOR_INSIGHT) return INSIGHT_FALLBACK;
+  const hasSubstantialSummary = typeof summary === 'string' && summary.length >= MIN_SUBSTANTIAL_SUMMARY_CHARS_FOR_INSIGHT;
+  if (countConfirmedFacts(facts) < MIN_CONFIRMED_FACTS_FOR_INSIGHT && !hasSubstantialSummary) return INSIGHT_FALLBACK;
   if (isUngroundedGeneralization(trimmed)) return INSIGHT_FALLBACK;
   return trimmed;
 }
@@ -303,7 +320,7 @@ function parseDraftResponse(raw, taxonomy) {
 
   const facts = Object.fromEntries(FACT_KEYS.map((key) => [key, factOrUnconfirmed(parsed[key])]));
   const summary = buildFactualSummary(facts, parsed.summary);
-  const insight = resolveInsight(parsed.insight, facts);
+  const insight = resolveInsight(parsed.insight, facts, summary);
   const keyTakeawayRaw = typeof parsed.key_takeaway === 'string' ? parsed.key_takeaway.trim() : '';
   const keyTakeaway = keyTakeawayRaw && !hasForeignScriptBleed(keyTakeawayRaw) ? keyTakeawayRaw : UNCONFIRMED;
 

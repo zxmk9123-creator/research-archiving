@@ -119,6 +119,25 @@ test('resolveInsight: a single confirmed fact is still not enough grounding for 
   assert.equal(resolveInsight('시장 경쟁이 심화될 것이다.', oneFact), INSIGHT_FALLBACK);
 });
 
+test('resolveInsight: a substantial multi-entity summary is accepted as grounding even when the singular fact slots are mostly 미확보', () => {
+  // Mirrors production item 941: a 4-refiner SAF-supply article. The
+  // singular who/what/amount slots can't represent 4 companies, so the
+  // model naturally left most "미확보" — but the summary itself (the
+  // model's own free prose, not slot-limited) is long and fact-dense.
+  const multiEntitySummary = 'GS칼텍스는 DHL 익스프레스와 1년간 순수 SAF 2000t 공급 계약을 체결했고, HD현대오일뱅크는 ANA에 SAF를 수출하며 대한항공 인천-고베 노선에 단독 공급한다. SK에너지는 캐세이퍼시픽과 내년까지 최소 2만t 공급 계약을 맺었고, 에쓰오일은 대한항공·아시아나항공·티웨이항공으로 공급처를 확대하고 있다.';
+  const insight = resolveInsight('원료 확보 경쟁이 공급사별 전략 차별화로 이어질 수 있다.', THIN_FACTS, multiEntitySummary);
+  assert.equal(insight, '원료 확보 경쟁이 공급사별 전략 차별화로 이어질 수 있다.');
+});
+
+test('resolveInsight: a short/placeholder summary does not unlock the substantial-summary exception', () => {
+  const shortSummary = '핵심 사실이 확인되지 않았습니다.';
+  assert.equal(resolveInsight('시장 경쟁이 심화될 것이다.', THIN_FACTS, shortSummary), INSIGHT_FALLBACK);
+});
+
+test('resolveInsight: callers that don\'t pass a summary (pre-existing call sites) keep the facts-only behavior unchanged', () => {
+  assert.equal(resolveInsight('시장 경쟁이 심화될 것이다.', THIN_FACTS), INSIGHT_FALLBACK);
+});
+
 test('resolveInsight: exactly the minimum number of confirmed facts is enough to keep the model\'s inference', () => {
   const twoFacts = { ...THIN_FACTS, what: '회사 A가 신제품을 출시했다', when: '2026-09-15' };
   const insight = '이는 관련 시장의 경쟁이 심화되는 신호로 해석될 수 있다.';
