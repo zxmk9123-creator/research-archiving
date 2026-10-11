@@ -1546,23 +1546,16 @@ async function renderReview() {
       };
       return;
     }
-    // Production bug: a failed fetch here (transient 502/503, the server
-    // momentarily overloaded, etc.) threw unhandled — #review-body kept
-    // showing whatever draft was on screen before (already published, in
-    // next/prev's case), with no error and the "자료 발행" button still
-    // live. Clicking it again looked like "발행했는데 안 넘어간다": the
-    // click actually worked, but the screen never moved on to show it.
-    let item;
+    // Production bug: an exception anywhere in this whole function — the
+    // fetch (transient 502/503, server momentarily overloaded) or
+    // anything in the rendering/event-binding below it — threw unhandled,
+    // leaving #review-body showing whatever draft was on screen before
+    // (already published, in next/prev's case), with no error. Publishing
+    // genuinely worked; the screen just never moved on to show the next
+    // one. Wrapping the whole thing, not just the fetch, means ANY such
+    // failure now surfaces instead of failing silently partway through.
     try {
-      item = await api(`/items/${id}`);
-    } catch (err) {
-      document.getElementById('review-body').innerHTML = `
-        <p class="meta">다음 자료를 불러오지 못했습니다: ${escapeHtml(err.message)}</p>
-        <button class="btn" id="d-load-retry-btn" type="button">다시 시도</button>
-      `;
-      document.getElementById('d-load-retry-btn').onclick = () => loadDraft(id);
-      return;
-    }
+    const item = await api(`/items/${id}`);
 
     function renderAiBox() {
       if (item.ai_status === 'pending') {
@@ -1806,7 +1799,13 @@ async function renderReview() {
     // were after every single publish.
     function advancePastCurrentDraft() {
       const idx = drafts.findIndex((d) => String(d.id) === String(id));
-      if (idx !== -1) drafts.splice(idx, 1);
+      // idx === -1 shouldn't happen (this item came from `drafts` in the
+      // first place) but was previously a silent no-op if it ever did —
+      // selectDraftAt(-1) fails its own bounds check and returns without
+      // the screen changing at all, no error, same symptom as the bug
+      // above. A full reload is the safe fallback instead of a dead end.
+      if (idx === -1) { renderReview(); return; }
+      drafts.splice(idx, 1);
       const opt = select.querySelector(`option[value="${id}"]`);
       if (opt) opt.remove();
       if (!drafts.length) {
@@ -1814,6 +1813,14 @@ async function renderReview() {
         return;
       }
       selectDraftAt(Math.min(idx, drafts.length - 1));
+    }
+    } catch (err) {
+      console.error('Review tab: failed to load/render draft', id, err);
+      document.getElementById('review-body').innerHTML = `
+        <p class="meta">자료를 불러오지 못했습니다: ${escapeHtml(err.message)}</p>
+        <button class="btn" id="d-load-retry-btn" type="button">다시 시도</button>
+      `;
+      document.getElementById('d-load-retry-btn').onclick = () => loadDraft(id);
     }
   }
 
