@@ -25,6 +25,49 @@ function requireNonEmptyText(text, providerLabel) {
   throw markFallback(new Error('AI provider returned an empty response'), 'empty_response');
 }
 
+// Production incident: an AI search answer came back as the same ~40-char
+// chunk ("Indices: palm oil, soybean oil, sunflower oil.") repeated
+// hundreds of times until max_tokens cut it off — a known failure mode of
+// the smaller/weaker free-tier models FreeLLMAPI's rotation can land on,
+// with no repetition penalty configured on our side to guard against it.
+// requireNonEmptyText doesn't catch this (the text is very much
+// non-empty), so this scans for a long substring repeating immediately,
+// several times in a row — something a well-formed answer never does —
+// and treats it the same as any other provider failure rather than
+// letting the garbage reach the user.
+// The repeating unit's length isn't known in advance (it's whatever
+// sentence/phrase the model got stuck on), so this tries a range of
+// candidate unit lengths rather than assuming one fixed window — a fixed
+// window only catches a repeat whose actual length happens to be a
+// multiple of it. Scoped to the first part of the text (where a
+// degenerating response starts going wrong) and to a bounded min/max unit
+// length, to keep this cheap enough to run on every provider response.
+const REPETITION_MIN_UNIT_CHARS = 15;
+const REPETITION_MAX_UNIT_CHARS = 150;
+const REPETITION_MIN_REPEATS = 3;
+const REPETITION_SCAN_CHARS = 300;
+function hasDegenerateRepetition(text) {
+  const scanLimit = Math.min(REPETITION_SCAN_CHARS, text.length);
+  for (let i = 0; i < scanLimit; i++) {
+    for (let period = REPETITION_MIN_UNIT_CHARS; period <= REPETITION_MAX_UNIT_CHARS; period++) {
+      if (i + period * REPETITION_MIN_REPEATS > text.length) break;
+      const unit = text.slice(i, i + period);
+      let matched = true;
+      for (let r = 1; r < REPETITION_MIN_REPEATS; r++) {
+        if (text.slice(i + period * r, i + period * (r + 1)) !== unit) { matched = false; break; }
+      }
+      if (matched) return true;
+    }
+  }
+  return false;
+}
+
+function requireNonDegenerateText(text, providerLabel) {
+  if (!hasDegenerateRepetition(text)) return text;
+  console.error(`${providerLabel} returned degenerate repeated output (length=${text.length})`);
+  throw markFallback(new Error('AI provider returned degenerate repeated output'), 'degenerate_output');
+}
+
 // Wraps a provider's fetch call and classifies the failure:
 //   429            -> 'rate_limit'   (transient)
 //   5xx            -> 'server_error' (transient)
@@ -106,6 +149,7 @@ async function callFreeLLMAPI({ system, user }) {
   const data = await res.json();
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
   requireNonEmptyText(text, 'freellmapi');
+  requireNonDegenerateText(text, 'freellmapi');
   return text;
 }
 
@@ -158,5 +202,7 @@ module.exports = {
   runProviderChain,
   buildProviderChain,
   requireNonEmptyText,
+  hasDegenerateRepetition,
+  requireNonDegenerateText,
   FREELLMAPI_TIMEOUT_MS,
 };

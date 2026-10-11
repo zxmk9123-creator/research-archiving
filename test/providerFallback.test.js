@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runProviderChain, buildProviderChain, requireNonEmptyText, callProviderWithFallback, callFreeLLMAPI, FREELLMAPI_TIMEOUT_MS } = require('../server/lib/ai/provider');
+const { runProviderChain, buildProviderChain, requireNonEmptyText, hasDegenerateRepetition, requireNonDegenerateText, callProviderWithFallback, callFreeLLMAPI, FREELLMAPI_TIMEOUT_MS } = require('../server/lib/ai/provider');
 
 function transientError(message) {
   const err = new Error(message);
@@ -49,6 +49,61 @@ test('requireNonEmptyText: throws a transient error for empty/null/undefined con
 
 test('requireNonEmptyText: returns the text unchanged when non-empty', () => {
   assert.equal(requireNonEmptyText('hello', 'freellmapi'), 'hello');
+});
+
+// Production incident: an AI search answer came back as the same ~40-char
+// chunk repeated hundreds of times until max_tokens cut it off — a free-
+// tier model degenerating into a repetition loop, not an empty response
+// (requireNonEmptyText alone doesn't catch it).
+
+test('hasDegenerateRepetition: flags a chunk repeating 3+ times in a row', () => {
+  const chunk = 'Indices: palm oil, soybean oil, sunflower oil.'; // 48 chars
+  assert.equal(hasDegenerateRepetition(chunk.repeat(5)), true);
+  assert.equal(hasDegenerateRepetition(chunk.repeat(3)), true);
+});
+
+test('hasDegenerateRepetition: does not flag a normal, non-repetitive answer', () => {
+  const normal = '팜유 가격은 인도네시아 수출 정책 변화로 상승했습니다. 수출세 인상이 아시아 시장 전반의 공급 비용에 영향을 미칠 것으로 보입니다.';
+  assert.equal(hasDegenerateRepetition(normal), false);
+  assert.equal(hasDegenerateRepetition('짧은 답변'), false);
+  assert.equal(hasDegenerateRepetition(''), false);
+});
+
+test('hasDegenerateRepetition: does not false-positive on legitimately repeated short phrases (below the window size)', () => {
+  // "매우 매우 매우" style emphasis, or short list separators, repeat a
+  // SHORT fragment — only a long (40+ char) chunk repeating is the tell.
+  assert.equal(hasDegenerateRepetition('매우 매우 매우 매우 매우 매우 매우 중요한 수치입니다.'), false);
+});
+
+test('requireNonDegenerateText: throws a transient, classified error for degenerate output', () => {
+  const garbage = 'Indices: palm oil, soybean oil, sunflower oil.'.repeat(10);
+  assert.throws(
+    () => requireNonDegenerateText(garbage, 'freellmapi'),
+    (err) => err.transient === true && err.failureType === 'degenerate_output'
+  );
+});
+
+test('requireNonDegenerateText: returns the text unchanged when not degenerate', () => {
+  assert.equal(requireNonDegenerateText('hello', 'freellmapi'), 'hello');
+});
+
+test('callProviderWithFallback: degenerate repeated output throws instead of returning garbage to the caller', async () => {
+  const garbage = 'Indices: palm oil, soybean oil, sunflower oil.'.repeat(10);
+  const restore = mockFetchByUrl([
+    ['router.example.com', async () => jsonResponse(200, { choices: [{ message: { content: garbage } }] })],
+  ]);
+  try {
+    process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+    process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
+    await assert.rejects(
+      () => callProviderWithFallback({ system: 's', user: 'u' }),
+      (err) => err.failureType === 'degenerate_output'
+    );
+  } finally {
+    restore();
+    delete process.env.FREELLMAPI_API_KEY;
+    delete process.env.FREELLMAPI_BASE_URL;
+  }
 });
 
 test('runProviderChain: throws a clear error when no provider is configured', async () => {
