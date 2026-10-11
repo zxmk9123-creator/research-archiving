@@ -636,6 +636,11 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
   padding-top: var(--sp-2); border-top: 1px solid var(--border);
 }
 .archive-month-divider:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+/* The sticky .topbar otherwise covers whatever lands at the very top of
+   the viewport when the month sidebar scrolls a divider into view —
+   this reserves space above it so the divider (and the card row right
+   under it) land below the topbar instead of behind it. */
+.archive-month-divider { scroll-margin-top: 76px; }
 
 /* Year-month jump sidebar — click a month to scroll straight to its
    divider below, same idea as ChatGPT's conversation-history-by-date
@@ -645,9 +650,12 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .archive-layout { display: flex; align-items: flex-start; gap: var(--sp-5); }
 .archive-main { flex: 1 1 auto; min-width: 0; }
 .archive-month-nav {
-  flex: 0 0 150px; position: sticky; top: var(--sp-4);
+  /* top/max-height both account for the sticky .topbar above — without
+     it the sidebar's own top items sit hidden behind the topbar instead
+     of just below it. */
+  flex: 0 0 150px; position: sticky; top: 76px;
   display: flex; flex-direction: column; gap: 2px;
-  max-height: calc(100vh - var(--sp-8)); overflow-y: auto;
+  max-height: calc(100vh - 76px - var(--sp-4)); overflow-y: auto;
   border-left: 1px solid var(--border); padding-left: var(--sp-3);
 }
 .archive-month-nav-item {
