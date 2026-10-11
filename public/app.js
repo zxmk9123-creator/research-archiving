@@ -436,7 +436,7 @@ function aiSearchHtml() {
       <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off" required>
       <button type="submit" class="btn">검색</button>
     </form>
-    <div id="ai-search-result"></div>
+    <div class="ai-search-result" id="ai-search-result"></div>
   </section>`;
 }
 
