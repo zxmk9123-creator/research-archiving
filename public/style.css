@@ -273,6 +273,14 @@ p { margin: 0; }
 .home-module-arrow { color: var(--text-tertiary); font-size: 20px; line-height: 1; }
 .home-module-header:hover .home-module-arrow { color: var(--action); }
 
+/* Drag-and-drop reordering handle (app.js initHomeCarouselDragReorder) —
+   only present on a theme root's reorderable child carousels, never on
+   the root headers themselves. cursor:grab hints the whole module is the
+   drag source, not just this icon. */
+.home-module[draggable="true"] { cursor: grab; }
+.home-module[draggable="true"].is-dragging { opacity: .4; }
+.home-module-drag-handle { color: var(--text-tertiary); font-size: 16px; line-height: 1; cursor: grab; }
+
 /* Home theme roots (식용유지/비식용유지): a bigger clickable heading than
    a child theme's .home-module-header, grouping that root's child-theme
    carousels underneath. The children themselves are plain .home-module

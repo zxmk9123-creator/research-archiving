@@ -240,13 +240,19 @@ function initHomeCarousel(containerEl) {
 // heading/entry area of each module is clickable (navigates to the
 // dedicated full-list page); the grid itself reuses the existing
 // itemCard()/Detail-navigation component unchanged.
-function homeCarouselModule(heading, moduleItems, targetHash, importantIds, savedIds) {
+function homeCarouselModule(heading, moduleItems, targetHash, importantIds, savedIds, moduleAttrs = '') {
   const slides = chunk(moduleItems, 3);
+  // moduleAttrs carries the drag-reorder wiring (draggable + data-drag-*)
+  // when this module is one of a theme root's reorderable children —
+  // empty string elsewhere, so the module is otherwise unaffected.
+  const dragHandleHtml = moduleAttrs
+    ? '<span class="home-module-drag-handle" aria-hidden="true" title="드래그해서 순서 변경" onclick="event.stopPropagation()">⠿</span>'
+    : '';
   const headerHtml = `<div class="home-module-header" onclick="location.hash='${targetHash}'">
-    <h2>${heading}</h2><span class="home-module-arrow">›</span>
+    ${dragHandleHtml}<h2>${heading}</h2><span class="home-module-arrow">›</span>
   </div>`;
   if (!slides.length) {
-    return `<div class="home-module">${headerHtml}<p class="meta">표시할 자료가 없습니다.</p></div>`;
+    return `<div class="home-module" ${moduleAttrs}>${headerHtml}<p class="meta">표시할 자료가 없습니다.</p></div>`;
   }
   // One dot per 3-card slide group, for direct navigation — shown whenever
   // there's more than one slide to paginate. No upper cap: a sector with a
@@ -310,9 +316,12 @@ function isWithinPastMonth(publishedAt) {
 // each reusing homeCarouselModule() unchanged so card/detail behavior and
 // visual language stay exactly as they are elsewhere on Home.
 function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
-  const children = byParent.get(root.id) || [];
+  const children = applyHomeCarouselOrder(root.id, byParent.get(root.id) || []);
   const childModulesHtml = children
-    .map((child) => homeCarouselModule(child.name, itemsForSector(items, child.id), `#/archive?sector=${child.id}`, importantIds, savedIds))
+    .map((child) => homeCarouselModule(
+      child.name, itemsForSector(items, child.id), `#/archive?sector=${child.id}`, importantIds, savedIds,
+      `draggable="true" data-drag-sector="${child.id}"`
+    ))
     .join('');
   // Items are tagged with a leaf/child sector, essentially never the root
   // itself — the root link must filter on the whole subtree (root +
@@ -323,8 +332,80 @@ function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
     <div class="home-theme-root-header" onclick="location.hash='#/archive?sector=${subtreeIds.join(',')}'">
       <h2>${root.name}</h2><span class="home-module-arrow">›</span>
     </div>
-    <div class="home-theme-children">${childModulesHtml || '<p class="meta">표시할 테마가 없습니다.</p>'}</div>
+    <div class="home-theme-children" data-drag-root="${root.id}">${childModulesHtml || '<p class="meta">표시할 테마가 없습니다.</p>'}</div>
   </section>`;
+}
+
+// Per-browser carousel order (localStorage, same convention as
+// personalSaves/onboarding flags) — a display preference, not account
+// data, so it needs no backend or auth. Keyed by theme-root id since the
+// two roots' children are independent orderings.
+const HOME_CAROUSEL_ORDER_KEY = 'ra_home_carousel_order';
+
+function getHomeCarouselOrderMap() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HOME_CAROUSEL_ORDER_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function saveHomeCarouselOrder(rootId, orderedSectorIds) {
+  const map = getHomeCarouselOrderMap();
+  map[rootId] = orderedSectorIds;
+  try {
+    localStorage.setItem(HOME_CAROUSEL_ORDER_KEY, JSON.stringify(map));
+  } catch (err) { /* storage unavailable (private mode, quota) — order just resets next load */ }
+}
+
+// Applies this browser's saved order, if any, to a root's child sectors.
+// A child not present in the saved order (e.g. a sector added after the
+// user last reordered) is appended at the end rather than hidden — the
+// saved order is a preference over what exists today, never a filter.
+function applyHomeCarouselOrder(rootId, children) {
+  const saved = getHomeCarouselOrderMap()[rootId];
+  if (!Array.isArray(saved) || !saved.length) return children;
+  const byId = new Map(children.map((c) => [c.id, c]));
+  const ordered = saved.map((id) => byId.get(id)).filter(Boolean);
+  const orderedIds = new Set(ordered.map((c) => c.id));
+  return [...ordered, ...children.filter((c) => !orderedIds.has(c.id))];
+}
+
+// Drag-and-drop reordering of each theme root's carousels — native HTML5
+// drag/drop (no library), scoped per .home-theme-children container so
+// dragging within 식용유지 never reorders into 비식용유지's list. Saves
+// the new order on drop; the displayed order is only ever re-derived from
+// localStorage on the next renderHome(), never mutated in place beyond
+// the live DOM move during the drag itself.
+function initHomeCarouselDragReorder() {
+  document.querySelectorAll('.home-theme-children[data-drag-root]').forEach((container) => {
+    const rootId = container.dataset.dragRoot;
+    let draggedEl = null;
+    container.querySelectorAll('.home-module[data-drag-sector]').forEach((mod) => {
+      mod.addEventListener('dragstart', (e) => {
+        draggedEl = mod;
+        mod.classList.add('is-dragging');
+        // Firefox refuses to start a drag unless dataTransfer carries
+        // something — the payload itself is never read on drop.
+        if (e.dataTransfer) e.dataTransfer.setData('text/plain', '');
+      });
+      mod.addEventListener('dragend', () => {
+        mod.classList.remove('is-dragging');
+        draggedEl = null;
+        const orderedIds = [...container.querySelectorAll('.home-module[data-drag-sector]')]
+          .map((el) => Number(el.dataset.dragSector));
+        saveHomeCarouselOrder(rootId, orderedIds);
+      });
+      mod.addEventListener('dragover', (e) => {
+        if (!draggedEl || draggedEl === mod) return;
+        e.preventDefault();
+        const rect = mod.getBoundingClientRect();
+        const insertBefore = (e.clientY - rect.top) < rect.height / 2;
+        container.insertBefore(draggedEl, insertBefore ? mod : mod.nextSibling);
+      });
+    });
+  });
 }
 
 // Minimum conversation context for AI Research Search follow-ups — kept
@@ -512,6 +593,7 @@ async function renderHome() {
   `;
 
   document.querySelectorAll('.home-carousel').forEach((el) => initHomeCarousel(el));
+  initHomeCarouselDragReorder();
   bindAiSearchForm();
 }
 
