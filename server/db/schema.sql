@@ -796,6 +796,19 @@ SELECT v.name, p.id FROM (VALUES ('UCO'),('UCOME'),('SAF'),('Tallow'),('FAME'),(
 CROSS JOIN (SELECT id FROM sectors WHERE name='비식용유지' AND parent_id IS NULL ORDER BY id LIMIT 1) p
 ON CONFLICT DO NOTHING;
 
+-- Seed: 기타 root — a third MECE branch for articles that are genuinely
+-- about oils & fats markets (물류/운임, 국제 정세) but don't fit under
+-- 식용유지 or 비식용유지's commodity-based split. Not a Home theme (Home's
+-- HOME_THEME_ROOT_NAMES in app.js stays at the original two) — it only
+-- needs to exist as a root sector for it to appear in 자료 tab's sector
+-- filter tree, which already lists every root sector unfiltered.
+INSERT INTO sectors (name, parent_id) VALUES ('기타', NULL) ON CONFLICT DO NOTHING;
+
+INSERT INTO sectors (name, parent_id)
+SELECT v.name, p.id FROM (VALUES ('물류'),('운임료'),('국제 정세')) AS v(name)
+CROSS JOIN (SELECT id FROM sectors WHERE name='기타' AND parent_id IS NULL ORDER BY id LIMIT 1) p
+ON CONFLICT DO NOTHING;
+
 -- Seed: flat usage tags
 INSERT INTO usages (name) VALUES
   ('NBO 작성'), ('업체 프로파일'), ('시장 전망'), ('가격·물류'), ('규제 대응')
