@@ -703,6 +703,18 @@ async function renderArchive(query = {}) {
         ${view === 'saved' ? '아직 저장한 자료가 없습니다.' : view === 'team' ? '아직 팀 Pick이 없습니다.' : hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
       </div>`;
 
+  // Year-month jump sidebar (ChatGPT's conversation-history-by-date
+  // sidebar as the reference) — computed once and shared with the
+  // month-divider list below it, so the two never fall out of sync.
+  const monthGroups = groupByMonth(visibleItems);
+  const monthNavHtml = monthGroups.length
+    ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthGroups.map((g) => `
+        <button type="button" class="archive-month-nav-item" data-jump="archive-month-${g.key}">
+          <span class="archive-month-nav-label">${g.label}</span>
+          <span class="archive-month-nav-count">${g.items.length}</span>
+        </button>`).join('')}</nav>`
+    : '';
+
   app.innerHTML = `
     <h1>자료</h1>
     <p class="page-lede">발행된 유지 시장 리서치를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있습니다.</p>
@@ -737,16 +749,25 @@ async function renderArchive(query = {}) {
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-header"><h2>자료</h2><span class="count">${visibleItems.length}개</span></div>
-        ${emptyState}
-        ${groupByMonth(visibleItems).map((g) => `
-          <div class="archive-month-divider">${g.label}</div>
-          <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
-        `).join('')}
+      <div class="archive-layout">
+        ${monthNavHtml}
+        <div class="section archive-main">
+          <div class="section-header"><h2>자료</h2><span class="count">${visibleItems.length}개</span></div>
+          ${emptyState}
+          ${monthGroups.map((g) => `
+            <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
+            <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
+          `).join('')}
+        </div>
       </div>
     </div>
   `;
+
+  document.querySelectorAll('.archive-month-nav-item').forEach((btn) => {
+    btn.onclick = () => {
+      document.getElementById(btn.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  });
 
   const treeEl = document.getElementById('sector-tree');
   const chipsEl = document.getElementById('sector-chips');
@@ -852,7 +873,11 @@ function groupByMonth(items) {
     const valid = d && !isNaN(d.getTime());
     const key = valid ? `${d.getFullYear()}-${d.getMonth()}` : 'unknown';
     if (key !== currentKey) {
-      groups.push({ label: valid ? `${d.getFullYear()}년 ${d.getMonth() + 1}월` : '날짜 미확인', items: [] });
+      // `key` doubles as this group's divider element id (prefixed
+      // archive-month- below) so the year-month sidebar can scroll straight
+      // to it — kept on the group itself rather than re-derived from the
+      // label string, which isn't a safe DOM id (contains 년/월/공백).
+      groups.push({ key, label: valid ? `${d.getFullYear()}년 ${d.getMonth() + 1}월` : '날짜 미확인', items: [] });
       currentKey = key;
     }
     groups[groups.length - 1].items.push(it);
