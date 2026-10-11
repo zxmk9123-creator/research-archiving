@@ -417,8 +417,10 @@ test('SYSTEM_PROMPT: encodes the ordered eligibility criteria and explicitly dis
   assert.match(SYSTEM_PROMPT, /do not use "has specific facts\/figures" by itself as the test/i);
 });
 
-test('SYSTEM_PROMPT: summary and insight rules are unchanged from before this refinement', () => {
-  assert.match(SYSTEM_PROMPT, /a natural, flowing 1-3 sentence Korean summary containing ONLY the article's directly-stated facts/);
+test('SYSTEM_PROMPT: summary rule scales length with the article and requires a per-company/entity breakdown, not a single vague aggregate line', () => {
+  assert.match(SYSTEM_PROMPT, /a natural, flowing Korean summary containing ONLY the article's directly-stated facts/);
+  assert.match(SYSTEM_PROMPT, /MUST give each of them its own sentence or clause/);
+  assert.match(SYSTEM_PROMPT, /NEVER compress multiple companies' distinct deals into one vague aggregate line/i);
   assert.match(SYSTEM_PROMPT, /a separate 1-2 sentence Korean field for what goes BEYOND the plain facts/);
 });
 
