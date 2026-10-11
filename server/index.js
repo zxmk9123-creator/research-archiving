@@ -14,8 +14,20 @@ app.use('/api/search', require('./routes/search'));
 app.use('/api/picks', require('./routes/picks'));
 app.use('/api', require('./routes/taxonomy'));
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Root cause of several "the deploy went out but the browser still shows
+// the old UI" reports this session: index.html/app.js/style.css are
+// served under fixed filenames with no cache-busting query/hash, and
+// express.static's default (no maxAge, no explicit Cache-Control) leaves
+// a returning browser free to serve its own cached copy without even
+// revalidating — a real redeploy can sit invisible behind a stale tab
+// indefinitely. `no-cache` forces revalidation (an If-None-Match round
+// trip) on every load instead, so a changed file is always served fresh
+// while an unchanged one still gets a cheap 304.
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
