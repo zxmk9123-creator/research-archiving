@@ -40,10 +40,20 @@ setInterval(() => {
   runDueCollections().catch((err) => console.error('collection run failed', err));
 }, COLLECTION_CHECK_INTERVAL_MS);
 
-// Separate Daily Discovery job: checked on the same hourly cadence (so the
-// 08:00 KST window is never missed regardless of container timezone), but
-// entirely independent of the Research Sources scheduler above — it never
-// changes what that scheduler runs or when.
+// Separate Daily Discovery job: intended to be checked on the same hourly
+// cadence so the 08:00 KST window is never missed regardless of container
+// timezone — but setInterval alone only ticks at container-boot-time
+// offsets (e.g. a 19:20 KST boot ticks at 20:20, 21:20, ...), never
+// wall-clock-aligned. A redeploy (routine on this platform — happens on
+// every push) resets that offset, so a boot that never lands its hourly
+// tick inside 08:00-08:59 KST skips that day's run entirely until the
+// next boot's offset happens to land there (confirmed in production:
+// scheduler_jobs showed daily_discovery hadn't run in over a day because
+// of exactly this). Calling it once immediately on startup — in addition
+// to the interval — closes that gap: any redeploy that happens to land
+// during or after that day's window catches it up right away instead of
+// waiting on an arbitrary future tick.
+maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run failed', err));
 setInterval(() => {
   maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run failed', err));
 }, COLLECTION_CHECK_INTERVAL_MS);
