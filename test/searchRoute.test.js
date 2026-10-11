@@ -306,6 +306,47 @@ test('POST /: retrieval failures also get exactly one terminal ai_search_logs ro
   }
 });
 
+test('extractCitedIndices: returns distinct in-range indices in first-appearance order', () => {
+  assert.deepEqual(searchRouter.extractCitedIndices('첫 문장 [3]. 둘째 문장 [1][3]. 셋째 [9].', 5), [3, 1]);
+  assert.deepEqual(searchRouter.extractCitedIndices('근거 없는 답변입니다.', 5), []);
+  // [9] is out of range (only 5 candidates exist) and must be ignored, not treated as cited.
+  assert.deepEqual(searchRouter.extractCitedIndices('[9]만 있는 답변', 5), []);
+});
+
+test('remapCitationMarkers: rewrites markers to the cited set\'s own 1..k order, dropping anything uncited', () => {
+  const text = '첫 문장 [3]. 둘째 문장 [1][3]. 안쓴 자료 [9].';
+  const remapped = searchRouter.remapCitationMarkers(text, [3, 1]); // 3 -> 1, 1 -> 2
+  assert.equal(remapped, '첫 문장 [1]. 둘째 문장 [2][1]. 안쓴 자료 .');
+});
+
+test('POST /: sources are narrowed to only the candidates the model actually cited with [N]', async () => {
+  const ROW_A = { ...SAMPLE_ROW, id: 7, title: 'A' };
+  const ROW_B = { ...SAMPLE_ROW, id: 8, title: 'B' };
+  const { restore } = mockPool([
+    ['FROM items i', () => ({ rows: [ROW_A, ROW_B] })],
+  ]);
+  // Only 자료 2 (ROW_B) is actually cited — 자료 1 (ROW_A) was retrieved but
+  // never used, so it must not appear in `sources` or the rendered answer.
+  const restoreProvider = mockProvider(async () => ({ text: 'B에 근거한 문장입니다. [2]', provider: 'freellmapi' }));
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 가격이 왜 올랐어?' }),
+      });
+      const body = await res.json();
+      assert.equal(body.sources.length, 1);
+      assert.equal(body.sources[0].id, ROW_B.id);
+      // The marker is remapped to [1] to match the single remaining source.
+      assert.match(body.answer, /\[1\]/);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
 test('questionFingerprint: one-way hash, stable for the same question, different for different questions', () => {
   const a = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
   const b = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
@@ -315,13 +356,11 @@ test('questionFingerprint: one-way hash, stable for the same question, different
   assert.ok(!a.includes('팜유'));
 });
 
-test('SYSTEM_PROMPT instructs the model never to emit citation markers — the app owns citations', () => {
+test('SYSTEM_PROMPT requires a [N] citation marker on every claim, for per-claim traceability', () => {
   const prompt = searchRouter.SYSTEM_PROMPT;
-  assert.match(prompt, /Do NOT output any citation marker/);
-  assert.match(prompt, /\[1\]/); // named as a forbidden example, not an instruction to use it
-  assert.match(prompt, /no \[1\], \[7\], \(1\)/);
-  // Must not instruct the model to cite by bracket/number (the pre-redesign prompt did).
-  assert.ok(!/refer to them by their \[번호\]/.test(prompt));
+  assert.match(prompt, /Citations are REQUIRED/);
+  assert.match(prompt, /\[N\]/);
+  assert.match(prompt, /marked with its \[N\] citation/);
 });
 
 test('buildMaterialsBlock labels retrieved materials without bracket-style numbering (so the model has no bracket syntax to copy)', () => {

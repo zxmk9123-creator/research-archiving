@@ -443,37 +443,43 @@ function aiSearchHtml() {
 // Controlled Markdown-ish rendering for the model's answer — never raw
 // innerHTML of model text. escapeHtml() runs on every text fragment before
 // any tag is added, so the model cannot inject HTML of its own; the only
-// tags on the page come from this file's own template strings. Also strips
-// any citation marker defensively (the system prompt forbids them, but a
-// model can still slip one in) so a stray [1]/(1) never reaches the page.
-function renderInlineAnswerText(line) {
+// tags on the page come from this file's own template strings.
+// `sources` (server/routes/search.js's `sources` array, already remapped
+// to [1..k] against the model's own citation markers) turns each [N] into
+// a clickable link straight to that source's Detail page — per-claim
+// traceability, not just a flat source list at the end of the answer.
+// An out-of-range [N] (nothing at that position) is dropped rather than
+// left as a dead marker.
+function renderInlineAnswerText(line, sources) {
   const escaped = escapeHtml(line);
-  return escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const bolded = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return bolded.replace(/\[(\d{1,2})\]/g, (whole, digits) => {
+    const src = sources && sources[Number(digits) - 1];
+    if (!src) return '';
+    return `<a class="ai-citation" href="#/detail/${src.id}" title="${escapeHtml(src.title)}">[${digits}]</a>`;
+  });
 }
 
-function renderAnswerBlock(block) {
+function renderAnswerBlock(block, sources) {
   const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return '';
   const headingMatch = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
   if (headingMatch) {
-    return `<h3 class="ai-answer-heading">${renderInlineAnswerText(headingMatch[1])}</h3>`;
+    return `<h3 class="ai-answer-heading">${renderInlineAnswerText(headingMatch[1], sources)}</h3>`;
   }
   if (lines.every((l) => /^[-•]\s+/.test(l))) {
-    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-•]\s+/, ''))}</li>`).join('')}</ul>`;
+    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
   }
   if (lines.every((l) => /^\d+[.)]\s+/.test(l))) {
-    return `<ol class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`;
+    return `<ol class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^\d+[.)]\s+/, ''), sources)}</li>`).join('')}</ol>`;
   }
-  return `<p class="ai-answer-p">${lines.map(renderInlineAnswerText).join('<br>')}</p>`;
+  return `<p class="ai-answer-p">${lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
 }
 
-function renderAnswerHtml(rawAnswer) {
-  const stripped = String(rawAnswer || '')
-    .replace(/\[\d{1,2}\]/g, '')
-    .replace(/\(\d{1,2}\)/g, '')
-    .trim();
+function renderAnswerHtml(rawAnswer, sources) {
+  const stripped = String(rawAnswer || '').trim();
   const blocks = stripped.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
-  return `<div class="ai-answer">${blocks.map(renderAnswerBlock).join('')}</div>`;
+  return `<div class="ai-answer">${blocks.map((b) => renderAnswerBlock(b, sources)).join('')}</div>`;
 }
 
 // Compact citation chips — title/link indicator only, no dates/URLs/
@@ -491,12 +497,17 @@ function renderAnswerHtml(rawAnswer) {
 // queries it can be a long internal query description rather than a
 // publisher name. The field itself is untouched server-side (still part
 // of the API response) — this is a display-only change.
+// `s` here is positioned so its index+1 matches the [N] markers
+// renderInlineAnswerText() just linked inline — the leading number chip
+// is the same [N], so a reader can match an inline citation back to this
+// list (or just click the inline [N] itself) without guessing.
 function aiSearchSourcesHtml(sources) {
   if (!sources || !sources.length) return '';
   return `<div class="ai-search-sources">
     <div class="ai-search-sources-label">SOURCES · ${sources.length}</div>
-    <div class="ai-source-chips">${sources.map((s) => `
+    <div class="ai-source-chips">${sources.map((s, i) => `
       <a class="ai-source-chip" href="#/detail/${s.id}" title="${escapeHtml(s.title)}">
+        <span class="ai-source-chip-num">[${i + 1}]</span>
         <span class="ai-source-chip-title">${escapeHtml(s.title)}</span>
         <span class="ai-source-chip-link" aria-hidden="true">↗</span>
       </a>`).join('')}</div>
@@ -573,7 +584,7 @@ function bindAiSearchForm() {
       aiSearchHistory.push({ role: 'user', content: question });
       aiSearchHistory.push({ role: 'assistant', content: body.answer });
       bodyEl.innerHTML = `
-        ${renderAnswerHtml(body.answer)}
+        ${renderAnswerHtml(body.answer, body.sources)}
         ${aiSearchSourcesHtml(body.sources)}
       `;
       aiSearchTurnsHtml.push(turnEl.outerHTML);

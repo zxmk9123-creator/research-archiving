@@ -248,6 +248,15 @@ p { margin: 0; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ai-source-chip-link { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); }
+.ai-source-chip-num { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--action); }
+
+/* Inline per-claim citation link — the same [N] rendered next to the
+   sentence it backs, matching the SOURCES chip of the same number above. */
+.ai-citation {
+  font-size: 11px; font-weight: 700; color: var(--action); text-decoration: none;
+  margin: 0 1px; vertical-align: super;
+}
+.ai-citation:hover, .ai-citation:focus-visible { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-search.is-searching::before { animation: none; opacity: .6; }

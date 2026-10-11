@@ -115,20 +115,24 @@ async function retrieveCandidates(question, history) {
   return rows;
 }
 
-// The application owns citations (see the `sources` array built from real
-// DB rows below) — the model must never emit its own citation markers,
-// since those can't be guaranteed to map back to a real record. Light
-// Markdown is still allowed so the client's controlled renderer can turn it
-// into real headings/bold/lists instead of a wall of plain text.
+// Per-claim traceability: the model must mark, after every sentence that
+// states a fact, which numbered "자료 N" it came from (e.g. "...상승했습니다.
+// [1]"). The application never trusts the model's prose alone to decide
+// which sources get shown — extractCitedIndices() below re-derives the
+// actual cited set straight from these markers, and only those candidates
+// become `sources`; a candidate the model never leaned on never appears as
+// "evidence" for an answer that didn't use it. Markers for an out-of-range
+// number (hallucinated) are stripped, never trusted.
 const SYSTEM_PROMPT = `You are the AI Research Search assistant for the Oil&Fat Research Center, a Korean oils & fats (유지) market intelligence archive.
 Answer the user's question using ONLY the "Research Center materials" supplied in the user message below — never your own outside knowledge, never invented facts, never invented sources or URLs.
 Formatting:
 - Light Markdown is fine for readability: **bold** for key terms/figures, "- " for a bullet list, "1. " for a numbered list, and a short "#" line for a section heading when the answer has multiple parts.
-- Do NOT output any citation marker — no [1], [7], (1), footnote-style references, Markdown links, or raw URLs. The application lists the sources separately; never cite them yourself, by number or otherwise.
+- Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
+- Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
 - If the supplied materials do not contain enough information to answer, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
-- Every factual claim must be grounded in the supplied materials, referred to in plain language (e.g. "관련 자료에 따르면") — never by a number, bracket, or link.
-- Clearly separate stated evidence from your own interpretation/inference; phrase inference as such (e.g. "~로 추정됩니다", "~일 가능성이 있습니다"), never as a reported fact.
+- Every factual claim must be grounded in the supplied materials and marked with its [N] citation — never stated as fact without one.
+- Clearly separate stated evidence from your own interpretation/inference; phrase inference as such (e.g. "~로 추정됩니다", "~일 가능성이 있습니다"), never as a reported fact. An inference sentence may still carry a [N] if it's based on a specific material.
 - Be concise and research-oriented — no greetings, no conversational filler, no restating the question.
 - If earlier conversation turns are given, treat them as context for a follow-up question, but still ground every claim only in the materials given now.
 - Respond in Korean.`;
@@ -153,6 +157,39 @@ function buildHistoryBlock(history) {
 }
 
 const INSUFFICIENT_MESSAGE = '현재 보유한 Research Center 자료로는 이 질문에 답변하기에 근거가 부족합니다. 관련 자료가 추가되면 다시 질문해 주세요.';
+
+// Re-derives which 자료 N were actually cited, straight from the model's
+// own [N] markers — never trusted from prose alone. Returns the distinct,
+// in-range indices (1-based, matching buildMaterialsBlock's 자료 N) in the
+// order they first appear, so citation order drives display order too.
+function extractCitedIndices(text, maxIndex) {
+  const seen = new Set();
+  const ordered = [];
+  const re = /\[(\d{1,2})\]/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const n = Number(m[1]);
+    if (n >= 1 && n <= maxIndex && !seen.has(n)) {
+      seen.add(n);
+      ordered.push(n);
+    }
+  }
+  return ordered;
+}
+
+// Rewrites the model's [N] markers (numbered against the full candidate
+// set sent to it) to [1..k] against `citedIndices`' own order — the order
+// `sources` is about to be built in — so a marker in the displayed answer
+// always points at the matching position in the displayed source list.
+// An out-of-range or otherwise invalid marker (hallucinated) is dropped
+// rather than left in the text pointing at nothing.
+function remapCitationMarkers(text, citedIndices) {
+  const newIndexByOld = new Map(citedIndices.map((orig, i) => [orig, i + 1]));
+  return String(text || '').replace(/\[(\d{1,2})\]/g, (whole, digits) => {
+    const newIndex = newIndexByOld.get(Number(digits));
+    return newIndex ? `[${newIndex}]` : '';
+  });
+}
 
 router.post('/', async (req, res) => {
   const startedAt = Date.now();
@@ -206,7 +243,15 @@ router.post('/', async (req, res) => {
 
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
-  const sources = candidates.map((c) => ({
+  // Which candidates become `sources` is further narrowed to only the ones
+  // the model's own [N] markers actually cited — a retrieved-but-unused
+  // candidate never gets shown as "evidence" for an answer that didn't
+  // draw on it. If the model cited nothing (missed the instruction), fall
+  // back to showing every retrieved candidate rather than an empty list.
+  const citedIndices = extractCitedIndices(text, candidates.length);
+  const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
+  const answer = citedIndices.length ? remapCitationMarkers(text, citedIndices) : text;
+  const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
     source: c.source_name || null,
@@ -218,7 +263,7 @@ router.post('/', async (req, res) => {
     candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
     isFollowup, questionFingerprint: fingerprint,
   });
-  res.json({ answer: text, insufficient: false, sources });
+  res.json({ answer, insufficient: false, sources });
 });
 
 module.exports = router;
@@ -229,3 +274,5 @@ module.exports.buildHistoryBlock = buildHistoryBlock;
 module.exports.INSUFFICIENT_MESSAGE = INSUFFICIENT_MESSAGE;
 module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
 module.exports.questionFingerprint = questionFingerprint;
+module.exports.extractCitedIndices = extractCitedIndices;
+module.exports.remapCitationMarkers = remapCitationMarkers;
