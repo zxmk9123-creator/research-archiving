@@ -319,6 +319,52 @@ test('remapCitationMarkers: rewrites markers to the cited set\'s own 1..k order,
   assert.equal(remapped, '첫 문장 [1]. 둘째 문장 [2][1]. 안쓴 자료 .');
 });
 
+test('moveCitationsAfterPunctuation: moves a marker (or run of markers) from before the closing punctuation to after it', () => {
+  assert.equal(
+    searchRouter.moveCitationsAfterPunctuation('정책이 변경되었다 [1].'),
+    '정책이 변경되었다. [1]'
+  );
+  // no space before the marker, and multiple markers together
+  assert.equal(
+    searchRouter.moveCitationsAfterPunctuation('완료되었다[1][3].'),
+    '완료되었다. [1][3]'
+  );
+  // already-correct placement (punctuation before the marker) is left alone
+  assert.equal(
+    searchRouter.moveCitationsAfterPunctuation('완료되었다. [1]'),
+    '완료되었다. [1]'
+  );
+  // a marker with nothing after it (no sentence-ending punctuation) is untouched
+  assert.equal(
+    searchRouter.moveCitationsAfterPunctuation('근거 자료 [1]'),
+    '근거 자료 [1]'
+  );
+});
+
+test('POST /: a citation marker placed before the sentence\'s closing punctuation is moved to after it', async () => {
+  const { restore } = mockPool([
+    ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
+  ]);
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) return { text: '[]', provider: 'freellmapi' };
+    return { text: '팜유 공급 정책이 변경되었다 [1].', provider: 'freellmapi' };
+  });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 가격이 왜 올랐어?' }),
+      });
+      const body = await res.json();
+      assert.equal(body.answer, '팜유 공급 정책이 변경되었다. [1]');
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
 test('POST /: sources are narrowed to only the candidates the model actually cited with [N]', async () => {
   const ROW_A = { ...SAMPLE_ROW, id: 7, title: 'A' };
   const ROW_B = { ...SAMPLE_ROW, id: 8, title: 'B' };

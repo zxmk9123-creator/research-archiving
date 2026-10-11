@@ -127,7 +127,7 @@ const SYSTEM_PROMPT = `You are the AI Research Search assistant for the Oil&Fat 
 Answer the user's question using ONLY the "Research Center materials" supplied in the user message below — never your own outside knowledge, never invented facts, never invented sources or URLs.
 Formatting:
 - Light Markdown is fine for readability: **bold** for key terms/figures, "- " for a bullet list, "1. " for a numbered list, and a short "#" line for a section heading when the answer has multiple parts.
-- Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
+- Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Place [N] AFTER the sentence's closing punctuation, never before it — write "...정책이 변경되었다. [1]", never "...정책이 변경되었다 [1]." Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
 - If the supplied materials do not contain enough information to answer, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
@@ -189,6 +189,19 @@ function remapCitationMarkers(text, citedIndices) {
     const newIndex = newIndexByOld.get(Number(digits));
     return newIndex ? `[${newIndex}]` : '';
   });
+}
+
+// Backstop for the SYSTEM_PROMPT's "[N] goes after the closing punctuation"
+// rule — prompt instructions alone don't reliably hold (same reasoning as
+// aiDraft.js's hasForeignScriptBleed/isUngroundedGeneralization overrides),
+// and a model writing "...변경되었다 [1]." reads as the period belonging to
+// the citation rather than the sentence. Moves a run of one or more [N]
+// markers to after the sentence-ending punctuation that follows them,
+// regardless of what the model actually emitted. A marker with nothing
+// following it (end of text, no punctuation) is left untouched — there is
+// nothing to reorder it against.
+function moveCitationsAfterPunctuation(text) {
+  return String(text || '').replace(/\s*((?:\[\d{1,2}\])+)\s*([.!?])/g, '$2 $1');
 }
 
 // Splits the model's answer into claim units (one per line, matching how
@@ -336,7 +349,7 @@ router.post('/', async (req, res) => {
   // back to showing every retrieved candidate rather than an empty list.
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
-  const answer = citedIndices.length ? remapCitationMarkers(text, citedIndices) : text;
+  const answer = moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text);
   const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
@@ -362,6 +375,7 @@ module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
 module.exports.questionFingerprint = questionFingerprint;
 module.exports.extractCitedIndices = extractCitedIndices;
 module.exports.remapCitationMarkers = remapCitationMarkers;
+module.exports.moveCitationsAfterPunctuation = moveCitationsAfterPunctuation;
 module.exports.splitClaimLines = splitClaimLines;
 module.exports.parseUnsupportedClaimNumbers = parseUnsupportedClaimNumbers;
 module.exports.VERIFICATION_SYSTEM_PROMPT = VERIFICATION_SYSTEM_PROMPT;
