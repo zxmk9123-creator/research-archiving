@@ -191,6 +191,86 @@ function remapCitationMarkers(text, citedIndices) {
   });
 }
 
+// Splits the model's answer into claim units (one per line, matching how
+// renderAnswerBlock() on the client already treats lines/list items) and
+// keeps only the ones that actually cite something — an uncited line has
+// nothing to verify. `maxIndex` bounds extractCitedIndices() the same way
+// the main citation pass does, so a hallucinated out-of-range marker never
+// reaches the verification prompt either.
+function splitClaimLines(text, maxIndex) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => ({ line, indices: extractCitedIndices(line, maxIndex) }))
+    .filter((c) => c.indices.length > 0);
+}
+
+// A focused, structured-output check — never asked to write prose, only to
+// flag claim numbers — so a single extra provider call can verify many
+// claims at once instead of one call per claim.
+const VERIFICATION_SYSTEM_PROMPT = `You check whether a claim is genuinely supported by the material(s) cited for it — not just topically related to the same general subject, but actually stating what the claim says. A claim about biofuel policy citing a material that is only about food-price inflation, for example, is NOT supported even though both are oils & fats topics.
+For each numbered claim below, with the material(s) cited for it, decide whether those materials genuinely support the claim.
+Respond with ONLY a JSON array of the claim numbers that are NOT supported by their cited material(s) — e.g. [2,5] — or [] if every claim is supported. No other text, no explanation.`;
+
+function buildVerificationPrompt(claims, candidates) {
+  return claims.map((c, i) => {
+    const materialsText = c.indices.map((idx) => {
+      const m = candidates[idx - 1];
+      return `자료 ${idx}: ${m.summary || m.ai_summary || m.insight || m.ai_insight || '(내용 없음)'}`;
+    }).join('\n');
+    const claimText = c.line.replace(/\[\d{1,2}\]/g, '').trim();
+    return `주장 ${i + 1}: "${claimText}"\n인용된 자료:\n${materialsText}`;
+  }).join('\n\n');
+}
+
+// Defensive parse of the verification call's response — a malformed or
+// non-JSON reply (or anything outside 1..claimCount) is treated as "flags
+// nothing", not as an error, so a verification-call hiccup never corrupts
+// the answer that's about to go out.
+function parseUnsupportedClaimNumbers(verificationText, claimCount) {
+  const match = String(verificationText || '').match(/\[[\d,\s]*\]/);
+  if (!match) return [];
+  try {
+    const arr = JSON.parse(match[0]);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((n) => Number.isInteger(n) && n >= 1 && n <= claimCount);
+  } catch {
+    return [];
+  }
+}
+
+// Second-pass check layered on top of the base answer: a [N] marker only
+// proves the model POINTED at a material, never that the material backs
+// that specific sentence (the gap a reviewer flagged — a biofuel-policy
+// claim citing a food-inflation article purely on topical overlap). This
+// re-asks the model, focused only on claim-vs-material support, and
+// strips the citation marker(s) from any claim it flags as unsupported —
+// the sentence stays, it just stops claiming that material as evidence.
+// Fails open (changes nothing) on any error or unparseable response: this
+// is a quality layer on the base answer, never allowed to break it.
+async function verifyCitations(text, candidates) {
+  const claims = splitClaimLines(text, candidates.length);
+  if (!claims.length) return text;
+  try {
+    const result = await provider.callProviderWithFallback({
+      system: VERIFICATION_SYSTEM_PROMPT,
+      user: buildVerificationPrompt(claims, candidates),
+    });
+    const unsupported = parseUnsupportedClaimNumbers(result.text, claims.length);
+    if (!unsupported.length) return text;
+    let corrected = text;
+    for (const n of unsupported) {
+      const { line } = claims[n - 1];
+      corrected = corrected.replace(line, line.replace(/\[\d{1,2}\]/g, '').trim());
+    }
+    return corrected;
+  } catch (err) {
+    console.error('ai-search citation verification failed:', err.message);
+    return text;
+  }
+}
+
 router.post('/', async (req, res) => {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
@@ -241,6 +321,12 @@ router.post('/', async (req, res) => {
     return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 
+  // Verify each citation against its claim before deciding what counts as
+  // "actually cited" below — an unsupported citation gets its marker
+  // stripped here, so it naturally falls out of `sources` below rather
+  // than needing a separate filter pass.
+  text = await verifyCitations(text, candidates);
+
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -276,3 +362,6 @@ module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
 module.exports.questionFingerprint = questionFingerprint;
 module.exports.extractCitedIndices = extractCitedIndices;
 module.exports.remapCitationMarkers = remapCitationMarkers;
+module.exports.splitClaimLines = splitClaimLines;
+module.exports.parseUnsupportedClaimNumbers = parseUnsupportedClaimNumbers;
+module.exports.VERIFICATION_SYSTEM_PROMPT = VERIFICATION_SYSTEM_PROMPT;

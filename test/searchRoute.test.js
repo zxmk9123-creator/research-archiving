@@ -347,6 +347,62 @@ test('POST /: sources are narrowed to only the candidates the model actually cit
   }
 });
 
+test('splitClaimLines: keeps only lines that actually cite something, in-range', () => {
+  const text = '인용 없는 문장.\n인용 있는 문장 [1].\n범위 밖 인용 [9].';
+  assert.deepEqual(searchRouter.splitClaimLines(text, 3), [
+    { line: '인용 있는 문장 [1].', indices: [1] },
+  ]);
+});
+
+test('parseUnsupportedClaimNumbers: parses a bracketed list, out-of-range/non-integer entries dropped', () => {
+  assert.deepEqual(searchRouter.parseUnsupportedClaimNumbers('[2, 5]', 5), [2, 5]);
+  assert.deepEqual(searchRouter.parseUnsupportedClaimNumbers('[]', 5), []);
+  assert.deepEqual(searchRouter.parseUnsupportedClaimNumbers('[1, 9]', 5), [1]); // 9 is out of range
+});
+
+test('parseUnsupportedClaimNumbers: fails open (returns []) on an unparseable response', () => {
+  assert.deepEqual(searchRouter.parseUnsupportedClaimNumbers('근거가 부족해서 판단할 수 없습니다.', 5), []);
+  assert.deepEqual(searchRouter.parseUnsupportedClaimNumbers('', 5), []);
+});
+
+test('POST /: a citation the verification pass flags as unsupported is stripped — the claim stays, the citation does not', async () => {
+  const ROW_A = { ...SAMPLE_ROW, id: 7, title: '바이오연료 정책 자료' };
+  const ROW_B = { ...SAMPLE_ROW, id: 8, title: '해운 운임 자료' };
+  const { restore } = mockPool([
+    ['FROM items i', () => ({ rows: [ROW_A, ROW_B] })],
+  ]);
+  // Two claims, each citing one material. The second call (verification,
+  // identified by its system prompt) flags claim 2 as unsupported — its
+  // cited 자료 2 (해운 운임) doesn't actually back a biofuel-policy claim.
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) {
+      return { text: '[2]', provider: 'freellmapi' };
+    }
+    return {
+      text: '인도네시아 바이오연료 정책이 변경되었습니다. [1]\n해운 운임도 함께 언급됩니다. [2]',
+      provider: 'freellmapi',
+    };
+  });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '팜유 공급 변수가 뭐야?' }),
+      });
+      const body = await res.json();
+      // Claim 2's marker was stripped, so only 자료 1 (ROW_A) remains cited.
+      assert.equal(body.sources.length, 1);
+      assert.equal(body.sources[0].id, ROW_A.id);
+      assert.match(body.answer, /해운 운임도 함께 언급됩니다\./);
+      assert.ok(!body.answer.includes('해운 운임도 함께 언급됩니다. [2]'));
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
 test('questionFingerprint: one-way hash, stable for the same question, different for different questions', () => {
   const a = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
   const b = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
