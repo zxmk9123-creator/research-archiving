@@ -7,6 +7,7 @@ const {
   buildFactualSummary,
   resolveInsight,
   isUngroundedGeneralization,
+  hasForeignScriptBleed,
   factOrUnconfirmed,
   parseEligible,
   parseQaDecision,
@@ -140,6 +141,37 @@ test('isUngroundedGeneralization: flags an unsupported macro-slowdown conclusion
 test('isUngroundedGeneralization: does not flag a specific, article-scoped monitoring point', () => {
   assert.equal(isUngroundedGeneralization('해당 기업의 다음 분기 실적을 지켜볼 필요가 있다.'), false);
   assert.equal(isUngroundedGeneralization('경쟁사의 유사한 조치 여부가 관전 포인트다.'), false);
+});
+
+test('hasForeignScriptBleed: flags Chinese and Cyrillic fragments, never plain Korean or an English abbreviation', () => {
+  assert.equal(hasForeignScriptBleed('팜유 수출세가 인상되었다.'), false);
+  assert.equal(hasForeignScriptBleed('SAF 수요가 ADM의 생산 확대로 이어졌다.'), false); // English abbreviations are fine
+  assert.equal(hasForeignScriptBleed('印尼棕榈油出口税上调，这可能导致价格上涨。'), true); // Chinese
+  assert.equal(hasForeignScriptBleed('Экспортный налог на пальмовое масло был повышен.'), true); // Cyrillic
+  assert.equal(hasForeignScriptBleed('수출세가 인상되었다. 这将影响亚洲市场.'), true); // mixed
+  assert.equal(hasForeignScriptBleed(''), false);
+  assert.equal(hasForeignScriptBleed(undefined), false);
+});
+
+test('buildFactualSummary: a model summary with foreign-script bleed is discarded in favor of the facts-only fallback', () => {
+  const mixed = '인도네시아가 수출세를 인상했다. 这将推高亚洲棕榈油价格.';
+  assert.equal(buildFactualSummary(WELL_GROUNDED_FACTS, mixed), WELL_GROUNDED_FACTS.what);
+});
+
+test('resolveInsight: a model insight with foreign-script bleed falls back to the honest no-implication statement', () => {
+  const mixed = '이는 아시아 공급망에 영향을 줄 수 있다. Это может затронуть рынок.';
+  assert.equal(resolveInsight(mixed, WELL_GROUNDED_FACTS), INSIGHT_FALLBACK);
+});
+
+test('parseDraftResponse: key_takeaway/eligibility_reason/publication_reason with foreign-script bleed fall back to 미확보', () => {
+  const draft = parseDraftResponse(fullResponse({
+    key_takeaway: '수출세 인상이 단기 가격 상승 요인이다. 这是关键.',
+    eligibility_reason: '구체적 수치가 포함됨. Конкретные данные присутствуют.',
+    publication_reason: '원본 분석 자료로 확인됨. 这是原创分析.',
+  }), taxonomy);
+  assert.equal(draft.keyTakeaway, UNCONFIRMED);
+  assert.equal(draft.eligibilityReason, UNCONFIRMED);
+  assert.equal(draft.qaReason, UNCONFIRMED);
 });
 
 test('resolveInsight: concrete, well-grounded facts keep a specific article-scoped insight', () => {

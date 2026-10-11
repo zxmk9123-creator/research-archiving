@@ -42,6 +42,7 @@ Rules:
 - summary: a natural, flowing 1-3 sentence Korean summary containing ONLY the article's directly-stated facts (who/what/amount/when/where/why) — NOT a labeled list (do not write "누가:", "무엇을:", etc.), and NOT the place for inference, prediction, evaluation, or impact statements (those belong in "insight" instead). Prioritize concrete, decision-relevant facts (companies, transactions, amounts, volumes, dates, locations) when present. Simply omit any fact that is "미확보" or otherwise unavailable — never mention it, never write "미확보" or a placeholder inside the sentence, and never invent or infer a cause, amount, date, or company that isn't explicitly stated.
 - insight: a separate 1-2 sentence Korean field for what goes BEYOND the plain facts — a specific monitoring point or movement implied by THIS article. It MUST be grounded in and traceable to the specific who/what/amount/when/where/why/impact facts you extracted above — never a generic industry/market prediction that could be written about any article in the sector regardless of its actual content. Do NOT generalize a single company's or single article's news into an industry-wide trend (e.g. do not turn one company's expansion into "업계 전반이 확대되고 있다"). Do NOT infer a macro slowdown, market expansion, future growth, or broad adoption trend unless the article itself gives evidence supporting that specific inference (e.g. a single job-cut figure at one company is NOT evidence of an industry-wide slowdown). If most of the extracted facts are "미확보" (i.e. this article gave you little concrete to reason from), or if you cannot identify a specific, article-grounded implication, do not stretch a generic claim out of the little that's there — plainly say no notable implication is evident instead. This is explicitly your inference, and must read as such (e.g. "~할 가능성이 있다", "~로 이어질 수 있다") rather than being stated as a confirmed fact — never phrase an inference as if it were reported in the article.
 - key_takeaway: one concise Korean sentence stating the single most useful insight for a reviewer.
+- summary / insight / key_takeaway / eligibility_reason / publication_reason MUST be written entirely in Korean, even when the source title/description is in English, Chinese, Russian, or any other language — translate it, never leave untranslated foreign-script fragments in these fields. A widely-used English abbreviation or ticker that has no established Korean form (e.g. "SAF", "OPEC+", "ADM") is fine on its own, but every sentence around it must still be Korean prose, never a sentence or clause left in another language or script.
 - suggested_sectors: 0-3 ids chosen ONLY from the allowed sector id list given below. Never invent an id or a name that is not listed.
 - suggested_usages: 0-3 ids chosen ONLY from the allowed usage id list given below. Never invent an id or a name that is not listed.
 - If you cannot confidently choose any tag, return an empty array for that field rather than guessing.
@@ -179,7 +180,7 @@ const FACT_KEYS = ['who', 'what', 'amount', 'when', 'where', 'why', 'impact'];
 // never an invented fact).
 function buildFactualSummary(facts, modelSummary) {
   const summary = typeof modelSummary === 'string' ? modelSummary.trim() : '';
-  if (summary) return summary;
+  if (summary && !hasForeignScriptBleed(summary)) return summary;
 
   const what = facts.what !== UNCONFIRMED ? facts.what : '';
   return what || '핵심 사실이 확인되지 않았습니다.';
@@ -217,6 +218,21 @@ function isUngroundedGeneralization(insightText) {
   return UNGROUNDED_GENERALIZATION_PATTERN.test(insightText);
 }
 
+// Production incident: Korean-language fields came back with a stray
+// Chinese or Cyrillic clause/sentence mixed in (translation bleed-through
+// from a non-Korean source article, more common on the smaller fallback
+// providers in the chain) — the prompt rule above asks for Korean-only
+// prose, but prompt instructions alone don't guarantee it, same reasoning
+// as isUngroundedGeneralization() above. Only Han ideographs and Cyrillic
+// are checked — Latin script is deliberately NOT flagged, since English
+// abbreviations/tickers/company names (SAF, ADM, OPEC+) are expected and
+// allowed inside otherwise-Korean prose.
+const FOREIGN_SCRIPT_PATTERN = /[一-鿿㐀-䶿Ѐ-ӿ]/;
+
+function hasForeignScriptBleed(text) {
+  return typeof text === 'string' && FOREIGN_SCRIPT_PATTERN.test(text);
+}
+
 // Insight is deliberately the model's own inference (implications, an
 // emerging trend, a point worth monitoring) — unlike buildFactualSummary,
 // there is no fact-only fallback to construct here, since a bare fact is
@@ -227,6 +243,7 @@ function isUngroundedGeneralization(insightText) {
 function resolveInsight(modelInsight, facts) {
   const trimmed = typeof modelInsight === 'string' ? modelInsight.trim() : '';
   if (!trimmed) return INSIGHT_FALLBACK;
+  if (hasForeignScriptBleed(trimmed)) return INSIGHT_FALLBACK;
   if (countConfirmedFacts(facts) < MIN_CONFIRMED_FACTS_FOR_INSIGHT) return INSIGHT_FALLBACK;
   if (isUngroundedGeneralization(trimmed)) return INSIGHT_FALLBACK;
   return trimmed;
@@ -287,17 +304,15 @@ function parseDraftResponse(raw, taxonomy) {
   const facts = Object.fromEntries(FACT_KEYS.map((key) => [key, factOrUnconfirmed(parsed[key])]));
   const summary = buildFactualSummary(facts, parsed.summary);
   const insight = resolveInsight(parsed.insight, facts);
-  const keyTakeaway = typeof parsed.key_takeaway === 'string' && parsed.key_takeaway.trim()
-    ? parsed.key_takeaway.trim()
-    : UNCONFIRMED;
+  const keyTakeawayRaw = typeof parsed.key_takeaway === 'string' ? parsed.key_takeaway.trim() : '';
+  const keyTakeaway = keyTakeawayRaw && !hasForeignScriptBleed(keyTakeawayRaw) ? keyTakeawayRaw : UNCONFIRMED;
 
   // Advisory only — a non-boolean verdict means "no recommendation" (null),
   // never a silent false, so Review can tell "AI said no" apart from
   // "AI draft is incomplete/failed to opine".
   const eligible = parseEligible(parsed.eligible);
-  const eligibilityReason = typeof parsed.eligibility_reason === 'string' && parsed.eligibility_reason.trim()
-    ? parsed.eligibility_reason.trim()
-    : UNCONFIRMED;
+  const eligibilityReasonRaw = typeof parsed.eligibility_reason === 'string' ? parsed.eligibility_reason.trim() : '';
+  const eligibilityReason = eligibilityReasonRaw && !hasForeignScriptBleed(eligibilityReasonRaw) ? eligibilityReasonRaw : UNCONFIRMED;
 
   const sectorIds = new Set((taxonomy.sectors || []).map((s) => s.id));
   const usageIds = new Set((taxonomy.usages || []).map((u) => u.id));
@@ -309,9 +324,8 @@ function parseDraftResponse(raw, taxonomy) {
     : [];
 
   const qaDecision = parseQaDecision(parsed.publication_decision);
-  const qaReason = typeof parsed.publication_reason === 'string' && parsed.publication_reason.trim()
-    ? parsed.publication_reason.trim()
-    : UNCONFIRMED;
+  const qaReasonRaw = typeof parsed.publication_reason === 'string' ? parsed.publication_reason.trim() : '';
+  const qaReason = qaReasonRaw && !hasForeignScriptBleed(qaReasonRaw) ? qaReasonRaw : UNCONFIRMED;
 
   return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages, qaDecision, qaReason };
 }
@@ -478,6 +492,7 @@ module.exports = {
   buildFactualSummary,
   resolveInsight,
   isUngroundedGeneralization,
+  hasForeignScriptBleed,
   factOrUnconfirmed,
   parseEligible,
   parseQaDecision,
