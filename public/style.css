@@ -182,28 +182,33 @@ p { margin: 0; }
    it doesn't read as sitting right under it — margin-top alone wasn't
    enough visual distance, so this also adds its own top padding beyond
    the border line, rather than relying on margin collapsing to carry it. */
-.ai-search-result:not(:empty) { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--border); }
+.ai-search-result:not(:empty) { margin-top: var(--sp-6); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
 
 /* Each question/answer is its own turn, stacked in order — a follow-up's
    answer appends below the ones before it instead of replacing them. */
 .ai-search-turn { margin-bottom: var(--sp-5); }
 .ai-search-turn + .ai-search-turn { padding-top: var(--sp-5); border-top: 1px solid var(--border); }
+/* flex + align-items:center instead of vertical-align tricks — the tag
+   (10.5px, its own padding) and the question text (14px) have different
+   line-box metrics, so centering them relative to each other needed a
+   real flex baseline, not a guess at vertical-align's middle offset. */
 .ai-search-turn-q {
+  display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 700; color: var(--text-secondary); margin-bottom: var(--sp-2);
   max-width: 780px;
 }
 .ai-search-turn-followup-tag {
-  display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px;
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
   font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--action-hover); background: var(--action-soft); vertical-align: middle;
+  color: var(--action-hover); background: var(--action-soft);
 }
 /* Mirrors ai-search-turn-followup-tag's shape/sizing, but neutral rather
    than brand-blue — the opening question of a conversation, not a signal
    to pay extra attention to like a follow-up is. */
 .ai-search-turn-initial-tag {
-  display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px;
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
   font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
-  color: var(--text-tertiary); background: var(--surface-sunken); vertical-align: middle;
+  color: var(--text-tertiary); background: var(--surface-sunken);
 }
 .ai-search-status {
   margin: 0; font-size: 14px; color: var(--action-hover); font-weight: 500;
