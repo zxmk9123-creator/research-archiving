@@ -234,6 +234,7 @@ p { margin: 0; }
    Built only from the `sources` the server already returned (real DB
    rows), never parsed out of the model's own text. */
 .ai-search-sources { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border); max-width: 780px; }
+.ai-search-retry-btn { margin-top: var(--sp-2); }
 .ai-search-sources-label {
   font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--text-tertiary); margin-bottom: var(--sp-2);
 }

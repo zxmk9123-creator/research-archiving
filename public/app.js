@@ -536,15 +536,76 @@ function stopAiSearchStatus(moduleEl) {
   moduleEl.classList.remove('is-searching');
 }
 
+// Runs (or re-runs, via the error state's "재검색" button) one turn's
+// search request against `question`, rendering into `turnEl`'s body.
+// Pulled out of the form's submit handler so a failed turn can retry
+// itself in place — same turn element, same question — without the user
+// having to retype it into the input box.
+async function runAiSearchTurn(turnEl, question, submitBtn) {
+  const moduleEl = document.getElementById('ai-search');
+  const bodyEl = turnEl.querySelector('.ai-search-turn-body');
+  bodyEl.innerHTML = '<p class="ai-search-status"></p>';
+  const statusEl = bodyEl.querySelector('.ai-search-status');
+  if (submitBtn) submitBtn.disabled = true;
+  startAiSearchStatus(moduleEl, statusEl);
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, history: aiSearchHistory }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      bodyEl.innerHTML = aiSearchErrorHtml(body.error || 'AI 검색 중 오류가 발생했습니다.');
+      return;
+    }
+    aiSearchHistory.push({ role: 'user', content: question });
+    aiSearchHistory.push({ role: 'assistant', content: body.answer });
+    bodyEl.innerHTML = `
+      ${renderAnswerHtml(body.answer, body.sources)}
+      ${aiSearchSourcesHtml(body.sources)}
+    `;
+    // On a retry, this turn wasn't recorded the first time around (only a
+    // successful turn gets persisted) — push now, and only now, so a
+    // Home re-render replays exactly the turns that actually succeeded.
+    aiSearchTurnsHtml.push(turnEl.outerHTML);
+  } catch (err) {
+    bodyEl.innerHTML = aiSearchErrorHtml('AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+  } finally {
+    stopAiSearchStatus(moduleEl);
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+function aiSearchErrorHtml(message) {
+  return `<p class="meta">${escapeHtml(message)}</p>
+    <button type="button" class="btn ai-search-retry-btn">재검색</button>`;
+}
+
 function bindAiSearchForm() {
   const form = document.getElementById('ai-search-form');
   if (!form) return;
-  const moduleEl = document.getElementById('ai-search');
+  const resultEl = document.getElementById('ai-search-result');
+  const submitBtn = form.querySelector('button[type="submit"]');
+
+  // Delegated once on the result container — covers every turn's retry
+  // button, including ones added after this bind (each new turn's button
+  // is a fresh element, but the listener lives on their shared ancestor).
+  resultEl.onclick = (e) => {
+    const btn = e.target.closest('.ai-search-retry-btn');
+    if (!btn || submitBtn.disabled) return;
+    const turnEl = btn.closest('.ai-search-turn');
+    // Not parsed from the turn-q line's textContent — it's the tag label
+    // ("opening"/"follow-up") and the question concatenated with no
+    // separator, so a straight textContent read would retry with the
+    // wrong string. The original question is kept verbatim in a data
+    // attribute set when the turn was created instead.
+    runAiSearchTurn(turnEl, turnEl.dataset.question, submitBtn);
+  };
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     const input = document.getElementById('ai-search-input');
-    const resultEl = document.getElementById('ai-search-result');
-    const submitBtn = form.querySelector('button[type="submit"]');
     const question = input.value.trim();
     if (!question) return;
     // Disable duplicate submissions while a request is already in flight.
@@ -556,6 +617,7 @@ function bindAiSearchForm() {
     const isFollowup = aiSearchHistory.length > 0;
     const turnEl = document.createElement('div');
     turnEl.className = 'ai-search-turn';
+    turnEl.dataset.question = question;
     turnEl.innerHTML = `
       <div class="ai-search-turn-q">${isFollowup ? '<span class="ai-search-turn-followup-tag">follow-up</span>' : '<span class="ai-search-turn-initial-tag">opening</span>'}${escapeHtml(question)}</div>
       <div class="ai-search-turn-body"><p class="ai-search-status"></p></div>
@@ -566,34 +628,7 @@ function bindAiSearchForm() {
     // question sits visible twice while the request is in flight: once
     // still in the input box, once in the new turn's question label below.
     input.value = '';
-    const bodyEl = turnEl.querySelector('.ai-search-turn-body');
-    const statusEl = turnEl.querySelector('.ai-search-status');
-    submitBtn.disabled = true;
-    startAiSearchStatus(moduleEl, statusEl);
-    try {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, history: aiSearchHistory }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        bodyEl.innerHTML = `<p class="meta">${escapeHtml(body.error || 'AI 검색 중 오류가 발생했습니다.')}</p>`;
-        return;
-      }
-      aiSearchHistory.push({ role: 'user', content: question });
-      aiSearchHistory.push({ role: 'assistant', content: body.answer });
-      bodyEl.innerHTML = `
-        ${renderAnswerHtml(body.answer, body.sources)}
-        ${aiSearchSourcesHtml(body.sources)}
-      `;
-      aiSearchTurnsHtml.push(turnEl.outerHTML);
-    } catch (err) {
-      bodyEl.innerHTML = '<p class="meta">AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>';
-    } finally {
-      stopAiSearchStatus(moduleEl);
-      submitBtn.disabled = false;
-    }
+    await runAiSearchTurn(turnEl, question, submitBtn);
   };
 }
 
