@@ -4,12 +4,11 @@
 // Extraction -> AI Research Screening -> AI Classification -> AI
 // Summary/Insight -> Automatic Archive.
 //
-// Deliberately the smallest possible shape: exact-URL dedup only (no
-// title-similarity pass), one metadata-extraction call per candidate via
-// the existing extractMetadata() helper, then the exact same
-// relevance-filter / AI-draft / auto-archive calls every other
-// acquisition method already uses unmodified. No link-following, no
-// sitemap discovery, no query generation — see adapters/webSearch.js.
+// Otherwise the smallest possible shape: one metadata-extraction call per
+// candidate via the existing extractMetadata() helper, then the exact same
+// relevance-filter / AI-draft / auto-archive calls every other acquisition
+// method already uses unmodified. No link-following, no sitemap discovery,
+// no query generation — see adapters/webSearch.js.
 const pool = require('../db/pool');
 // Required as module objects (not destructured) so tests can swap
 // searchWeb/extractMetadata for a synthetic result without a real
@@ -19,9 +18,20 @@ const webSearchAdapter = require('./adapters/webSearch');
 const extractMetadataModule = require('./extractMetadata');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
+const { titleSimilarity } = require('./similarity');
 
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
 const FALLBACK_CANDIDATES_TO_TRY = 3;
+
+// Near-duplicate title check — the same report (e.g. a farmdoc paper)
+// repeatedly resurfaces at a different URL across overlapping/repeated
+// search queries (mirrors, tracking-param variants, re-crawls). Exact-URL
+// dedup alone never catches that, which is exactly how the same material
+// ended up archived twice under different item ids (seen in the chatbot's
+// citation list). Same threshold/window collector.js (RSS) and
+// institutionalIngest.js already use for this exact check.
+const TITLE_SIMILARITY_THRESHOLD = 0.82;
+const RECENT_TITLES_LIMIT = 500;
 
 // "Newly published" as a first-class criterion, without inventing dates:
 // only acts when (a) the caller explicitly asked for a freshness-biased
@@ -94,10 +104,24 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
     let failed = 0;
     const details = [];
 
+    // Fetched once per run (not per-candidate) and appended to below as
+    // candidates are accepted, so near-duplicates within the same run
+    // (two candidates for the same report at different URLs) are caught
+    // too, not just against items from earlier runs.
+    const { rows: titleRows } = await pool.query(
+      'SELECT title FROM items ORDER BY collected_at DESC LIMIT $1',
+      [RECENT_TITLES_LIMIT]
+    );
+    const recentTitles = titleRows.map((r) => r.title);
+
     for (const candidate of candidates) {
       const { rows: existing } = await pool.query('SELECT id FROM items WHERE source_url = $1', [candidate.link]);
       if (existing.length) {
         details.push({ title: candidate.title, link: candidate.link, stage: 'already_ingested', itemId: existing[0].id });
+        continue;
+      }
+      if (recentTitles.some((t) => titleSimilarity(candidate.title, t) >= TITLE_SIMILARITY_THRESHOLD)) {
+        details.push({ title: candidate.title, link: candidate.link, stage: 'duplicate_title' });
         continue;
       }
 
@@ -161,6 +185,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
           [meta.title || candidate.title, candidate.link, meta.published_at, source.id, itemType, meta.thumbnail_url, fallbackUrl]
         );
         itemId = inserted[0].id;
+        recentTitles.push(meta.title || candidate.title);
       } catch (err) {
         // 23505 = unique_violation on items.source_url — a different
         // candidate (same or another query, this run or an overlapping

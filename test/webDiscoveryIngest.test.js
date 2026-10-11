@@ -155,6 +155,56 @@ test('collectWebDiscoverySource: exact-URL dedup skips a candidate already in th
   }
 }));
 
+test('collectWebDiscoverySource: a near-duplicate title (same report resurfacing at a different URL) is skipped without re-extraction or re-insert', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([
+    { title: 'Palm Oil Market Outlook: Supply Constraints in 2026', link: 'https://mirror.example.org/farmdoc-copy' },
+  ]);
+  const restoreMeta = mockExtractMetadata(async () => { throw new Error('should not be called — dedup must happen before extraction'); });
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })], // no exact-URL match
+    // An existing item already covers this report under a different URL —
+    // its title is a near-exact match (same wording, just a trailing
+    // date range tacked on), well above the 0.82 Dice-coefficient bar.
+    ['SELECT title FROM items', () => ({ rows: [{ title: 'Palm Oil Market Outlook: Supply Constraints 2026' }] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource());
+    assert.equal(result.ok, true);
+    assert.equal(result.archived, 0);
+    assert.equal(result.failed, 0);
+    assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')), 'a near-duplicate title must never reach item creation');
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
+test('collectWebDiscoverySource: a genuinely distinct title is not blocked by an unrelated recent title', () => withNoProviders(async () => {
+  const restoreSearch = mockSearchWeb([{ title: 'Sunflower oil export quota lifted', link: 'https://example.org/distinct' }]);
+  const restoreMeta = mockExtractMetadata(async () => ({
+    title: 'Sunflower oil export quota lifted',
+    summary: 'Edible oil export quotas were lifted, affecting sunflower oil supply chains.',
+    thumbnail_url: null,
+    published_at: '2026-07-01',
+  }));
+  const { calls, restore } = mockPool([
+    ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })],
+    ['SELECT title FROM items', () => ({ rows: [{ title: 'Palm Oil Export Tariff Raised to 10%' }] })],
+    ['INSERT INTO items', () => ({ rows: [{ id: 779 }] })],
+    ['SELECT \\* FROM items WHERE id', () => ({ rows: [{ id: 779, ai_status: null }] })],
+  ]);
+  try {
+    const result = await collectWebDiscoverySource(webDiscoverySource());
+    assert.ok(calls.some((c) => c.text.includes('INSERT INTO items')), 'an unrelated recent title must never block a distinct candidate');
+    assert.equal(result.discovered, 1);
+  } finally {
+    restoreSearch();
+    restoreMeta();
+    restore();
+  }
+}));
+
 test('collectWebDiscoverySource: an irrelevant candidate is filtered after extraction and never reaches AI screening or item creation', () => withNoProviders(async () => {
   const restoreSearch = mockSearchWeb([{ title: 'Local football club wins championship', link: 'https://example.org/sports' }]);
   const restoreMeta = mockExtractMetadata(async () => ({
