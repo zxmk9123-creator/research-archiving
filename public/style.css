@@ -178,7 +178,11 @@ p { margin: 0; }
 }
 .ai-search input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
 .ai-search-result { position: relative; }
-.ai-search-result:not(:empty) { margin-top: var(--sp-8); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
+/* Separates the answer thread from the search input clearly enough that
+   it doesn't read as sitting right under it — margin-top alone wasn't
+   enough visual distance, so this also adds its own top padding beyond
+   the border line, rather than relying on margin collapsing to carry it. */
+.ai-search-result:not(:empty) { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--border); }
 
 /* Each question/answer is its own turn, stacked in order — a follow-up's
    answer appends below the ones before it instead of replacing them. */
