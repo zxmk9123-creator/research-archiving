@@ -1546,7 +1546,23 @@ async function renderReview() {
       };
       return;
     }
-    const item = await api(`/items/${id}`);
+    // Production bug: a failed fetch here (transient 502/503, the server
+    // momentarily overloaded, etc.) threw unhandled — #review-body kept
+    // showing whatever draft was on screen before (already published, in
+    // next/prev's case), with no error and the "자료 발행" button still
+    // live. Clicking it again looked like "발행했는데 안 넘어간다": the
+    // click actually worked, but the screen never moved on to show it.
+    let item;
+    try {
+      item = await api(`/items/${id}`);
+    } catch (err) {
+      document.getElementById('review-body').innerHTML = `
+        <p class="meta">다음 자료를 불러오지 못했습니다: ${escapeHtml(err.message)}</p>
+        <button class="btn" id="d-load-retry-btn" type="button">다시 시도</button>
+      `;
+      document.getElementById('d-load-retry-btn').onclick = () => loadDraft(id);
+      return;
+    }
 
     function renderAiBox() {
       if (item.ai_status === 'pending') {
@@ -1743,24 +1759,43 @@ async function renderReview() {
       };
     }
 
-    document.getElementById('d-publish').onclick = async () => {
-      await api(`/items/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          summary: document.getElementById('d-summary').value,
-          insight: document.getElementById('d-insight').value,
-          sector_ids: getActive(document.getElementById('d-sectors'), 'sector'),
-          usage_ids: getActive(document.getElementById('d-usages'), 'usage'),
-          status: 'Published',
-        }),
-      });
-      advancePastCurrentDraft();
+    const publishBtn = document.getElementById('d-publish');
+    publishBtn.onclick = async () => {
+      // Without this, the previous silent-failure symptom could also happen
+      // the other way: a slow PATCH + an impatient double-click fired two
+      // publishes, the second landing on an item that was no longer Draft.
+      if (publishBtn.disabled) return;
+      publishBtn.disabled = true;
+      try {
+        await api(`/items/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            summary: document.getElementById('d-summary').value,
+            insight: document.getElementById('d-insight').value,
+            sector_ids: getActive(document.getElementById('d-sectors'), 'sector'),
+            usage_ids: getActive(document.getElementById('d-usages'), 'usage'),
+            status: 'Published',
+          }),
+        });
+        advancePastCurrentDraft();
+      } catch (err) {
+        // The PATCH's own failure wasn't the reported bug (that was the
+        // NEXT draft's fetch failing silently, fixed above) — but it had
+        // the same silent-failure shape, so it gets the same visible
+        // treatment rather than only a console error.
+        alert(`발행에 실패했습니다: ${err.message}`);
+        publishBtn.disabled = false;
+      }
     };
 
     document.getElementById('d-delete').onclick = async () => {
       if (!confirm('이 Draft를 삭제할까요? 되돌릴 수 없습니다.')) return;
-      await api(`/items/${id}`, { method: 'DELETE' });
-      advancePastCurrentDraft();
+      try {
+        await api(`/items/${id}`, { method: 'DELETE' });
+        advancePastCurrentDraft();
+      } catch (err) {
+        alert(`삭제에 실패했습니다: ${err.message}`);
+      }
     };
 
     // Removes the just-published/deleted item from the in-memory drafts
