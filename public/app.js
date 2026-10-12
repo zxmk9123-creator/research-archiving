@@ -1343,11 +1343,11 @@ async function renderSourceManager(view, query = {}) {
         <select id="ref-f-commodity"><option value="">품목 전체</option>${refCommodityOpts}</select>
         <button class="btn" id="ref-f-clear">초기화</button>
       </div>
-      <details class="section ref-add-details" id="s-form-section">
+      <details class="ref-add-details" id="s-form-section">
         <summary id="s-form-summary" class="btn primary">+ 소스 추가</summary>
-        ${sourceFormFieldsHtml(view)}
       </details>
     </div>
+    <div class="ref-add-form-wrap" id="ref-add-form-wrap" hidden>${sourceFormFieldsHtml(view)}</div>
     <div id="ref-sources-result">${referenceSourcesTable(sources, { region: query.region, commodity: query.commodity })}</div>
     `}
   `;
@@ -1392,6 +1392,21 @@ async function renderSourceManager(view, query = {}) {
         applyRefFilters();
       };
     }
+  }
+  // Reference tab only: the "+ 소스 추가" <details> holds just the summary
+  // button (see the template above) — the actual form fields live in a
+  // separate full-width wrapper right after .ref-toolbar so opening it
+  // pushes the results table down the page, rather than revealing the
+  // form squeezed inside the toolbar's flex row next to the filters.
+  // Mirrors the <details> element's native open/closed state via its
+  // 'toggle' event, which also fires on the programmatic `.open = true`
+  // the edit-row handler below uses.
+  const refAddDetails = document.getElementById('s-form-section');
+  const refAddFormWrap = document.getElementById('ref-add-form-wrap');
+  if (refAddDetails && refAddFormWrap) {
+    refAddDetails.addEventListener('toggle', () => {
+      refAddFormWrap.hidden = !refAddDetails.open;
+    });
   }
   const sectorLinksContainer = document.getElementById('s-sector-links');
   function addSectorLinkRow(link) {
@@ -1474,7 +1489,7 @@ async function renderSourceManager(view, query = {}) {
         document.getElementById('s-usage-note').value = s.usage_note || '';
         sectorLinksContainer.innerHTML = '';
         (s.sector_links || []).forEach((link) => addSectorLinkRow(link));
-        document.getElementById('s-form-section').scrollIntoView({ behavior: 'smooth' });
+        (refAddFormWrap || document.getElementById('s-form-section')).scrollIntoView({ behavior: 'smooth' });
       };
     });
   }

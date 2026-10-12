@@ -665,27 +665,29 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
   .card, .btn, details.section summary::after, details.section > *:not(summary) { transition: none; animation: none; }
 }
 
-/* Reference tab: filters and "+ 소스 추가" share one row, the add button
-   at the far right — moved up from the page's bottom (where it used to
-   sit below the whole results table) so adding a source doesn't require
-   scrolling past however many rows are currently listed. */
-.ref-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); margin: var(--sp-4) 0; flex-wrap: wrap; }
+/* Reference tab: filters and "+ 소스 추가" share one row, vertically
+   centered together, the add button at the far right — moved up from
+   the page's bottom (where it used to sit below the whole results
+   table) so adding a source doesn't require scrolling past however
+   many rows are currently listed. */
+.ref-toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0; flex-wrap: wrap; }
 .ref-toolbar .filters { margin: 0; }
-.ref-add-details { position: relative; margin: 0; padding: 0; border-top: none; }
+/* Deliberately NOT `details.section` — that generic accordion styling
+   (border-top divider line, large bold summary text, floating-card
+   reveal) reads as a whole separate page section, not a single button
+   sized to match the filter row beside it. This <details> holds only
+   the summary/button; the actual form lives in #ref-add-form-wrap
+   right after .ref-toolbar (see sourceFormFieldsHtml's call site in
+   renderSourceManager) so opening it pushes the results table down the
+   page in normal document flow, instead of floating a popover over it. */
+.ref-add-details { margin: 0; }
 .ref-add-details summary {
   list-style: none; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; height: var(--ctrl-md); padding: 0 16px;
+  font-size: 14px; font-weight: 600;
 }
 .ref-add-details summary::-webkit-details-marker { display: none; }
-.ref-add-details summary::after { content: none; }
-/* The form itself floats as a card under the button rather than pushing
-   the filters/table layout down — same anchored-popover pattern as
-   .home-root-reorder-card. */
-.ref-add-details[open] > *:not(summary) {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 5;
-  width: min(480px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .16); padding: var(--sp-5);
-}
+.ref-add-form-wrap { margin: 0 0 var(--sp-5); }
 
 /* "대표 링크로 메타데이터 자동 채우기" — pastes into the extraction
    endpoint rather than directly into the URL field, so re-running it
