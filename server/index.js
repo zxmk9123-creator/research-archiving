@@ -16,16 +16,36 @@ app.use('/api/picks', require('./routes/picks'));
 app.use('/api', require('./routes/taxonomy'));
 
 // Root cause of several "the deploy went out but the browser still shows
-// the old UI" reports this session: index.html/app.js/style.css are
-// served under fixed filenames with no cache-busting query/hash, and
+// the old UI" reports earlier this session: index.html/app.js/style.css
+// are served under fixed filenames with no cache-busting query/hash, and
 // express.static's default (no maxAge, no explicit Cache-Control) leaves
 // a returning browser free to serve its own cached copy without even
 // revalidating — a real redeploy can sit invisible behind a stale tab
-// indefinitely. `no-cache` forces revalidation (an If-None-Match round
-// trip) on every load instead, so a changed file is always served fresh
-// while an unchanged one still gets a cheap 304.
+// indefinitely.
+//
+// Blanket `no-cache` on every static file fixed that, but traded it for
+// a different, milder symptom reported after: a slight load delay on
+// every single page view, since no-cache forces an If-None-Match round
+// trip to the server for EVERY asset (app.js, style.css, and the five
+// small helper scripts in index.html) on every load, even when nothing
+// changed — 7-8 extra round trips that a plain disk-cache hit would have
+// skipped entirely. index.html itself still needs no-cache (it's the one
+// file whose freshness actually matters — it's what points the browser
+// at the current app.js/style.css), but the other files only need to
+// catch up within some bounded window, not instantly on every load.
+// `max-age=60, must-revalidate` lets a browser reuse its own cached copy
+// for up to 60s with zero network round trip, then forces a real
+// revalidation after that — bounding staleness to at most a minute after
+// a deploy (this platform's redeploys are infrequent relative to that)
+// instead of either extreme (indefinite staleness, or a round trip on
+// every load).
 app.use(express.static(path.join(__dirname, '..', 'public'), {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  setHeaders: (res, filePath) => {
+    const cacheControl = path.basename(filePath) === 'index.html'
+      ? 'no-cache'
+      : 'public, max-age=60, must-revalidate';
+    res.setHeader('Cache-Control', cacheControl);
+  },
 }));
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
