@@ -310,6 +310,11 @@ p { margin: 0; }
 .home-theme-root-header h2 { margin: 0; font-size: 1.4rem; }
 .home-theme-root-header .home-module-arrow { font-size: 24px; }
 
+/* Swaps the two theme roots' order in one click — a 2-item list has only
+   one possible reorder, so this replaces drag-and-drop for the roots
+   themselves rather than making the whole page a drop target for them. */
+.home-theme-swap-btn { display: block; margin: 0 0 var(--sp-6); }
+
 .home-carousel { display: flex; align-items: flex-start; gap: var(--sp-3); }
 .home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }
 .home-carousel-track { display: flex; transition: transform 0.4s ease; }

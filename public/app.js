@@ -310,6 +310,54 @@ function isWithinPastMonth(publishedAt) {
   return d >= cutoff;
 }
 
+// Order of the two top-level theme roots (식용유지/비식용유지) themselves.
+// Drag-and-drop is the wrong tool for a 2-item list — there's only ever
+// one possible move (swap the two), so a single button that performs
+// that move directly is faster and more obvious than picking up a card,
+// carrying it across the whole page, and dropping it in the only other
+// valid slot. Same localStorage convention as the per-theme carousel
+// order (HOME_CAROUSEL_ORDER_KEY) — a per-browser display preference,
+// no backend involved.
+const HOME_ROOT_ORDER_KEY = 'ra_home_root_order';
+
+function getHomeRootOrder() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HOME_ROOT_ORDER_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveHomeRootOrder(orderedIds) {
+  try {
+    localStorage.setItem(HOME_ROOT_ORDER_KEY, JSON.stringify(orderedIds));
+  } catch (err) { /* storage unavailable (private mode, quota) — order just resets next load */ }
+}
+
+// A root not present in the saved order (e.g. a theme root added after the
+// user last swapped) is appended at the end rather than hidden — same
+// "preference over what exists today, never a filter" rule as
+// applyHomeCarouselOrder().
+function applyHomeRootOrder(roots) {
+  const saved = getHomeRootOrder();
+  if (!saved.length) return roots;
+  const byId = new Map(roots.map((r) => [r.id, r]));
+  const ordered = saved.map((id) => byId.get(id)).filter(Boolean);
+  const orderedIds = new Set(ordered.map((r) => r.id));
+  return [...ordered, ...roots.filter((r) => !orderedIds.has(r.id))];
+}
+
+// Cached by renderHome() so the swap button can act without re-fetching
+// /api/sectors — it only ever needs the id order, not fresh data.
+let homeThemeRootsCache = [];
+
+function swapHomeThemeRootOrder() {
+  if (homeThemeRootsCache.length < 2) return;
+  saveHomeRootOrder([...homeThemeRootsCache].reverse().map((r) => r.id));
+  renderHome();
+}
+
 // One top-level theme (식용유지/비식용유지): a clickable heading that opens
 // the full-results view filtered to the whole root subtree, followed by one
 // compact carousel per child theme (팜유, 대두유, ... / UCO, SAF, ...),
@@ -689,7 +737,12 @@ async function renderHome() {
   const importantIds = new Set(ranking.map((r) => r.id));
   const savedIds = getPersonalSaveIds();
   const { byParent } = buildSectorMaps(sectors);
-  const roots = (byParent.get(null) || []).filter((s) => HOME_THEME_ROOT_NAMES.includes(s.name));
+  const roots = applyHomeRootOrder((byParent.get(null) || []).filter((s) => HOME_THEME_ROOT_NAMES.includes(s.name)));
+  homeThemeRootsCache = roots;
+
+  const swapButtonHtml = roots.length >= 2
+    ? `<button type="button" class="btn home-theme-swap-btn" onclick="swapHomeThemeRootOrder()" title="${roots[0].name} / ${roots[1].name} 순서 바꾸기">⇅ 테마 순서 바꾸기</button>`
+    : '';
 
   const themesHtml = roots.length
     ? roots.map((root) => homeThemeRoot(root, byParent, items, importantIds, savedIds)).join('')
@@ -699,6 +752,7 @@ async function renderHome() {
     <h1>Home</h1>
     <p class="page-lede">최근 유지시장의 주요 이슈를 둘러보세요.</p>
     ${aiSearchHtml()}
+    ${swapButtonHtml}
     ${themesHtml}
   `;
 
