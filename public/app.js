@@ -2072,9 +2072,13 @@ function updateActiveNavTab(path) {
 // target while that scroll (or any later resize/scroll) is in flight. A
 // step whose target isn't in the DOM (e.g. Review has no drafts yet) is
 // skipped rather than ending the tour early. Marks `seenKey` once shown or
-// skipped so it never reappears in that browser.
-function runSpotlightTour(steps, seenKey) {
-  if (localStorage.getItem(seenKey)) return;
+// skipped so it never reappears in that browser. `onDone`, if given, fires
+// once — whether the tour actually ran to the end, was skipped, or never
+// ran at all because `seenKey` was already set — so callers can chain a
+// next tour onto this one unconditionally (see startHomeTour below)
+// without caring which of those three happened.
+function runSpotlightTour(steps, seenKey, onDone) {
+  if (localStorage.getItem(seenKey)) { if (onDone) onDone(); return; }
 
   let step = 0;
   let highlightedEl = null;
@@ -2098,6 +2102,7 @@ function runSpotlightTour(steps, seenKey) {
     window.removeEventListener('resize', positionCard);
     card.remove();
     localStorage.setItem(seenKey, '1');
+    if (onDone) onDone();
   }
 
   function renderStep(direction) {
@@ -2149,7 +2154,7 @@ const ONBOARDING_STEPS = [
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
   { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 자동 채집·판단한 초안을 발행 전에 사람이 검수하는 화면입니다. 검수 결과는 주제가 비슷한 이후 기사 판단에 우선 참고되어 정확도가 보정됩니다.' },
 ];
-function startOnboardingTour() { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY); }
+function startOnboardingTour(onDone) { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY, onDone); }
 
 // Review-page tour — spotlights that page's own controls in the order a
 // reviewer actually works through them (판단 미완료 draft 고르기 → AI 판단
@@ -2167,6 +2172,24 @@ const REVIEW_TOUR_STEPS = [
   { selector: '#d-publish', title: '자료 발행', desc: '판단과 분류가 끝나면 발행 버튼을 눌러 공개합니다.' },
 ];
 function startReviewTour() { runSpotlightTour(REVIEW_TOUR_STEPS, REVIEW_TOUR_SEEN_KEY); }
+
+// Home-page tour — runs immediately after the top-bar nav tour finishes
+// (chained via startOnboardingTour's onDone, see DOMContentLoaded below),
+// not in parallel with it, so the two never visually overlap. Targets
+// Home's own first-visit-worthy features in the order a new user would
+// actually want them explained: how to use the AI search, what a
+// carousel's 1-month archive window means, how to reorder the two theme
+// roots, and how to reorder a theme's own child carousels. Separate
+// seenKey from the nav tour so it only ever shows once regardless of how
+// many times the nav tour itself has already run in this browser.
+const HOME_TOUR_SEEN_KEY = 'ra_home_tour_seen';
+const HOME_TOUR_STEPS = [
+  { selector: '#ai-search', title: 'AI 검색', desc: '여기에 궁금한 점을 질문하면 아카이빙된 자료를 근거로 AI가 답변해 드립니다. 답변의 [번호]를 누르면 해당 자료로 바로 이동해요.' },
+  { selector: '.home-module', title: '테마별 캐러셀', desc: '각 테마의 최근 1개월 이내 발행된 자료만 모아 보여줍니다. 그보다 오래된 자료는 "자료" 탭에서 확인할 수 있어요.' },
+  { selector: '.home-theme-root-swap-icon', title: '테마 순서 조정', desc: '이 아이콘을 누르면 식용유지/비식용유지 순서를 바꿀 수 있는 카드가 뜹니다. 조정 후 저장을 눌러야 반영돼요.' },
+  { selector: '.home-module-drag-handle', title: '소주제 순서 변경', desc: '이 점 모양 핸들을 눌러서 끌면 테마 안 소주제(캐러셀) 순서를 원하는 대로 바꿀 수 있어요.' },
+];
+function startHomeTour() { runSpotlightTour(HOME_TOUR_STEPS, HOME_TOUR_SEEN_KEY); }
 
 async function router() {
   const { path, param, query } = parseHash();
@@ -2242,9 +2265,25 @@ app.addEventListener('dragover', (e) => { homeDragClientY = e.clientY; e.prevent
 app.addEventListener('drop', (e) => e.preventDefault());
 
 window.addEventListener('hashchange', router);
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   if (!location.hash) location.hash = '#/home';
-  startOnboardingTour();
   refreshAdminAuthUi();
-  router();
+  // Home's own tour targets elements that only exist once renderHome()
+  // has actually composed the DOM (AI search form, carousels, the theme
+  // swap icon, a carousel's drag handle) — starting it before router()
+  // resolves would find none of them and silently mark it "seen" without
+  // ever showing a single step. Awaiting router() first guarantees Home
+  // is rendered before either tour's first spotlight is attempted, and
+  // chaining startHomeTour as the nav tour's onDone keeps the two from
+  // ever appearing at the same time.
+  await router();
+  // Guards against a deep link landing on a non-Home route on first
+  // visit: none of HOME_TOUR_STEPS' selectors would exist there, which
+  // would otherwise mark HOME_TOUR_SEEN_KEY as seen without ever showing
+  // it. Skipping it here just leaves it unseen for the next visit that
+  // actually lands on Home, rather than burning it on a page it can't
+  // run on.
+  startOnboardingTour(() => {
+    if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
+  });
 });
