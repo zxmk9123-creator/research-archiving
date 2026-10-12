@@ -19,6 +19,50 @@ router.post('/extract-metadata', requireAuth, async (req, res) => {
   }
 });
 
+// One-off bulk re-processing: re-extracts body_text (via extractMetadata,
+// now cheerio-based with structural boilerplate exclusion — see
+// extractMetadata.js) and regenerates ai_summary/ai_insight for every
+// still-unreviewed Draft item, so the quality improvement from that
+// switch reaches items collected before it, not just new ones going
+// forward. Scoped to Draft only, by design: a Published item's
+// summary/insight is whatever a reviewer already confirmed, and
+// silently overwriting that behind their back (even just its ai_* advisory
+// fields) is a worse outcome than leaving older Published items as-is.
+//
+// Responds immediately and does the actual work in the background rather
+// than blocking the request for however long several hundred sequential
+// external fetches + AI calls take — a review-audit run earlier this
+// session doing exactly that (one long synchronous loop inside a single
+// request) made the whole server feel unresponsive for other requests
+// while it ran. generateAiDraftForItem's own limitAiCall already bounds
+// AI call concurrency/rate; the external re-fetch here stays sequential
+// (one site at a time) rather than hammering many different origins at
+// once.
+async function reextractDraftsInBackground(rows) {
+  let ok = 0;
+  let failed = 0;
+  console.log(`reextract-drafts started: ${rows.length} Draft item(s)`);
+  for (const { id, source_url } of rows) {
+    try {
+      const meta = await extractMetadata(source_url);
+      const result = await generateAiDraftForItem(id, undefined, meta.body_text || meta.summary);
+      if (result.ok) ok++; else failed++;
+    } catch (err) {
+      failed++;
+      console.error(`reextract-drafts: item ${id} failed: ${err.message}`);
+    }
+  }
+  console.log(`reextract-drafts completed: ok=${ok} failed=${failed} total=${rows.length}`);
+}
+
+router.post('/reextract-drafts', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, source_url FROM items WHERE status = 'Draft' AND source_url IS NOT NULL`
+  );
+  res.json({ started: true, total: rows.length });
+  reextractDraftsInBackground(rows).catch((err) => console.error('reextract-drafts failed', err));
+});
+
 const ITEM_SELECT = `
   SELECT i.*, s.name AS source_name, s.trust_grade,
     COALESCE(sec.sectors, '[]') AS sectors,
