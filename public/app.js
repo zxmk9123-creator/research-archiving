@@ -289,24 +289,36 @@ const HOME_THEME_ROOT_NAMES = ['식용유지', '비식용유지'];
 // taxonomy, no DB change. A theme's items are whichever already-fetched
 // Published items carry that sector tag (the same {id, name}[] array every
 // item already returns), so this is purely a client-side grouping.
-function itemsForSector(items, sectorId) {
+function itemsForSector(items, sectorId, windowDays) {
   return items
     .filter((it) => (it.sectors || []).some((s) => s.id === sectorId))
-    .filter((it) => isWithinPastMonth(it.published_at));
+    .filter((it) => isWithinWindow(it.published_at, windowDays));
 }
 
 // Home carousel freshness window — the item's own published_at (never
-// created_at/collected_at), within the last 1 calendar month. An item with
-// no published_at can't be judged "recent" so it's excluded, not kept.
-// Deliberately a filter, not a backfill: if fewer than a full slide's worth
-// of items qualify, the carousel just shows fewer slides/cards — it never
-// reaches past the window to pad slots with older items.
-function isWithinPastMonth(publishedAt) {
+// created_at/collected_at). An item with no published_at can't be judged
+// "recent" so it's excluded, not kept. Deliberately a filter, not a
+// backfill: if fewer than a full slide's worth of items qualify, the
+// carousel just shows fewer slides/cards — it never reaches past the
+// window to pad slots with older items.
+//
+// Window length is per theme root, not a single fixed value: 식용유지's
+// major commodities (팜유, 대두유, ...) publish often enough that a
+// 1-week window still fills a carousel and reads noticeably fresher;
+// 비식용유지's commodities (UCO, SAF, Tallow, ...) are structurally
+// sparse (CLAUDE.md: "매번 '미확보'가 정상" for these) and a 1-week
+// window there would leave most carousels empty far more often, so they
+// keep the longer 1-month window. See HOME_CAROUSEL_WINDOW_DAYS_BY_ROOT's
+// call site in homeThemeRoot().
+const HOME_CAROUSEL_WINDOW_DAYS_BY_ROOT = { 식용유지: 7 };
+const HOME_CAROUSEL_DEFAULT_WINDOW_DAYS = 30;
+
+function isWithinWindow(publishedAt, windowDays) {
   if (!publishedAt) return false;
   const d = new Date(publishedAt);
   if (Number.isNaN(d.getTime())) return false;
   const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 1);
+  cutoff.setDate(cutoff.getDate() - windowDays);
   return d >= cutoff;
 }
 
@@ -421,10 +433,11 @@ function homeThemeRootReorderCardHtml() {
 // each reusing homeCarouselModule() unchanged so card/detail behavior and
 // visual language stay exactly as they are elsewhere on Home.
 function homeThemeRoot(root, byParent, items, importantIds, savedIds, isFirstRoot) {
+  const windowDays = HOME_CAROUSEL_WINDOW_DAYS_BY_ROOT[root.name] ?? HOME_CAROUSEL_DEFAULT_WINDOW_DAYS;
   const children = applyHomeCarouselOrder(root.id, byParent.get(root.id) || []);
   const childModulesHtml = children
     .map((child) => homeCarouselModule(
-      child.name, itemsForSector(items, child.id), `#/archive?sector=${child.id}`, importantIds, savedIds,
+      child.name, itemsForSector(items, child.id, windowDays), `#/archive?sector=${child.id}`, importantIds, savedIds,
       `draggable="false" data-drag-sector="${child.id}"`
     ))
     .join('');
@@ -2278,7 +2291,7 @@ function startReviewTour() { runSpotlightTour(REVIEW_TOUR_STEPS, REVIEW_TOUR_SEE
 const HOME_TOUR_SEEN_KEY = 'ra_home_tour_seen';
 const HOME_TOUR_STEPS = [
   { selector: '#ai-search', title: 'AI 검색', desc: '여기에 궁금한 점을 질문하면 아카이빙된 자료를 근거로 AI가 답변해 드립니다. 답변의 [번호]를 누르면 해당 자료로 바로 이동해요.' },
-  { selector: '.home-module', title: '테마별 캐러셀', desc: '각 테마의 최근 1개월 이내 발행된 자료만 모아 보여줍니다. 그보다 오래된 자료는 "자료" 탭에서 확인할 수 있어요.' },
+  { selector: '.home-module', title: '테마별 캐러셀', desc: '각 테마의 최근 발행 자료만 모아 보여줍니다 (식용유지는 최근 1주일, 비식용유지는 최근 1개월). 그보다 오래된 자료는 "자료" 탭에서 확인할 수 있어요.' },
   { selector: '.home-theme-root-swap-icon', title: '테마 순서 조정', desc: '이 아이콘을 누르면 식용유지/비식용유지 순서를 바꿀 수 있는 카드가 뜹니다. 조정 후 저장을 눌러야 반영돼요.' },
   { selector: '.home-module-drag-handle', title: '소주제 순서 변경', desc: '이 점 모양 핸들을 눌러서 끌면 테마 안 소주제(캐러셀) 순서를 원하는 대로 바꿀 수 있어요.' },
 ];
