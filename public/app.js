@@ -2452,12 +2452,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // "사용 가이드" link (top-right of the topbar): replays whichever tour
   // belongs to the tab the visitor is currently on — NOT a fixed
-  // "always jump to Home" action. Home/Review/Reference each already have
-  // their own page-specific tour; 자료/Sources have none yet, so those
-  // fall back to the nav tour (the only one that's still meaningfully
-  // "about this tab" without a dedicated one). Stays on the current page
-  // throughout — none of this navigates away, so every target it
-  // spotlights is already in the DOM.
+  // "always jump to Home" action, and NOT the full multi-tab nav tour for
+  // a tab that has no dedicated one of its own (자료/Sources) — playing
+  // the whole nav tour there would walk through every OTHER tab too,
+  // which reads as the wrong tab's info when the visitor asked about
+  // this one specifically. For those, it reuses that tab's own
+  // description text already written for ONBOARDING_STEPS and shows it
+  // as a single spotlight card on just that tab's nav link — one step,
+  // not a walkthrough. Stays on the current page throughout — none of
+  // this navigates away, so every target it spotlights is already in
+  // the DOM.
   document.getElementById('nav-guide-btn').onclick = () => {
     const path = parseHash().path || 'home';
     if (path === 'home') {
@@ -2470,8 +2474,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       localStorage.removeItem(REFERENCE_TOUR_SEEN_KEY);
       startReferenceTour();
     } else {
-      localStorage.removeItem(ONBOARDING_SEEN_KEY);
-      startOnboardingTour();
+      const step = ONBOARDING_STEPS.find((s) => s.selector === `[data-route="${path}"]`);
+      if (step) {
+        const seenKey = `ra_tab_info_seen_${path}`;
+        localStorage.removeItem(seenKey);
+        runSpotlightTour([step], seenKey);
+      }
     }
   };
 });
