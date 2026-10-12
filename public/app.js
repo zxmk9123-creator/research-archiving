@@ -1141,10 +1141,11 @@ function getUserEmail(promptIfMissing) {
 }
 
 async function renderDetail(id) {
-  const [item, picks, related] = await Promise.all([
+  const [item, picks, related, isAdmin] = await Promise.all([
     api(`/items/${id}`),
     api(`/picks?item_id=${id}`).catch(() => []),
     api(`/items/${id}/related`).catch(() => []),
+    isAdminAuthenticated(),
   ]);
   const usageTags = (item.usages || []).map((u) => `<span class="pill">${u.name}</span>`).join('');
   const sectorTags = (item.sectors || []).map((s) => `<span class="pill">${s.name}</span>`).join('');
@@ -1176,7 +1177,7 @@ async function renderDetail(id) {
         <button class="btn compact-save-btn ${isSaved ? 'is-saved' : ''}" id="personal-pick-btn">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
         <button class="btn ${myTeamPick ? 'primary' : ''}" id="team-pick-btn">${myTeamPick ? '팀 Pick 취소' : '팀 Pick 저장'}</button>
         <span class="meta">팀 Pick ${teamPickCount}명</span>
-        <button class="btn" id="delete-item-btn" style="margin-left:auto;color:#b91c1c">삭제</button>
+        ${isAdmin ? '<button class="btn" id="delete-item-btn" style="margin-left:auto;color:#b91c1c">삭제</button>' : ''}
       </div>
       ${related.length ? `
         <div class="section">
@@ -1201,11 +1202,19 @@ async function renderDetail(id) {
     }
     renderDetail(id);
   };
-  document.getElementById('delete-item-btn').onclick = async () => {
-    if (!confirm('이 자료를 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
-    await api(`/items/${id}`, { method: 'DELETE' });
-    location.hash = '#/archive';
-  };
+  const deleteItemBtn = document.getElementById('delete-item-btn');
+  if (deleteItemBtn) {
+    deleteItemBtn.onclick = async () => {
+      if (!confirm('이 자료를 영구적으로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+      try {
+        await api(`/items/${id}`, { method: 'DELETE' });
+      } catch (err) {
+        alert(`삭제 실패: ${err.message}`);
+        return;
+      }
+      location.hash = '#/archive';
+    };
+  }
 }
 
 // Reference Source Library v1: a separate, client-side filtered view over
@@ -1847,7 +1856,7 @@ async function renderReview() {
     // one. Wrapping the whole thing, not just the fetch, means ANY such
     // failure now surfaces instead of failing silently partway through.
     try {
-    const item = await api(`/items/${id}`);
+    const [item, isAdmin] = await Promise.all([api(`/items/${id}`), isAdminAuthenticated()]);
 
     function renderAiBox() {
       if (item.ai_status === 'pending') {
@@ -1951,7 +1960,7 @@ async function renderReview() {
           </div>
           <div style="display:flex;gap:6px;align-items:center">
             <button class="btn primary btn-publish" id="d-publish" style="flex:1;width:auto">자료 발행</button>
-            <button class="btn" id="d-delete" type="button" style="flex:0 0 auto;white-space:nowrap;height:var(--ctrl-lg);margin-top:var(--sp-4)">삭제</button>
+            ${isAdmin ? '<button class="btn" id="d-delete" type="button" style="flex:0 0 auto;white-space:nowrap;height:var(--ctrl-lg);margin-top:var(--sp-4)">삭제</button>' : ''}
           </div>
         </div>
       </div>
@@ -2073,15 +2082,18 @@ async function renderReview() {
       }
     };
 
-    document.getElementById('d-delete').onclick = async () => {
-      if (!confirm('이 Draft를 삭제할까요? 되돌릴 수 없습니다.')) return;
-      try {
-        await api(`/items/${id}`, { method: 'DELETE' });
-        advancePastCurrentDraft();
-      } catch (err) {
-        alert(`삭제에 실패했습니다: ${err.message}`);
-      }
-    };
+    const dDeleteBtn = document.getElementById('d-delete');
+    if (dDeleteBtn) {
+      dDeleteBtn.onclick = async () => {
+        if (!confirm('이 Draft를 삭제할까요? 되돌릴 수 없습니다.')) return;
+        try {
+          await api(`/items/${id}`, { method: 'DELETE' });
+          advancePastCurrentDraft();
+        } catch (err) {
+          alert(`삭제에 실패했습니다: ${err.message}`);
+        }
+      };
+    }
 
     // Removes the just-published/deleted item from the in-memory drafts
     // list and dropdown, then moves to whichever item now sits at the same
@@ -2367,14 +2379,25 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 // accounts. The button lives in the nav's "operate" group since only
 // Sources/Review writes and collection triggers require it; reading any
 // page (including Sources/Review themselves) stays open to everyone.
+// Shared by refreshAdminAuthUi() (the nav button) and every page that
+// needs to gate a destructive action (item delete on Detail/Review) on
+// whether an admin is actually logged in client-side, not just rely on
+// the server's requireAuth to reject an unauthenticated attempt after
+// the fact — a delete button visible to everyone but silently 401ing
+// for a logged-out visitor is a worse experience than not offering it.
+async function isAdminAuthenticated() {
+  try {
+    const status = await api('/auth/status');
+    return Boolean(status.authenticated);
+  } catch (err) {
+    return false; // treat an unreachable status check as logged out
+  }
+}
+
 async function refreshAdminAuthUi() {
   const btn = document.getElementById('nav-admin-auth');
   if (!btn) return;
-  let authenticated = false;
-  try {
-    const status = await api('/auth/status');
-    authenticated = Boolean(status.authenticated);
-  } catch (err) { /* treat an unreachable status check as logged out */ }
+  const authenticated = await isAdminAuthenticated();
   btn.textContent = authenticated ? '로그아웃' : '관리자 로그인';
   btn.onclick = authenticated ? adminLogout : adminLogin;
 }
