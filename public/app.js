@@ -265,7 +265,7 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
     ? `<div class="home-carousel-dots">${slides.map((_, i) => `<button type="button" class="home-carousel-dot ${i === 0 ? 'is-active' : ''}" aria-label="${i + 1}번째 그룹으로 이동"></button>`).join('')}</div>`
     : '';
 
-  return `<div class="home-module">
+  return `<div class="home-module" ${moduleAttrs}>
     ${headerHtml}
     <div class="home-carousel">
       <button type="button" class="home-carousel-nav prev" aria-label="이전 자료">‹</button>
