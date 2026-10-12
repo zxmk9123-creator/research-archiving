@@ -1197,11 +1197,16 @@ async function renderDetail(id) {
 // whole point is that a single institution can expose several verified
 // sector/commodity-specific pages (MPOB's production vs. export statistics,
 // for instance), and a reviewer needs to reach the RIGHT one directly.
-function sectorLinksHtml(sectorLinks) {
-  if (!sectorLinks || !sectorLinks.length) return '-';
-  return sectorLinks.map((l) =>
-    `<a class="pill" href="${l.url}" target="_blank" title="${l.sector}">${l.label}</a>`
-  ).join(' ');
+// Per-link sector_links pills used to link straight to each institution's
+// own sector-specific page, but most of those individual URLs have since
+// broken (site restructuring, paywalls, etc.), leaving this column blank
+// for most rows — a per-row fallback would leave the column inconsistent
+// row to row. Unified instead: every row links to a Google search for
+// that institution's name, which always resolves to something useful
+// even when the institution's own site has moved or reorganized.
+function sectorLinksHtml(sourceName) {
+  const url = `https://www.google.com/search?q=${encodeURIComponent(sourceName)}`;
+  return `<a class="pill" href="${url}" target="_blank" rel="noopener" title="${sourceName} 구글 검색">구글 검색</a>`;
 }
 
 // Distinct 지역/품목 values actually present among Reference Sources —
@@ -1228,7 +1233,7 @@ function referenceSourcesTable(sources, filters = {}) {
       <td class="cell-muted">${s.region || '-'}</td>
       <td class="cell-muted">${(s.commodities || []).join(', ') || '-'}</td>
       <td class="cell-muted">${s.coverage_note || '-'}</td>
-      <td class="cell-muted">${sectorLinksHtml(s.sector_links)}</td>
+      <td class="cell-muted">${sectorLinksHtml(s.name)}</td>
       <td class="cell-muted">${(s.access_format || []).join(', ') || '-'}</td>
       <td class="cell-muted">${s.update_frequency || '-'}</td>
       <td class="cell-muted">${s.rss_available ? '있음' : '없음'}</td>
