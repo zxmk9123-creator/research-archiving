@@ -378,6 +378,51 @@ function applyHomeCarouselOrder(rootId, children) {
 // the new order on drop; the displayed order is only ever re-derived from
 // localStorage on the next renderHome(), never mutated in place beyond
 // the live DOM move during the drag itself.
+// Auto-scroll the page while dragging a carousel near the top/bottom edge
+// of the viewport — without this, reordering a theme with more children
+// than fit on screen is impossible: the drag can never reach a module
+// that's off-screen, since native drag/drop doesn't scroll the page on
+// its own the way a text selection does. Speed ramps up the closer the
+// cursor gets to the edge, and stops entirely once it's clear of the
+// edge band, rather than a fixed-speed scroll that overshoots on a quick
+// flick to the very edge.
+const HOME_DRAG_SCROLL_EDGE_PX = 120;
+const HOME_DRAG_SCROLL_MAX_PX = 22;
+let homeDragActive = false;
+let homeDragClientY = null;
+let homeDragScrollRafId = null;
+
+function homeDragAutoScrollStep() {
+  if (!homeDragActive) { homeDragScrollRafId = null; return; }
+  if (homeDragClientY != null) {
+    const viewportH = window.innerHeight;
+    const distFromTop = homeDragClientY;
+    const distFromBottom = viewportH - homeDragClientY;
+    let delta = 0;
+    if (distFromTop < HOME_DRAG_SCROLL_EDGE_PX) {
+      delta = -HOME_DRAG_SCROLL_MAX_PX * (1 - distFromTop / HOME_DRAG_SCROLL_EDGE_PX);
+    } else if (distFromBottom < HOME_DRAG_SCROLL_EDGE_PX) {
+      delta = HOME_DRAG_SCROLL_MAX_PX * (1 - distFromBottom / HOME_DRAG_SCROLL_EDGE_PX);
+    }
+    if (delta) window.scrollBy(0, delta);
+  }
+  homeDragScrollRafId = requestAnimationFrame(homeDragAutoScrollStep);
+}
+
+function startHomeDragAutoScroll() {
+  homeDragActive = true;
+  if (!homeDragScrollRafId) homeDragScrollRafId = requestAnimationFrame(homeDragAutoScrollStep);
+}
+
+function stopHomeDragAutoScroll() {
+  homeDragActive = false;
+  homeDragClientY = null;
+  if (homeDragScrollRafId) {
+    cancelAnimationFrame(homeDragScrollRafId);
+    homeDragScrollRafId = null;
+  }
+}
+
 function initHomeCarouselDragReorder() {
   document.querySelectorAll('.home-theme-children[data-drag-root]').forEach((container) => {
     const rootId = container.dataset.dragRoot;
@@ -391,7 +436,7 @@ function initHomeCarouselDragReorder() {
     // module is also an <a href="#/detail/...">, so an illegal drop can
     // additionally trigger the browser's native "navigate to this link"
     // action instead of just silently failing.
-    container.addEventListener('dragover', (e) => e.preventDefault());
+    container.addEventListener('dragover', (e) => { homeDragClientY = e.clientY; e.preventDefault(); });
     container.addEventListener('drop', (e) => e.preventDefault());
     container.querySelectorAll('.home-module[data-drag-sector]').forEach((mod) => {
       mod.addEventListener('dragstart', (e) => {
@@ -400,15 +445,18 @@ function initHomeCarouselDragReorder() {
         // Firefox refuses to start a drag unless dataTransfer carries
         // something — the payload itself is never read on drop.
         if (e.dataTransfer) e.dataTransfer.setData('text/plain', '');
+        startHomeDragAutoScroll();
       });
       mod.addEventListener('dragend', () => {
         mod.classList.remove('is-dragging');
         draggedEl = null;
+        stopHomeDragAutoScroll();
         const orderedIds = [...container.querySelectorAll('.home-module[data-drag-sector]')]
           .map((el) => Number(el.dataset.dragSector));
         saveHomeCarouselOrder(rootId, orderedIds);
       });
       mod.addEventListener('dragover', (e) => {
+        homeDragClientY = e.clientY;
         if (!draggedEl || draggedEl === mod) return;
         e.preventDefault();
         const rect = mod.getBoundingClientRect();
@@ -2057,7 +2105,7 @@ async function adminLogout() {
 // crossing into the gap between the two theme sections), where nothing
 // else calls preventDefault — without this, that split-second illegal
 // drop target is enough for the browser to reject the whole drop.
-app.addEventListener('dragover', (e) => e.preventDefault());
+app.addEventListener('dragover', (e) => { homeDragClientY = e.clientY; e.preventDefault(); });
 app.addEventListener('drop', (e) => e.preventDefault());
 
 window.addEventListener('hashchange', router);
