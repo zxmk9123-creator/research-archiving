@@ -1,31 +1,17 @@
-// Lightweight metadata extraction (og:*, <title>, meta description) — no HTML parser dependency.
-//
-// The content capture matches back to the SAME quote character the
-// attribute actually opened with (via the \1 backreference), not "any quote
-// character" — a title/description containing an apostrophe (e.g.
-// `content="Indonesia's palm oil exports rise"`) previously truncated at
-// that apostrophe because [^"']* treats ' and " as equivalent terminators
-// regardless of which one the attribute is actually quoted with.
-function matchMeta(html, prop) {
-  const re = new RegExp(
-    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=(["'])([\\s\\S]*?)\\1`,
-    'i'
-  );
-  const m = html.match(re) || html.match(
-    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+(?:property|name)=["']${prop}["']`, 'i')
-  );
-  return m ? m[2].trim() : null;
-}
-
-function decodeEntities(str) {
-  if (!str) return str;
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
+// Metadata extraction (og:*, <title>, meta description, article body) via
+// cheerio — replaces the previous hand-rolled regex parser. Regex HTML
+// parsing is fragile against real-world page structure: this file
+// previously needed a backreference hack just to stop an apostrophe
+// inside a double-quoted attribute from truncating og:title/og:description
+// (quote characters aren't interchangeable, but [^"']* treated them as
+// equivalent terminators), and a full <br>-fallback path because a
+// production site (g-enews.com) rendered its article body as <br>-
+// separated text with no <p> tags at all, which the <p>-only regex simply
+// couldn't see. cheerio parses real HTML (lenient, same tolerance a
+// browser has for malformed markup) instead of pattern-matching it, so an
+// attribute's quote type, tag order, and self-closing style all just work
+// without special-casing.
+const cheerio = require('cheerio');
 
 // Bot-block/CAPTCHA interstitials (Radware, Akamai, Cloudflare, generic
 // "verify you are human" pages) return HTTP 200 with a real <title> —
@@ -44,16 +30,14 @@ function isBotBlockPage(title) {
 // starves the AI draft prompt of real material — the weak-summary/insight
 // complaint traces back to this, not to the AI prompt itself. Pulling the
 // actual <p> body text gives generateAiDraftForItem() something substantive
-// to work from. No HTML-parser dependency, same convention as the rest of
-// this file: strip script/style blocks, then concatenate <p> text content.
+// to work from.
 const MAX_BODY_TEXT_CHARS = 6000;
-// Hard cap on how much raw HTML the regexes in this file ever scan — see the
-// comment at its use site in extractMetadata() for why.
+// Hard cap on how much raw HTML cheerio ever parses — see the comment at
+// its use site in extractMetadata() for why.
 const MAX_HTML_CHARS = 500_000;
-
-function stripTags(fragment) {
-  return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-}
+// Below this, the <p>-based pool isn't the real article — try the <br>
+// fallback instead of accepting a thin/empty result.
+const MIN_SUBSTANTIAL_BODY_CHARS = 200;
 
 // A footer/legal-notice paragraph (copyright line, publisher address,
 // "무단전재 금지") is itself often a real <p>...</p> long enough to pass the
@@ -63,25 +47,38 @@ function stripTags(fragment) {
 // page) never captured at all. Worse than finding no content, because it
 // silently reads as real article text to generateAiDraftForItem(), so the
 // model correctly judged it had no substance — on the wrong input.
-// Filtered out before the length check, not after, so a long boilerplate
-// paragraph still never counts as "substantial".
 const BOILERPLATE_PARAGRAPH_RE = /copyright\s*©|무단\s*(전재|사용|복사|배포)|all rights reserved|저작권법에\s*저촉|^\(우\)\d{5}/i;
 
-function extractParagraphs(regex, cleaned) {
-  return [...cleaned.matchAll(regex)]
-    .map((m) => stripTags(m[1]))
+function filterParagraphs(texts) {
+  return texts
+    .map((t) => t.trim())
     .filter((text) => text.length > 40 && !BOILERPLATE_PARAGRAPH_RE.test(text)); // drop nav/caption/boilerplate fragments
 }
 
-// Below this, the <p>-based pool isn't the real article — try the <br>
-// fallback instead of accepting a thin/empty result.
-const MIN_SUBSTANTIAL_BODY_CHARS = 200;
+// The <br>-fallback's segments are raw (still-tagged) HTML substrings from
+// a plain string split — never parsed by cheerio, so unlike $(...).text()
+// they're never auto-decoded. decodeEntities only needs the handful of
+// entities real article HTML actually uses; a <br>-less page never reaches
+// this path at all.
+function decodeEntities(str) {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+function stripTags(fragment) {
+  return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+}
 
-function extractBodyText(html) {
-  const cleaned = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
-  let paragraphs = extractParagraphs(/<p[^>]*>([\s\S]*?)<\/p>/gi, cleaned);
+// Shared by extractBodyText(html) (the standalone/tested entry point) and
+// extractMetadata() (which parses the page once and reuses the same
+// cheerio instance for both metadata and body text, rather than parsing
+// twice).
+function extractBodyTextFrom($) {
+  $('script, style').remove();
+  let paragraphs = filterParagraphs($('p').map((i, el) => $(el).text()).get());
 
   // Some Korean news CMS templates render the article body as a single
   // container with <br> line breaks instead of separate <p> tags — <p>
@@ -89,23 +86,23 @@ function extractBodyText(html) {
   // production on g-enews.com: the real article sat in <br>-separated
   // lines inside one <div itemprop="articleBody">, with no <p> tags at
   // all). Generic fallback, not site-specific: whenever the <p> pool is
-  // too thin to plausibly be the article, also try text runs ending in
-  // <br>, and keep whichever pool is actually bigger.
+  // too thin to plausibly be the article, also try text runs separated by
+  // <br>, and keep whichever pool is actually bigger. This is the one part
+  // cheerio's DOM model doesn't give a direct equivalent for (a <br> isn't
+  // a container with its own text), so it still works off the serialized
+  // HTML string, same as before.
   if (paragraphs.join('').length < MIN_SUBSTANTIAL_BODY_CHARS) {
-    // split(), not a regex match loop — a lazy quantifier here
-    // (`[^<]{41,}?` before `<br>`) backtracks catastrophically across a
-    // large page with few/no actual <br> tags nearby; splitting is linear
-    // regardless of how the content is shaped.
-    const brParagraphs = cleaned
-      .split(/<br\s*\/?>/gi)
-      .map((segment) => stripTags(segment))
-      .filter((text) => text.length > 40 && !BOILERPLATE_PARAGRAPH_RE.test(text));
+    const bodyHtml = $('body').html() || $.html();
+    const brParagraphs = filterParagraphs(bodyHtml.split(/<br\s*\/?>/gi).map(stripTags));
     if (brParagraphs.join('').length > paragraphs.join('').length) paragraphs = brParagraphs;
   }
 
   if (!paragraphs.length) return null;
-  const joined = paragraphs.join('\n\n');
-  return joined.slice(0, MAX_BODY_TEXT_CHARS);
+  return paragraphs.join('\n\n').slice(0, MAX_BODY_TEXT_CHARS);
+}
+
+function extractBodyText(html) {
+  return extractBodyTextFrom(cheerio.load(html.slice(0, MAX_HTML_CHARS)));
 }
 
 async function extractMetadata(url) {
@@ -115,34 +112,39 @@ async function extractMetadata(url) {
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const rawHtml = await res.text();
-  // Production incident: an unbounded-size page fed into the regexes below
-  // (matchMeta, extractBodyText) froze the whole Node process for minutes —
-  // GET / (a static file, no DB query) took 4+ minutes to respond while a
+  // Production incident: an unbounded-size page fed into the previous
+  // regex parser froze the whole Node process for minutes — GET / (a
+  // static file, no DB query) took 4+ minutes to respond while a
   // collection run was fetching real-world pages, some apparently large or
-  // malformed enough to blow up [\s\S]*? backtracking across the full
-  // document. og:meta tags and the first article paragraphs always appear
-  // near the top of a real page, so truncating well before any regex runs
-  // bounds the worst case without losing anything these regexes would have
-  // found anyway.
+  // malformed enough to blow up backtracking across the full document.
+  // og:meta tags and the first article paragraphs always appear near the
+  // top of a real page, so truncating well before cheerio ever parses it
+  // bounds the worst case without losing anything it would have found
+  // anyway — still needed with cheerio, which has to walk the whole
+  // document regardless of how lenient its parser is.
   const html = rawHtml.slice(0, MAX_HTML_CHARS);
+  const $ = cheerio.load(html);
 
-  const titleTag = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-  const title = decodeEntities(matchMeta(html, 'og:title') || (titleTag ? titleTag[1].trim() : null));
+  // Matches whichever of property="X"/name="X" the page actually used, in
+  // either attribute order — a CSS attribute selector doesn't care which,
+  // unlike the previous two-regex-with-a-fallback approach this replaces.
+  const metaContent = (prop) => {
+    const value = $(`meta[property="${prop}"], meta[name="${prop}"]`).attr('content');
+    return value ? value.trim() : null;
+  };
+
+  const title = metaContent('og:title') || $('title').first().text().trim() || null;
   if (isBotBlockPage(title)) throw new Error(`bot-block interstitial detected: "${title}"`);
-  const summary = decodeEntities(matchMeta(html, 'og:description') || matchMeta(html, 'description'));
-  const thumbnail_url = matchMeta(html, 'og:image');
-  const published_at = (
-    matchMeta(html, 'article:published_time') ||
-    matchMeta(html, 'og:published_time') ||
-    matchMeta(html, 'date')
-  );
-  const body_text = extractBodyText(html);
+  const summary = metaContent('og:description') || metaContent('description');
+  const thumbnail_url = metaContent('og:image');
+  const publishedRaw = metaContent('article:published_time') || metaContent('og:published_time') || metaContent('date');
+  const body_text = extractBodyTextFrom($);
 
   return {
-    title: title || null,
-    summary: summary || null,
-    thumbnail_url: thumbnail_url || null,
-    published_at: published_at ? published_at.slice(0, 10) : null,
+    title,
+    summary,
+    thumbnail_url,
+    published_at: publishedRaw ? publishedRaw.slice(0, 10) : null,
     body_text,
   };
 }
