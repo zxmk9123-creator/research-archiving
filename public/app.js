@@ -1065,8 +1065,28 @@ async function renderArchive(query = {}) {
 
   const filterPanel = document.getElementById('filter-panel');
   const filterToggleBtn = document.getElementById('filter-toggle-btn');
+  // The CSS transition used to animate max-height toward a fixed, much
+  // larger-than-actual 900px cap (see .archive-filter-panel) — with a
+  // fixed-duration transition, the browser spends the same amount of
+  // time covering the whole 0-900px range regardless of how much of it
+  // the real content ever reaches, so the panel's actual (much smaller)
+  // height change happens in a fraction of that time and the rest reads
+  // as a stutter/early stop rather than a smooth reveal. Measuring the
+  // panel's real scrollHeight and transitioning to that exact value
+  // instead makes the animation's timing match what's actually visible.
   filterToggleBtn.onclick = () => {
     const willOpen = !filterPanel.classList.contains('is-open');
+    if (willOpen) {
+      filterPanel.style.maxHeight = `${filterPanel.scrollHeight}px`;
+    } else {
+      // Start the close transition from the panel's current real height
+      // (not the open-state CSS rule's value) — forces a reflow via the
+      // read right before the write so the browser has a concrete
+      // starting point to animate from instead of jumping straight to 0.
+      filterPanel.style.maxHeight = `${filterPanel.scrollHeight}px`;
+      void filterPanel.offsetHeight; // forces a layout flush between the two writes above/below
+      filterPanel.style.maxHeight = '0px';
+    }
     filterPanel.classList.toggle('is-open', willOpen);
     filterToggleBtn.setAttribute('aria-expanded', String(willOpen));
   };
