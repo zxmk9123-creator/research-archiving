@@ -1585,6 +1585,8 @@ async function renderSourceManager(view, query = {}) {
     }
     renderSourceManager(view, query);
   };
+
+  if (view === 'reference') startReferenceTour();
 }
 
 async function renderSources(query = {}) { return renderSourceManager('all', query); }
@@ -2278,6 +2280,35 @@ const REVIEW_TOUR_STEPS = [
   { selector: '#d-publish', title: '자료 발행', desc: '판단과 분류가 끝나면 발행 버튼을 눌러 공개합니다.' },
 ];
 function startReviewTour() { runSpotlightTour(REVIEW_TOUR_STEPS, REVIEW_TOUR_SEEN_KEY); }
+
+// Reference-page tour — walks through adding a new Reference Source: open
+// the add form, paste a representative link, run AI metadata extraction,
+// then submit. The form's fields live in #ref-add-form-wrap, hidden by
+// default (see renderSourceManager/sourceFormFieldsHtml) — opening it
+// before the tour starts is what actually makes steps 2-4's targets
+// visible to spotlight; without that, every step after the first would
+// find its selector in the DOM (so it wouldn't get silently skipped) but
+// nothing would visibly highlight, since a hidden element still matches
+// a CSS selector.
+const REFERENCE_TOUR_SEEN_KEY = 'ra_reference_tour_seen';
+const REFERENCE_TOUR_STEPS = [
+  { selector: '#s-form-summary', title: '소스 추가', desc: '여기를 눌러 새 레퍼런스 소스를 추가하는 입력란을 열 수 있어요.' },
+  { selector: '#s-extract-url', title: '대표 링크 입력', desc: '추가하려는 기관의 대표 URL을 붙여넣으세요.' },
+  { selector: '#s-extract-btn', title: '메타데이터 추출', desc: '이 버튼을 누르면 페이지 정보를 가져오고, AI가 유형·지역·품목 등 가능한 항목을 자동으로 채워줍니다. 비어있는 칸만 채워지니 직접 입력한 값은 유지돼요.' },
+  { selector: '#s-add', title: '추가', desc: '자동으로 채워지지 않은 항목은 직접 입력한 뒤 이 버튼을 눌러 저장하세요.' },
+];
+function startReferenceTour() {
+  // Only force the add panel open for a first-ever visit — on every later
+  // visit (seenKey already set), runSpotlightTour would no-op anyway, but
+  // opening the panel here regardless would still pop it open unprompted
+  // on every single Reference page load from then on.
+  if (localStorage.getItem(REFERENCE_TOUR_SEEN_KEY)) return;
+  const details = document.getElementById('s-form-section');
+  const formWrap = document.getElementById('ref-add-form-wrap');
+  if (details) details.open = true;
+  if (formWrap) formWrap.hidden = false;
+  runSpotlightTour(REFERENCE_TOUR_STEPS, REFERENCE_TOUR_SEEN_KEY);
+}
 
 // Home-page tour — runs immediately after the top-bar nav tour finishes
 // (chained via startOnboardingTour's onDone, see DOMContentLoaded below),
