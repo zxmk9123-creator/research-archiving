@@ -1258,6 +1258,57 @@ function sectorLinkRowHtml(link = {}) {
   </div>`;
 }
 
+// The add/edit form's fields, shared verbatim by both the Sources tab's
+// bottom-of-page placement and the Reference tab's top-right popover
+// (see renderSourceManager below) — only the surrounding <details>
+// wrapper's position/styling differs between the two.
+//
+// "대표 링크로 메타데이터 자동 채우기": same idea as Review's AI draft
+// generation (paste a link, let AI fill the blanks), applied to this
+// form's own fields instead of an article's summary/insight — see
+// bindSourceExtractButton() below for the fetch + fill logic.
+function sourceFormFieldsHtml(view) {
+  return `
+    <input type="hidden" id="s-edit-id">
+    <div class="form-row s-extract-row">
+      <label>대표 링크로 메타데이터 자동 채우기</label>
+      <div class="s-extract-controls">
+        <input id="s-extract-url" placeholder="기관 사이트 대표 URL (예: https://...)">
+        <button type="button" class="btn" id="s-extract-btn">메타데이터 추출</button>
+      </div>
+      <p class="meta" id="s-extract-status"></p>
+    </div>
+    <div class="form-row"><label>이름</label><input id="s-name"></div>
+    <div class="form-row"><label>
+      <input type="checkbox" id="s-is-reference" ${view === 'reference' ? 'checked' : ''}> Reference Source (자동 수집 없이 참고용으로만 등록)
+    </label></div>
+    <div class="form-row"><label>수집방식</label>
+      <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="structured">structured (통계 데이터 자동 수집)</option><option value="crawl">crawl</option></select>
+    </div>
+    <div class="form-row"><label>URL (일반/대표 링크. rss는 피드 URL)</label><input id="s-url"></div>
+    <div class="form-row"><label>오너</label><input id="s-owner"></div>
+    <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
+    <div class="form-row"><label>유형 (예: 정부/국제기구 통계, 거래소/가격데이터)</label><input id="s-type"></div>
+    <div class="form-row"><label>지역/국가</label><input id="s-region"></div>
+    <div class="form-row"><label>품목 (쉼표 구분, 예: 팜유,대두유)</label><input id="s-commodities"></div>
+    <div class="form-row"><label>데이터/보고서 커버리지</label><input id="s-coverage"></div>
+    <div class="form-row">
+      <label>섹터별 링크 (기관 사이트 내 품목/섹터 전용 페이지 — 홈페이지가 아닌 검증된 세부 페이지)</label>
+      <div id="s-sector-links"></div>
+      <button type="button" class="btn-text" id="s-sector-link-add">+ 링크 추가</button>
+    </div>
+    <div class="form-row"><label>접근형식 (쉼표 구분: web,PDF,XLSX,CSV,API,RSS)</label><input id="s-access-format"></div>
+    <div class="form-row"><label>업데이트 주기 (예: Monthly, Weekly)</label><input id="s-update-freq"></div>
+    <div class="form-row"><label>
+      <input type="checkbox" id="s-rss-available"> RSS 제공 여부
+    </label></div>
+    <div class="form-row"><label>최종 검증일</label><input id="s-last-verified" type="date"></div>
+    <div class="form-row"><label>비고 / 활용 노트</label><input id="s-usage-note"></div>
+    <button class="btn primary" id="s-add">추가</button>
+    <button class="btn" id="s-cancel-edit" style="display:none">취소</button>
+  `;
+}
+
 // Shared by the Sources tab (view='all') and the 레퍼런스 tab
 // (view='reference') — both manage rows in the same `sources` table
 // (is_reference flag), just scoped to a top-level route each now rather
@@ -1282,49 +1333,25 @@ async function renderSourceManager(view, query = {}) {
         <td>${s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
         <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
       </tr>`).join('')}
-    </table>` : `
-    <div class="filters" id="ref-filters">
-      <select id="ref-f-region"><option value="">지역 전체</option>${refRegionOpts}</select>
-      <select id="ref-f-commodity"><option value="">품목 전체</option>${refCommodityOpts}</select>
-      <button class="btn" id="ref-f-clear">초기화</button>
+    </table>
+    <details class="section" id="s-form-section">
+      <summary id="s-form-summary">소스 추가</summary>
+      ${sourceFormFieldsHtml(view)}
+    </details>
+    ${collectionWarningHtml(sources)}` : `
+    <div class="ref-toolbar">
+      <div class="filters" id="ref-filters">
+        <select id="ref-f-region"><option value="">지역 전체</option>${refRegionOpts}</select>
+        <select id="ref-f-commodity"><option value="">품목 전체</option>${refCommodityOpts}</select>
+        <button class="btn" id="ref-f-clear">초기화</button>
+      </div>
+      <details class="section ref-add-details" id="s-form-section">
+        <summary id="s-form-summary" class="btn primary">+ 소스 추가</summary>
+        ${sourceFormFieldsHtml(view)}
+      </details>
     </div>
     <div id="ref-sources-result">${referenceSourcesTable(sources, { region: query.region, commodity: query.commodity })}</div>
     `}
-
-    <details class="section" id="s-form-section">
-      <summary id="s-form-summary">소스 추가</summary>
-      <input type="hidden" id="s-edit-id">
-      <div class="form-row"><label>이름</label><input id="s-name"></div>
-      <div class="form-row"><label>
-        <input type="checkbox" id="s-is-reference" ${view === 'reference' ? 'checked' : ''}> Reference Source (자동 수집 없이 참고용으로만 등록)
-      </label></div>
-      <div class="form-row"><label>수집방식</label>
-        <select id="s-method"><option value="manual">manual</option><option value="rss">rss (자동 수집)</option><option value="institution">institution (기관 보고서 PDF 자동 수집)</option><option value="structured">structured (통계 데이터 자동 수집)</option><option value="crawl">crawl</option></select>
-      </div>
-      <div class="form-row"><label>URL (일반/대표 링크. rss는 피드 URL)</label><input id="s-url"></div>
-      <div class="form-row"><label>오너</label><input id="s-owner"></div>
-      <div class="form-row"><label>수집 주기(일)</label><input id="s-freq" type="number" value="1"></div>
-      <div class="form-row"><label>유형 (예: 정부/국제기구 통계, 거래소/가격데이터)</label><input id="s-type"></div>
-      <div class="form-row"><label>지역/국가</label><input id="s-region"></div>
-      <div class="form-row"><label>품목 (쉼표 구분, 예: 팜유,대두유)</label><input id="s-commodities"></div>
-      <div class="form-row"><label>데이터/보고서 커버리지</label><input id="s-coverage"></div>
-      <div class="form-row">
-        <label>섹터별 링크 (기관 사이트 내 품목/섹터 전용 페이지 — 홈페이지가 아닌 검증된 세부 페이지)</label>
-        <div id="s-sector-links"></div>
-        <button type="button" class="btn-text" id="s-sector-link-add">+ 링크 추가</button>
-      </div>
-      <div class="form-row"><label>접근형식 (쉼표 구분: web,PDF,XLSX,CSV,API,RSS)</label><input id="s-access-format"></div>
-      <div class="form-row"><label>업데이트 주기 (예: Monthly, Weekly)</label><input id="s-update-freq"></div>
-      <div class="form-row"><label>
-        <input type="checkbox" id="s-rss-available"> RSS 제공 여부
-      </label></div>
-      <div class="form-row"><label>최종 검증일</label><input id="s-last-verified" type="date"></div>
-      <div class="form-row"><label>비고 / 활용 노트</label><input id="s-usage-note"></div>
-      <button class="btn primary" id="s-add">추가</button>
-      <button class="btn" id="s-cancel-edit" style="display:none">취소</button>
-    </details>
-
-    ${view === 'all' ? collectionWarningHtml(sources) : ''}
   `;
   const collectAllBtn = document.getElementById('collect-all-btn');
   if (collectAllBtn) {
@@ -1400,6 +1427,8 @@ async function renderSourceManager(view, query = {}) {
     document.getElementById('s-is-reference').checked = view === 'reference';
     document.getElementById('s-rss-available').checked = false;
     sectorLinksContainer.innerHTML = '';
+    document.getElementById('s-extract-url').value = '';
+    document.getElementById('s-extract-status').textContent = '';
   }
 
   // Shared between the initial render and the Reference Sources filter's
@@ -1432,6 +1461,7 @@ async function renderSourceManager(view, query = {}) {
         document.getElementById('s-name').value = s.name || '';
         document.getElementById('s-method').value = s.method || 'manual';
         document.getElementById('s-url').value = s.url || '';
+        document.getElementById('s-extract-url').value = s.url || '';
         document.getElementById('s-owner').value = s.owner || '';
         document.getElementById('s-freq').value = s.frequency_days || 1;
         document.getElementById('s-is-reference').checked = Boolean(s.is_reference);
@@ -1452,6 +1482,45 @@ async function renderSourceManager(view, query = {}) {
   }
   bindReferenceSourceRowActions();
   document.getElementById('s-cancel-edit').onclick = () => resetForm();
+
+  // Only fills a field that's currently blank — a value the reviewer has
+  // already typed (including while re-running extraction after editing
+  // the URL) is never silently overwritten.
+  function fillIfBlank(id, value) {
+    const el = document.getElementById(id);
+    if (!el.value && value) el.value = value;
+  }
+
+  document.getElementById('s-extract-btn').onclick = async () => {
+    const url = document.getElementById('s-extract-url').value.trim();
+    const statusEl = document.getElementById('s-extract-status');
+    if (!url) { statusEl.textContent = '대표 URL을 먼저 입력하세요.'; return; }
+    const btn = document.getElementById('s-extract-btn');
+    btn.disabled = true;
+    statusEl.textContent = '추출 중...';
+    try {
+      const meta = await api('/sources/extract-metadata', { method: 'POST', body: JSON.stringify({ url }) });
+      fillIfBlank('s-url', url);
+      const sug = meta.suggested;
+      fillIfBlank('s-name', (sug && sug.name) || meta.title);
+      fillIfBlank('s-coverage', (sug && sug.coverage_note) || meta.summary);
+      if (sug) {
+        fillIfBlank('s-type', sug.source_type);
+        fillIfBlank('s-region', sug.region);
+        if (sug.commodities.length) fillIfBlank('s-commodities', sug.commodities.join(','));
+        if (sug.access_format.length) fillIfBlank('s-access-format', sug.access_format.join(','));
+        fillIfBlank('s-update-freq', sug.update_frequency);
+        fillIfBlank('s-usage-note', sug.usage_note);
+        statusEl.textContent = '메타데이터를 반영했습니다. 추정이 어려운 항목은 직접 입력해 주세요.';
+      } else {
+        statusEl.textContent = '페이지 정보는 가져왔지만 AI 분류에는 실패했습니다 — 유형/지역/품목 등은 직접 입력해 주세요.';
+      }
+    } catch (err) {
+      statusEl.textContent = `추출 실패: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
   document.getElementById('s-add').onclick = async () => {
     const commodities = document.getElementById('s-commodities').value

@@ -4,8 +4,38 @@ const { collectBySource, runDueCollections, collectAllSourcesNow } = require('..
 const { collectWebDiscoverySource } = require('../lib/webDiscoveryIngest');
 const { collectDailyDiscoveryNow } = require('../lib/dailyDiscovery');
 const { requireAuth } = require('../lib/auth');
+const { extractMetadata } = require('../lib/extractMetadata');
+const { suggestSourceMetadata } = require('../lib/sourceMetadataSuggest');
 
 const router = express.Router();
+
+// Reference Source add-form helper: given the source's own representative
+// link, extract page metadata the same way items.js's /extract-metadata
+// does, then ask the AI to categorize it into this form's own fields
+// (source_type/region/commodities/access_format/update_frequency/
+// coverage_note/usage_note) — same "paste a link, let AI fill the
+// blanks" idea generateAiDraftForItem() already applies to article
+// drafts. A page-fetch failure and an AI failure are reported with
+// different reasons so the client can tell "couldn't reach that URL"
+// apart from "reached it, but AI categorization failed" (metadata is
+// still usable on its own in that second case).
+router.post('/extract-metadata', requireAuth, async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  let meta;
+  try {
+    meta = await extractMetadata(url);
+  } catch (err) {
+    return res.status(422).json({ error: `metadata extraction failed: ${err.message}` });
+  }
+  let suggested = null;
+  try {
+    suggested = await suggestSourceMetadata({ title: meta.title, summary: meta.summary, bodyText: meta.body_text });
+  } catch (err) {
+    console.error(`source metadata suggestion failed: ${err.message}`);
+  }
+  res.json({ ...meta, suggested });
+});
 
 // Manual trigger: run collectDailyDiscoveryNow() — the exact same function
 // the 08:00 KST scheduler calls — on demand, regardless of
