@@ -14,7 +14,7 @@ const pool = require('../db/pool');
 // searchWeb/extractMetadata for a synthetic result without a real
 // network call — same convention structuredDataIngest.js uses for
 // fetchAndParse.
-const webSearchAdapter = require('./adapters/webSearch');
+const webSearchAdapter = require('./adapters/searchTiers');
 const extractMetadataModule = require('./extractMetadata');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');

@@ -1,0 +1,58 @@
+// Firecrawl Search adapter — second search tier for Web Research
+// Discovery, used only as a fallback when Brave Search (adapters/
+// webSearch.js, the primary tier) fails outright (all configured keys
+// exhausted/erroring). Kept as its own module/env vars rather than merged
+// into Brave's key rotation, so each tier stays independently
+// configurable and distinguishable in logs — see searchTiers.js, the only
+// module that calls both.
+const FIRECRAWL_SEARCH_ENDPOINT = 'https://api.firecrawl.dev/v1/search';
+const MAX_RESULTS = 10;
+
+// Same multi-key convention as webSearch.js's getConfiguredKeys(): read
+// fresh on every call, not cached at module load.
+function getConfiguredKeys() {
+  const multi = process.env.FIRECRAWL_API_KEYS;
+  if (multi && multi.trim()) return multi.split(',').map((k) => k.trim()).filter(Boolean);
+  const single = (process.env.FIRECRAWL_API_KEY || '').trim();
+  return single ? [single] : [];
+}
+
+async function searchWeb(query, options = {}) {
+  const keys = getConfiguredKeys();
+  if (!keys.length) throw new Error('no FIRECRAWL_API_KEY(S) configured');
+
+  const body = { query, limit: MAX_RESULTS };
+  // Firecrawl has no Brave-style freshness code; map the one value any
+  // existing caller actually passes (Daily Discovery's past-week bias) to
+  // Firecrawl's own time-based search operator.
+  if (options.freshness === 'pw') body.tbs = 'qdr:w';
+
+  let lastError;
+  for (const apiKey of keys) {
+    try {
+      const res = await fetch(FIRECRAWL_SEARCH_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        console.error(`firecrawl search failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+        lastError = new Error(`search failed: ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      const rawResults = (data && Array.isArray(data.data)) ? data.data : [];
+      return rawResults
+        .map((r) => ({ title: (r.title || '').trim(), link: (r.url || '').trim() }))
+        .filter((c) => c.title && c.link)
+        .slice(0, MAX_RESULTS);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('search failed: all configured Firecrawl API keys failed');
+}
+
+module.exports = { searchWeb, MAX_RESULTS };
