@@ -7,7 +7,13 @@ function decodeEntities(str) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    // Some feeds (confirmed in production — titles like "Indonesia&#039;s
+    // Palm Oil Export Overhaul" reaching the AI search chatbot verbatim)
+    // encode the apostrophe as the zero-padded numeric form &#039; rather
+    // than &#39; — both represent the same character (U+0027), so match
+    // either. Same fix already applied in adapters/institutionPdf.js for
+    // the identical bug there.
+    .replace(/&#0*39;/g, "'")
     .trim();
 }
 

@@ -66,7 +66,9 @@ function decodeEntities(str) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    // Zero-padded numeric form (&#039;) is equally common — match either
+    // (same fix as feedParser.js/institutionPdf.js's identical functions).
+    .replace(/&#0*39;/g, "'");
 }
 function stripTags(fragment) {
   return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
