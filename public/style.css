@@ -305,15 +305,48 @@ p { margin: 0; }
    carousels underneath. The children themselves are plain .home-module
    instances, unchanged. */
 .home-theme-root { margin-bottom: var(--sp-8); }
+/* Positioning context for the reorder card below, which anchors to the
+   first root's header rather than pushing the page's own layout. */
+.home-theme-root-header-row { position: relative; }
 .home-theme-root-header { display: flex; align-items: center; gap: 4px; cursor: pointer; margin-bottom: var(--sp-5); width: fit-content; }
 .home-theme-root-header:hover h2 { color: var(--action); }
 .home-theme-root-header h2 { margin: 0; font-size: 1.4rem; }
 .home-theme-root-header .home-module-arrow { font-size: 24px; }
 
-/* Swaps the two theme roots' order in one click — a 2-item list has only
-   one possible reorder, so this replaces drag-and-drop for the roots
-   themselves rather than making the whole page a drop target for them. */
-.home-theme-swap-btn { display: block; margin: 0 0 var(--sp-6); }
+/* Small ⇅ icon to the left of each root heading — opens the reorder
+   card below instead of standing on the page as its own button, so it
+   reads as part of the heading rather than extra page chrome. */
+.home-theme-root-swap-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border: none; background: none;
+  color: var(--text-tertiary); font-size: 14px; cursor: pointer; border-radius: 50%;
+}
+.home-theme-root-swap-icon:hover { color: var(--action); background: var(--surface-sunken); }
+
+/* The popover card itself — anchored under the first root's header
+   (home-theme-root-header-row's position:relative), floating above the
+   carousels rather than shifting their layout. Same surface/border
+   treatment as .review-tip-card, this codebase's other inline card. */
+.home-root-reorder-card {
+  position: absolute; top: 100%; left: 0; z-index: 5; margin-top: 4px;
+  width: 220px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-control); box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+  padding: var(--sp-4);
+}
+.home-root-reorder-title { margin: 0 0 var(--sp-3); font-size: 13px; font-weight: 700; color: var(--text); }
+.home-root-reorder-list { margin: 0 0 var(--sp-3); padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+.home-root-reorder-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 6px 10px; background: var(--surface-sunken); border-radius: var(--radius-sm); font-size: 13.5px;
+}
+.home-root-reorder-controls { display: flex; gap: 2px; }
+.home-root-reorder-move {
+  width: 20px; height: 20px; padding: 0; border: none; background: none;
+  color: var(--text-secondary); font-size: 11px; cursor: pointer; border-radius: var(--radius-sm);
+}
+.home-root-reorder-move:hover:not(:disabled) { color: var(--action); background: var(--surface); }
+.home-root-reorder-move:disabled { color: var(--text-tertiary); opacity: .4; cursor: default; }
+.home-root-reorder-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 
 .home-carousel { display: flex; align-items: flex-start; gap: var(--sp-3); }
 .home-carousel-viewport { overflow: hidden; flex: 1; min-width: 0; }

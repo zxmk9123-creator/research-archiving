@@ -315,9 +315,13 @@ function isWithinPastMonth(publishedAt) {
 // one possible move (swap the two), so a single button that performs
 // that move directly is faster and more obvious than picking up a card,
 // carrying it across the whole page, and dropping it in the only other
-// valid slot. Same localStorage convention as the per-theme carousel
-// order (HOME_CAROUSEL_ORDER_KEY) — a per-browser display preference,
-// no backend involved.
+// valid slot. Surfaced as a small ⇅ icon beside each root heading
+// (home-theme-root-swap-icon) that opens a tiny reorder card rather than
+// a standing button on the page — the button read as an extra piece of
+// chrome competing with the page's own heading/lede for attention.
+// Same localStorage convention as the per-theme carousel order
+// (HOME_CAROUSEL_ORDER_KEY) — a per-browser display preference, no
+// backend involved.
 const HOME_ROOT_ORDER_KEY = 'ra_home_root_order';
 
 function getHomeRootOrder() {
@@ -348,14 +352,67 @@ function applyHomeRootOrder(roots) {
   return [...ordered, ...roots.filter((r) => !orderedIds.has(r.id))];
 }
 
-// Cached by renderHome() so the swap button can act without re-fetching
-// /api/sectors — it only ever needs the id order, not fresh data.
+// Cached by renderHome() so the reorder card can act without re-fetching
+// /api/sectors — it only ever needs the id/name pairs, not fresh data.
 let homeThemeRootsCache = [];
 
-function swapHomeThemeRootOrder() {
-  if (homeThemeRootsCache.length < 2) return;
-  saveHomeRootOrder([...homeThemeRootsCache].reverse().map((r) => r.id));
+// Whether the reorder card is open, and its in-progress (unsaved) order —
+// kept separate from the saved order so the carousels behind the card
+// stay in their last-saved order while the user is still arranging rows,
+// and a Cancel simply drops this draft instead of needing to undo
+// anything. Reset to null whenever the card closes (saved or cancelled).
+let homeRootReorderCardOpen = false;
+let homeRootReorderDraft = null;
+
+function toggleHomeThemeRootReorderCard() {
+  homeRootReorderCardOpen = !homeRootReorderCardOpen;
+  homeRootReorderDraft = homeRootReorderCardOpen ? homeThemeRootsCache.map((r) => r.id) : null;
   renderHome();
+}
+
+// ▲/▼ swap the row at `idx` with its neighbor in the given direction —
+// the only two possible moves in a short list, so a full drag-and-drop
+// implementation inside a tiny popover card would be overkill.
+function moveHomeThemeRootReorderRow(idx, dir) {
+  if (!homeRootReorderDraft) return;
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= homeRootReorderDraft.length) return;
+  [homeRootReorderDraft[idx], homeRootReorderDraft[swapIdx]] = [homeRootReorderDraft[swapIdx], homeRootReorderDraft[idx]];
+  renderHome();
+}
+
+function saveHomeThemeRootReorderCard() {
+  if (homeRootReorderDraft) saveHomeRootOrder(homeRootReorderDraft);
+  homeRootReorderCardOpen = false;
+  homeRootReorderDraft = null;
+  renderHome();
+}
+
+// Rendered once, anchored under the first theme root's heading — both
+// roots' ⇅ icons open this same shared card since there's only one order
+// to manage between them, not one per root.
+function homeThemeRootReorderCardHtml() {
+  if (!homeRootReorderCardOpen || !homeRootReorderDraft) return '';
+  const byId = new Map(homeThemeRootsCache.map((r) => [r.id, r]));
+  const rows = homeRootReorderDraft.map((id, i) => {
+    const root = byId.get(id);
+    if (!root) return '';
+    return `<li class="home-root-reorder-row">
+      <span>${root.name}</span>
+      <span class="home-root-reorder-controls">
+        <button type="button" class="home-root-reorder-move" onclick="moveHomeThemeRootReorderRow(${i}, -1)" ${i === 0 ? 'disabled' : ''} aria-label="위로 이동">▲</button>
+        <button type="button" class="home-root-reorder-move" onclick="moveHomeThemeRootReorderRow(${i}, 1)" ${i === homeRootReorderDraft.length - 1 ? 'disabled' : ''} aria-label="아래로 이동">▼</button>
+      </span>
+    </li>`;
+  }).join('');
+  return `<div class="home-root-reorder-card">
+    <p class="home-root-reorder-title">테마 순서 조정</p>
+    <ul class="home-root-reorder-list">${rows}</ul>
+    <div class="home-root-reorder-actions">
+      <button type="button" class="btn-text-action" onclick="toggleHomeThemeRootReorderCard()">취소</button>
+      <button type="button" class="btn" onclick="saveHomeThemeRootReorderCard()">저장</button>
+    </div>
+  </div>`;
 }
 
 // One top-level theme (식용유지/비식용유지): a clickable heading that opens
@@ -363,7 +420,7 @@ function swapHomeThemeRootOrder() {
 // compact carousel per child theme (팜유, 대두유, ... / UCO, SAF, ...),
 // each reusing homeCarouselModule() unchanged so card/detail behavior and
 // visual language stay exactly as they are elsewhere on Home.
-function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
+function homeThemeRoot(root, byParent, items, importantIds, savedIds, isFirstRoot) {
   const children = applyHomeCarouselOrder(root.id, byParent.get(root.id) || []);
   const childModulesHtml = children
     .map((child) => homeCarouselModule(
@@ -376,9 +433,18 @@ function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
   // every child id), same expansion the Archive page's own sector-tree
   // checkbox already does, or clicking a root would show an empty result.
   const subtreeIds = collectSubtreeIds(byParent, root.id);
+  // The swap icon sits only to the left of the heading text — stopping
+  // propagation keeps a click on it from also firing the header's own
+  // navigate-to-archive handler.
+  const swapIconHtml = homeThemeRootsCache.length >= 2
+    ? `<button type="button" class="home-theme-root-swap-icon" title="테마 순서 조정" aria-label="테마 순서 조정" onclick="event.stopPropagation(); toggleHomeThemeRootReorderCard()">⇅</button>`
+    : '';
   return `<section class="home-theme-root">
-    <div class="home-theme-root-header" onclick="location.hash='#/archive?sector=${subtreeIds.join(',')}'">
-      <h2>${root.name}</h2><span class="home-module-arrow">›</span>
+    <div class="home-theme-root-header-row">
+      <div class="home-theme-root-header" onclick="location.hash='#/archive?sector=${subtreeIds.join(',')}'">
+        ${swapIconHtml}<h2>${root.name}</h2><span class="home-module-arrow">›</span>
+      </div>
+      ${isFirstRoot ? homeThemeRootReorderCardHtml() : ''}
     </div>
     <div class="home-theme-children" data-drag-root="${root.id}">${childModulesHtml || '<p class="meta">표시할 테마가 없습니다.</p>'}</div>
   </section>`;
@@ -758,19 +824,14 @@ async function renderHome() {
   const roots = applyHomeRootOrder((byParent.get(null) || []).filter((s) => HOME_THEME_ROOT_NAMES.includes(s.name)));
   homeThemeRootsCache = roots;
 
-  const swapButtonHtml = roots.length >= 2
-    ? `<button type="button" class="btn home-theme-swap-btn" onclick="swapHomeThemeRootOrder()" title="${roots[0].name} / ${roots[1].name} 순서 바꾸기">⇅ 테마 순서 바꾸기</button>`
-    : '';
-
   const themesHtml = roots.length
-    ? roots.map((root) => homeThemeRoot(root, byParent, items, importantIds, savedIds)).join('')
+    ? roots.map((root, i) => homeThemeRoot(root, byParent, items, importantIds, savedIds, i === 0)).join('')
     : '<p class="meta">표시할 테마가 없습니다.</p>';
 
   app.innerHTML = `
     <h1>Home</h1>
     <p class="page-lede">최근 유지시장의 주요 이슈를 둘러보세요.</p>
     ${aiSearchHtml()}
-    ${swapButtonHtml}
     ${themesHtml}
   `;
 
