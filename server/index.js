@@ -2,6 +2,7 @@ const path = require('path');
 const express = require('express');
 const { runDueCollections } = require('./lib/collector');
 const { maybeRunDailyDiscovery } = require('./lib/dailyDiscovery');
+const { requeueStalledPendingDrafts } = require('./lib/aiDraft');
 
 const app = express();
 app.use(express.json());
@@ -57,3 +58,12 @@ maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run faile
 setInterval(() => {
   maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run failed', err));
 }, COLLECTION_CHECK_INTERVAL_MS);
+
+// Recovers Review-tab items stuck forever at ai_status='pending' — see
+// requeueStalledPendingDrafts()'s own comment for the full root cause
+// (a redeploy killing the process mid-generateAiDraftForItem call, with
+// nothing else ever revisiting a 'pending' row afterward). Startup-only
+// is enough: a process this early in its own lifecycle can't be the one
+// that orphaned any 'pending' row it finds, so there's no risk of racing
+// a call still genuinely in flight.
+requeueStalledPendingDrafts().catch((err) => console.error('ai draft requeue failed', err));

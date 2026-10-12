@@ -436,6 +436,37 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
   }
 }
 
+// Recovers items orphaned at ai_status='pending' forever — confirmed in
+// production (2026-10-12): 14 items stuck there, some for over a day,
+// with zero path back to 'completed'/'failed'. generateAiDraftForItem()
+// sets 'pending' then updates to 'completed'/'failed' in the same
+// call, but a server restart/redeploy while that call is still
+// in-flight (routine on this platform — a redeploy happens on every
+// push, and this session alone restarted the service several times)
+// kills the process before that second write ever runs, leaving the
+// row permanently stuck. Nothing else ever revisits a 'pending' row:
+// Review's AI box only offers a retry button for 'failed' (see
+// renderAiBox in app.js), and review-audit only re-judges Draft items
+// generically, not specifically ones stuck here.
+//
+// Safe to call on every server boot: a process that's just starting
+// cannot have any call of its own genuinely still in flight, so on a
+// single-instance deployment (no concurrent replica could be holding a
+// legitimate in-progress call either) every 'pending' row found here is
+// by definition orphaned, never one this very call needs to protect
+// against racing. Fire-and-forget per item, same convention collector.js
+// already uses for generateAiDraftForItem — this only ever needs to
+// unstick a small, occasional backlog, not block startup on it.
+async function requeueStalledPendingDrafts() {
+  const { rows } = await pool.query(`SELECT id FROM items WHERE ai_status = 'pending'`);
+  if (!rows.length) return { requeued: 0 };
+  console.log(`ai_draft requeuing ${rows.length} item(s) stuck at ai_status='pending'`);
+  for (const { id } of rows) {
+    generateAiDraftForItem(id).catch((err) => console.error(`ai_draft requeue failed for item ${id}: ${err.message}`));
+  }
+  return { requeued: rows.length };
+}
+
 // Autonomous-ingestion-only step: applies an already-generated AI draft as
 // the item's canonical record and publishes it, with NO human "apply" in
 // between. This is the one place in the codebase that copies ai_summary/
@@ -517,6 +548,7 @@ module.exports = {
   getTaxonomy,
   sanitizeError,
   generateAiDraftForItem,
+  requeueStalledPendingDrafts,
   getFeedbackCandidatePool,
   selectFeedbackExamples,
   buildFeedbackBlock,

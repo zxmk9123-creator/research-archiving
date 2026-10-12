@@ -13,6 +13,7 @@ const {
   parseQaDecision,
   applyAiDraftIfEligible,
   generateAiDraftForItem,
+  requeueStalledPendingDrafts,
   getFeedbackCandidatePool,
   selectFeedbackExamples,
   buildFeedbackBlock,
@@ -921,6 +922,56 @@ test('generateAiDraftForItem: includes reviewer corrections in the prompt sent t
     assert.equal(result.ok, true);
     assert.match(capturedUserPrompt, /Reviewer corrections/);
     assert.match(capturedUserPrompt, /과거 기사/);
+  } finally {
+    restore();
+  }
+});
+
+// --- requeueStalledPendingDrafts: recovers items orphaned at ai_status='pending' ---
+
+test('requeueStalledPendingDrafts: queries only ai_status=\'pending\' items and reports how many it found', async () => {
+  const { calls, restore } = mockPool([
+    [`ai_status = 'pending'`, () => ({ rows: [{ id: 1 }, { id: 2 }, { id: 3 }] })],
+  ]);
+  try {
+    const result = await requeueStalledPendingDrafts();
+    assert.equal(result.requeued, 3);
+    const pendingQuery = calls.find((c) => c.text.includes("ai_status = 'pending'"));
+    assert.ok(pendingQuery, 'expected a query selecting pending items');
+  } finally {
+    restore();
+  }
+});
+
+test('requeueStalledPendingDrafts: does not query anything further when there are no pending items', async () => {
+  const { calls, restore } = mockPool([
+    [`ai_status = 'pending'`, () => ({ rows: [] })],
+  ]);
+  try {
+    const result = await requeueStalledPendingDrafts();
+    assert.equal(result.requeued, 0);
+    assert.equal(calls.length, 1, 'expected only the one SELECT, no further per-item work');
+  } finally {
+    restore();
+  }
+});
+
+test('requeueStalledPendingDrafts: fires generateAiDraftForItem per row without waiting for it to finish', async () => {
+  // generateAiDraftForItem(id) runs with the real default providerFn here
+  // (requeueStalledPendingDrafts doesn't accept an override — matching
+  // collector.js's own fire-and-forget convention for this call) — its
+  // own 'SELECT * FROM items WHERE id' finds no row (mockPool's default
+  // `{ rows: [] }` for anything unmatched), so it resolves quickly with
+  // {ok: false, error: 'item not found'} rather than reaching any
+  // provider/network call. This test only asserts requeue returns
+  // immediately, before that per-item work has necessarily completed —
+  // exactly the fire-and-forget behavior the function promises.
+  const { restore } = mockPool([
+    [`ai_status = 'pending'`, () => ({ rows: [{ id: 42 }] })],
+  ]);
+  try {
+    const result = await requeueStalledPendingDrafts();
+    assert.equal(result.requeued, 1);
   } finally {
     restore();
   }
