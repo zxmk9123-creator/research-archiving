@@ -793,21 +793,36 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .filter-toggle-btn { height: 42px; display: inline-flex; align-items: center; gap: 6px; }
 .filter-toggle-btn .pill { background: var(--action); color: #fff; }
 
+/* grid-template-rows 0fr -> 1fr instead of animating max-height toward a
+   guessed cap: the row track always matches the content's real intrinsic
+   height exactly, at every point in the transition, with no mismatch
+   between the animated duration and the actual height change — which is
+   what the max-height approach still looked slightly off on (the reveal
+   read as the content "flying up" into place rather than the panel
+   simply growing). No JS height measurement needed either. Padding moved
+   onto .archive-filter-panel-inner as a static value (not itself
+   animated) — one fewer property changing in parallel keeps the motion
+   simple to read as "one thing happening," not several queued up.
+   overflow:hidden + min-height:0 on the inner element is what actually
+   clips it to the collapsing 0fr row. */
 .archive-filter-panel {
+  display: grid;
+  grid-template-rows: 0fr;
   background: var(--surface-sunken);
   border-radius: var(--radius-surface);
-  padding: 0;
-  margin: 0 0 var(--sp-6);
-  overflow: hidden;
-  max-height: 0;
+  margin: 0;
   opacity: 0;
-  transition: max-height .22s var(--ease), opacity .18s var(--ease), padding .22s var(--ease), margin .22s var(--ease);
+  transition: grid-template-rows .25s var(--ease), opacity .2s var(--ease), margin-bottom .25s var(--ease);
 }
 .archive-filter-panel.is-open {
-  max-height: 900px;
+  grid-template-rows: 1fr;
   opacity: 1;
-  padding: var(--sp-4) var(--sp-4) var(--sp-3);
   margin: 0 0 var(--sp-6);
+}
+.archive-filter-panel-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
 }
 
 .archive .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--sp-4); align-items: center; }
@@ -879,7 +894,7 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 
 @media (max-width: 640px) {
   .sector-col { flex: 1 1 170px; min-width: 160px; }
-  .archive-filter-panel.is-open { padding: 12px 14px; }
+  .archive-filter-panel-inner { padding: 12px 14px; }
   .topbar { padding: 12px 16px; }
   #app { padding: var(--sp-5) var(--sp-3) var(--sp-7); }
   .detail { padding: var(--sp-4); border-radius: var(--radius-card); }
