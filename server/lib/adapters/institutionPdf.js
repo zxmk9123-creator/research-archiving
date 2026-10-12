@@ -37,15 +37,16 @@ const CGSPACE_DOWNLOAD_LINK_PATTERN = /cgspace\.cgiar\.org\/server\/api\/core\/b
 // "Download" (or an equivalent placeholder), in either discovery path.
 const GENERIC_TITLE_PATTERN = /^(download|다운로드|pdf|file|report|full text|view|read more)$/i;
 
+// `entities` (cheerio/htmlparser2's own entity decoder) handles the full
+// HTML5 entity set instead of a hand-picked list — this function used to
+// cover only &amp;/&lt;/&gt;/&quot;/&#0*39;, which was already a patch for
+// CGSpace's zero-padded numeric apostrophe (&#039; vs &#39;) found after
+// the fact; feedParser.js hit the identical gap, then a second one
+// (&#8217;, the curly right-single-quote entity) neither file's list
+// covered. See feedParser.js's decodeEntities for the fuller history.
+const { decodeHTML } = require('entities');
 function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    // CGSpace's title markup uses the zero-padded numeric form (&#039;)
-    // rather than &#39; — match either.
-    .replace(/&#0*39;/g, "'");
+  return decodeHTML(str);
 }
 
 function isGenericTitle(text) {

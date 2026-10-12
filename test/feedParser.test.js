@@ -37,3 +37,20 @@ test('parseFeed: decodes the zero-padded apostrophe entity in Atom <entry> title
   const items = parseFeed(xml);
   assert.equal(items[0].title, "Cargill's Q3 earnings beat expectations");
 });
+
+// Second production incident after the &#039; fix above, from switching
+// decodeEntities() to `entities`'s decodeHTML(): "Iran&#8217;s IRGC hit 7
+// '‘violating'’ oilers" reached the chatbot verbatim — &#8217; (curly
+// right-single-quote) and &#8216;/&#8220;/&#8221; (curly left-single-quote,
+// curly double-quotes) were never in the hand-picked entity list at all.
+// This is exactly the class of bug decodeHTML() closes structurally,
+// rather than needing yet another one-off regex patch.
+
+test('parseFeed: decodes curly-quote entities (&#8217; etc.), not just straight-quote ones', () => {
+  const xml = `<rss><channel><item>
+    <title>Iran&#8217;s IRGC hit 7 &#8216;violating&#8217; oilers</title>
+    <link>https://example.org/d</link>
+  </item></channel></rss>`;
+  const items = parseFeed(xml);
+  assert.equal(items[0].title, 'Iran’s IRGC hit 7 ‘violating’ oilers');
+});

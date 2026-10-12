@@ -12,6 +12,7 @@
 // attribute's quote type, tag order, and self-closing style all just work
 // without special-casing.
 const cheerio = require('cheerio');
+const { decodeHTML } = require('entities');
 
 // Bot-block/CAPTCHA interstitials (Radware, Akamai, Cloudflare, generic
 // "verify you are human" pages) return HTTP 200 with a real <title> —
@@ -57,21 +58,15 @@ function filterParagraphs(texts) {
 
 // The <br>-fallback's segments are raw (still-tagged) HTML substrings from
 // a plain string split — never parsed by cheerio, so unlike $(...).text()
-// they're never auto-decoded. decodeEntities only needs the handful of
-// entities real article HTML actually uses; a <br>-less page never reaches
-// this path at all.
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    // Zero-padded numeric form (&#039;) is equally common — match either
-    // (same fix as feedParser.js/institutionPdf.js's identical functions).
-    .replace(/&#0*39;/g, "'");
-}
+// they're never auto-decoded. Uses `entities` (cheerio/htmlparser2's own
+// entity decoder, added as a direct dependency) for the full HTML5 entity
+// set rather than a hand-picked list — a hand-rolled version of this
+// function covering only &amp;/&lt;/&gt;/&quot;/&#39; needed patching
+// twice in production for entities it didn't know (&#039; the zero-padded
+// numeric apostrophe, then &#8217; the curly right-single-quote), and
+// there was no reason to expect either patch was the last one needed.
 function stripTags(fragment) {
-  return decodeEntities(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+  return decodeHTML(fragment.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 // Shared by extractBodyText(html) (the standalone/tested entry point) and
