@@ -2450,28 +2450,28 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
   });
 
-  // "사용 가이드" button (top-right of the nav): lets a visitor replay the
-  // nav tour on demand, any time — not just on their very first visit.
-  // Clearing ONBOARDING_SEEN_KEY first is what makes runSpotlightTour()
-  // actually run again instead of early-returning as "already seen".
-  // Chains into the Home tour the same way the first-visit flow does
-  // (only when currently on Home, for the same reason startOnboardingTour
-  // guards it above), but does NOT clear HOME_TOUR_SEEN_KEY — the Home
-  // tour would otherwise also need forcing even when it's already been
-  // seen, which is scoped to the nav tour specifically here.
-  document.getElementById('nav-guide-btn').onclick = async () => {
-    localStorage.removeItem(ONBOARDING_SEEN_KEY);
-    // Navigates to Home and awaits its render directly (same reason
-    // DOMContentLoaded above awaits router() before starting any tour) —
-    // the Home tour's targets don't exist until renderHome() has run, and
-    // a raw location.hash assignment's 'hashchange' handler would only
-    // resolve that asynchronously, with no handle here to await.
-    if (parseHash().path !== 'home' && parseHash().path !== '') {
-      location.hash = '#/home';
-      await router();
+  // "사용 가이드" link (top-right of the topbar): replays whichever tour
+  // belongs to the tab the visitor is currently on — NOT a fixed
+  // "always jump to Home" action. Home/Review/Reference each already have
+  // their own page-specific tour; 자료/Sources have none yet, so those
+  // fall back to the nav tour (the only one that's still meaningfully
+  // "about this tab" without a dedicated one). Stays on the current page
+  // throughout — none of this navigates away, so every target it
+  // spotlights is already in the DOM.
+  document.getElementById('nav-guide-btn').onclick = () => {
+    const path = parseHash().path || 'home';
+    if (path === 'home') {
+      localStorage.removeItem(HOME_TOUR_SEEN_KEY);
+      startHomeTour();
+    } else if (path === 'review') {
+      localStorage.removeItem(REVIEW_TOUR_SEEN_KEY);
+      startReviewTour();
+    } else if (path === 'reference') {
+      localStorage.removeItem(REFERENCE_TOUR_SEEN_KEY);
+      startReferenceTour();
+    } else {
+      localStorage.removeItem(ONBOARDING_SEEN_KEY);
+      startOnboardingTour();
     }
-    startOnboardingTour(() => {
-      if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
-    });
   };
 });
