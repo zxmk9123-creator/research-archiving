@@ -2449,4 +2449,29 @@ window.addEventListener('DOMContentLoaded', async () => {
   startOnboardingTour(() => {
     if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
   });
+
+  // "사용 가이드" button (top-right of the nav): lets a visitor replay the
+  // nav tour on demand, any time — not just on their very first visit.
+  // Clearing ONBOARDING_SEEN_KEY first is what makes runSpotlightTour()
+  // actually run again instead of early-returning as "already seen".
+  // Chains into the Home tour the same way the first-visit flow does
+  // (only when currently on Home, for the same reason startOnboardingTour
+  // guards it above), but does NOT clear HOME_TOUR_SEEN_KEY — the Home
+  // tour would otherwise also need forcing even when it's already been
+  // seen, which is scoped to the nav tour specifically here.
+  document.getElementById('nav-guide-btn').onclick = async () => {
+    localStorage.removeItem(ONBOARDING_SEEN_KEY);
+    // Navigates to Home and awaits its render directly (same reason
+    // DOMContentLoaded above awaits router() before starting any tour) —
+    // the Home tour's targets don't exist until renderHome() has run, and
+    // a raw location.hash assignment's 'hashchange' handler would only
+    // resolve that asynchronously, with no handle here to await.
+    if (parseHash().path !== 'home' && parseHash().path !== '') {
+      location.hash = '#/home';
+      await router();
+    }
+    startOnboardingTour(() => {
+      if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
+    });
+  };
 });
