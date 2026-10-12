@@ -194,14 +194,20 @@ test('searchWeb: a non-402 failure (e.g. 429) on one key still throws immediatel
   }
 }));
 
-test('searchWeb: BRAVE_SEARCH_API_KEYS takes precedence over BRAVE_SEARCH_API_KEY when both are set', () => withApiKey('single-key', async () => {
+test('searchWeb: BRAVE_SEARCH_API_KEY is merged into the rotation alongside BRAVE_SEARCH_API_KEYS, not dropped', () => withApiKey('single-key', async () => {
   process.env.BRAVE_SEARCH_API_KEYS = 'multi-key-a';
   _resetKeyStateForTests();
-  let seenKey;
-  const restore = mockFetch(async (url, init) => { seenKey = init.headers['X-Subscription-Token']; return braveResponse([]); });
+  const seenKeys = [];
+  // Both keys are 402-exhausted in turn, so rotation must reach both of
+  // them — proof that 'single-key' is actually in the configured list,
+  // not silently dropped because BRAVE_SEARCH_API_KEYS was also set.
+  const restore = mockFetch(async (url, init) => {
+    seenKeys.push(init.headers['X-Subscription-Token']);
+    return { ok: false, status: 402, text: async () => '' };
+  });
   try {
-    await searchWeb('q');
-    assert.equal(seenKey, 'multi-key-a');
+    await assert.rejects(() => searchWeb('q'), /search failed: 402/);
+    assert.deepEqual(new Set(seenKeys), new Set(['single-key', 'multi-key-a']));
   } finally {
     restore();
     delete process.env.BRAVE_SEARCH_API_KEYS;

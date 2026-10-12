@@ -13,15 +13,18 @@ const MAX_RESULTS = 10;
 
 // Multiple free-tier Brave accounts' keys, comma-separated, so a key that
 // hits its monthly quota (HTTP 402) doesn't take down every Web Discovery
-// query until the next billing cycle. BRAVE_SEARCH_API_KEY (singular) keeps
-// working unchanged for a single-key setup — read fresh on every call, not
-// cached at module load, so a key added via an env var update takes effect
-// without a restart.
+// query until the next billing cycle. BRAVE_SEARCH_API_KEY (singular) is
+// merged in alongside BRAVE_SEARCH_API_KEYS (plural) rather than overridden
+// by it — both can hold a distinct key at once, and a setup that sets both
+// must not have the singular one silently dropped from the rotation. Read
+// fresh on every call, not cached at module load, so a key added via an env
+// var update takes effect without a restart. Deduped so the same key listed
+// in both vars isn't tried twice.
 function getConfiguredKeys() {
-  const multi = process.env.BRAVE_SEARCH_API_KEYS;
-  if (multi && multi.trim()) return multi.split(',').map((k) => k.trim()).filter(Boolean);
-  const single = process.env.BRAVE_SEARCH_API_KEY;
-  return single ? [single] : [];
+  const multi = (process.env.BRAVE_SEARCH_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
+  const single = (process.env.BRAVE_SEARCH_API_KEY || '').trim();
+  const all = single ? [single, ...multi] : multi;
+  return [...new Set(all)];
 }
 
 // Keys confirmed exhausted (HTTP 402) this process's lifetime. Brave's 402
