@@ -112,6 +112,39 @@ test('extractBodyText: a substantial <p>-based article is kept as-is, never repl
   assert.ok(text.includes('Analysts at a major trading house'));
 });
 
+// Production finding (2026-10-12, after switching extraction to cheerio):
+// a site's own masthead tagline and an author-bio blurb both slipped into
+// body_text as its very first paragraph, ahead of the real article, on two
+// different real sites — neither matched BOILERPLATE_PARAGRAPH_RE (which
+// only ever targeted copyright/legal-notice phrasing), so these needed a
+// structural exclusion instead: drop known non-article containers from
+// the DOM before <p> collection, something only possible once real HTML
+// parsing (cheerio) replaced the old regex-based extraction.
+
+test('extractBodyText: drops a site masthead/tagline inside <header>, keeps the real article', () => {
+  const html = `<html><body>
+    <header><p>Essential news coupled with the finest maritime content sourced from across the globe.</p></header>
+    <article>
+      <p>Two more tankers have been struck in the Strait of Hormuz as U.S. forces disable a cargo vessel in the Gulf of Oman, extending a sharp escalation in attacks on commercial shipping.</p>
+    </article>
+  </body></html>`;
+  const text = extractBodyText(html);
+  assert.ok(text.includes('Two more tankers have been struck'));
+  assert.ok(!text.includes('Essential news coupled'));
+});
+
+test('extractBodyText: drops an author-bio blurb by class name, keeps the real article', () => {
+  const html = `<html><body>
+    <div class="author-bio"><p>My focus spans the global energy landscape and the technologies reshaping it, specifically oil and gas markets.</p></div>
+    <article>
+      <p>The U.S. Strategic Petroleum Reserve held just 283 million barrels of oil at the end of September, the lowest level since October 1982.</p>
+    </article>
+  </body></html>`;
+  const text = extractBodyText(html);
+  assert.ok(text.includes('The U.S. Strategic Petroleum Reserve held'));
+  assert.ok(!text.includes('My focus spans'));
+});
+
 // Production bug: a title/description containing an apostrophe (common in
 // possessives, e.g. "Indonesia's exports...") was truncated right at that
 // apostrophe — [^"']* treated ' and " as interchangeable terminators

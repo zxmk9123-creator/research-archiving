@@ -76,8 +76,31 @@ function stripTags(fragment) {
 // extractMetadata() (which parses the page once and reuses the same
 // cheerio instance for both metadata and body text, rather than parsing
 // twice).
+// Structural, not text-pattern, boilerplate exclusion — one of the things
+// cheerio actually makes possible that the old regex parser couldn't:
+// these containers can now be dropped from the DOM entirely before <p>
+// collection ever runs, instead of trying to recognize their text content
+// after the fact. Confirmed live (2026-10-12): a site's own tagline
+// ("Essential news coupled with the finest maritime content sourced from
+// across the globe.") and an author-bio blurb ("What I Cover / My focus
+// spans the global energy landscape...") both slipped into body_text as
+// its very first paragraph on two different real sites, ahead of the
+// actual article — BOILERPLATE_PARAGRAPH_RE only ever matched copyright/
+// legal-notice phrasing, nothing generic enough to catch either of these,
+// and never could without risking false positives on real article prose
+// that happens to share a word with site chrome.
+const BOILERPLATE_CONTAINER_SELECTOR = [
+  'header', 'nav', 'footer', 'aside',
+  '[class*="author"]', '[class*="byline"]', '[class*="bio"]',
+  '[class*="tagline"]', '[class*="subtitle"]', '[class*="masthead"]',
+  '[class*="site-desc"]', '[class*="related"]', '[class*="share"]',
+  '[class*="social"]', '[class*="newsletter"]', '[class*="advert"]',
+  '[class*="widget"]', '[class*="promo"]', '[class*="disclaimer"]',
+].join(', ');
+
 function extractBodyTextFrom($) {
   $('script, style').remove();
+  $(BOILERPLATE_CONTAINER_SELECTOR).remove();
   let paragraphs = filterParagraphs($('p').map((i, el) => $(el).text()).get());
 
   // Some Korean news CMS templates render the article body as a single
