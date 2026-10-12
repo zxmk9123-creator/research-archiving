@@ -368,7 +368,7 @@ function homeThemeRoot(root, byParent, items, importantIds, savedIds) {
   const childModulesHtml = children
     .map((child) => homeCarouselModule(
       child.name, itemsForSector(items, child.id), `#/archive?sector=${child.id}`, importantIds, savedIds,
-      `draggable="true" data-drag-sector="${child.id}"`
+      `draggable="false" data-drag-sector="${child.id}"`
     ))
     .join('');
   // Items are tagged with a leaf/child sector, essentially never the root
@@ -487,6 +487,18 @@ function initHomeCarouselDragReorder() {
     container.addEventListener('dragover', (e) => { homeDragClientY = e.clientY; e.preventDefault(); });
     container.addEventListener('drop', (e) => e.preventDefault());
     container.querySelectorAll('.home-module[data-drag-sector]').forEach((mod) => {
+      // draggable starts false on every module (see homeThemeRoot's
+      // moduleAttrs) so that clicking anywhere else on the card — the
+      // carousel's own single-card-click navigation — never gets
+      // hijacked into a drag. Only arms draggable=true for the brief
+      // window between pressing down on the ⠿ handle and releasing (or
+      // dragend firing), then disarms it again; mousedown rather than
+      // click because dragstart fires before a click would.
+      const handle = mod.querySelector('.home-module-drag-handle');
+      if (handle) {
+        handle.addEventListener('mousedown', () => { mod.draggable = true; });
+        handle.addEventListener('touchstart', () => { mod.draggable = true; }, { passive: true });
+      }
       mod.addEventListener('dragstart', (e) => {
         draggedEl = mod;
         mod.classList.add('is-dragging');
@@ -497,12 +509,18 @@ function initHomeCarouselDragReorder() {
       });
       mod.addEventListener('dragend', () => {
         mod.classList.remove('is-dragging');
+        mod.draggable = false;
         draggedEl = null;
         stopHomeDragAutoScroll();
         const orderedIds = [...container.querySelectorAll('.home-module[data-drag-sector]')]
           .map((el) => Number(el.dataset.dragSector));
         saveHomeCarouselOrder(rootId, orderedIds);
       });
+      // Pressed the handle down but never actually dragged (e.g. a plain
+      // click on it) — dragstart/dragend never fire in that case, so this
+      // disarms draggable on its own instead of leaving the whole card
+      // draggable until the next unrelated drag elsewhere re-triggers it.
+      mod.addEventListener('mouseup', () => { mod.draggable = false; });
       mod.addEventListener('dragover', (e) => {
         homeDragClientY = e.clientY;
         if (!draggedEl || draggedEl === mod) return;
