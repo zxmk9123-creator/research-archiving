@@ -139,6 +139,10 @@ body {
 .onboard-card h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
 .onboard-card p { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
 .onboard-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* Single-step info card (no step counter, just one "확인" button) — keep
+   it on the same right edge the primary button sits at in the multi-step
+   footer, instead of flex's default left alignment for a lone child. */
+.onboard-card-footer-single { justify-content: flex-end; }
 .onboard-step-count { font-size: 12px; color: var(--text-tertiary); flex-shrink: 0; }
 .onboard-actions { display: flex; gap: 8px; }
 

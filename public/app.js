@@ -2239,7 +2239,18 @@ function runSpotlightTour(steps, seenKey, onDone) {
     highlightedEl = target;
     const isFirst = step === 0;
     const isLast = step === steps.length - 1;
-    card.innerHTML = `
+    // A single-step "tour" (e.g. the 자료/Sources tab info card — see
+    // nav-guide-btn's click handler) is really just a description
+    // popover, not a walkthrough — 이전/건너뛰기/단계 카운터 all imply
+    // there's more than one step to move through, which reads as
+    // confusing chrome around a single sentence. One "확인" button only.
+    card.innerHTML = steps.length === 1 ? `
+      <h3>${s.title}</h3>
+      <p>${s.desc}</p>
+      <div class="onboard-card-footer onboard-card-footer-single">
+        <button type="button" class="btn primary" id="onboard-next">확인</button>
+      </div>
+    ` : `
       <h3>${s.title}</h3>
       <p>${s.desc}</p>
       <div class="onboard-card-footer">
@@ -2253,12 +2264,12 @@ function runSpotlightTour(steps, seenKey, onDone) {
     `;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     positionCard();
-    document.getElementById('onboard-prev').onclick = () => {
+    document.getElementById('onboard-prev')?.addEventListener('click', () => {
       if (isFirst) return;
       step -= 1;
       renderStep(-1);
-    };
-    document.getElementById('onboard-skip').onclick = finish;
+    });
+    document.getElementById('onboard-skip')?.addEventListener('click', finish);
     document.getElementById('onboard-next').onclick = () => {
       if (isLast) { finish(); return; }
       step += 1;
