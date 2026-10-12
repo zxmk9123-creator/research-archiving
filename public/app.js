@@ -1226,7 +1226,7 @@ function referenceSourcesTable(sources, filters = {}) {
   if (filters.commodity) refs = refs.filter((s) => (s.commodities || []).includes(filters.commodity));
   if (!refs.length) return '<p class="meta">조건에 맞는 Reference Source가 없습니다.</p>';
   return `<table class="sources-table">
-    <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>섹터별 링크</th><th>접근형식</th><th>업데이트 주기</th><th>RSS</th><th>최종 검증일</th><th>비고</th><th></th></tr>
+    <tr><th>이름</th><th>유형</th><th>지역</th><th>품목</th><th>커버리지</th><th>섹터별 링크</th><th>접근형식</th><th>업데이트 주기</th><th>비고</th><th></th></tr>
     ${refs.map((s) => `<tr>
       <td class="cell-strong">${s.name}</td>
       <td class="cell-muted">${s.source_type || '-'}</td>
@@ -1236,8 +1236,6 @@ function referenceSourcesTable(sources, filters = {}) {
       <td class="cell-muted">${sectorLinksHtml(s.name)}</td>
       <td class="cell-muted">${(s.access_format || []).join(', ') || '-'}</td>
       <td class="cell-muted">${s.update_frequency || '-'}</td>
-      <td class="cell-muted">${s.rss_available ? '있음' : '없음'}</td>
-      <td class="cell-muted">${s.last_verified_at ? new Date(s.last_verified_at).toLocaleDateString() : '-'}</td>
       <td class="cell-muted">${s.usage_note || '-'}</td>
       <td>
         <button class="btn-text-action" data-edit-source="${s.id}">편집</button>
