@@ -1289,6 +1289,10 @@ async function renderArchive(query = {}) {
             <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
             <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds, teamPicksByItem)).join('')}</div>
           `).join('')}
+          <div class="pagination-controls">
+            ${offset > 0 ? `<button class="btn" id="archive-prev-page">이전 100개</button>` : ''}
+            ${itemsPage.hasMore ? `<button class="btn" id="archive-next-page">다음 100개</button>` : ''}
+          </div>
         </div>
       </div>
     </div>
