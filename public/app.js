@@ -2033,12 +2033,16 @@ function renderOpsHtml(stats) {
 
   return `
     <h1>운영 현황</h1>
-    <p class="page-lede">파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 봅니다.<br>
-    미검수 적체량은 <code>${basis.backlogDefinition}</code> 전체를 ai_status별로 나눈 것(상호 배타적, 합계=적체량 총수)이고,
-    AI 실패 원인은 그중 <code>${basis.aiFailureReasonsScope}</code>만 셉니다.<br>
-    소스별 수집량·품질은 ${basis.collectionWindow.start} ~ ${basis.collectionWindow.end} (UTC 기준 ${basis.collectionWindow.days}×24시간, 현지 날짜·시간대 아님) 동안 실제로 저장된(중복 제거 후) 건수입니다.<br>
-    소스 오류는 각 소스의 가장 최근 실행 결과만 반영하며, 다음 성공 시 자동으로 지워집니다.<br>
-    (생성 시각: ${formatDateOnly(basis.generatedAt)})</p>
+    <p class="page-lede">파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 봅니다. (생성 시각: ${formatDateOnly(basis.generatedAt)})</p>
+    <details class="ops-basis-details">
+      <summary>숫자 집계 기준 자세히 보기</summary>
+      <p>
+        미검수 적체량은 <code>${basis.backlogDefinition}</code> 전체를 ai_status별로 나눈 것(상호 배타적, 합계=적체량 총수)이고,
+        AI 실패 원인은 그중 <code>${basis.aiFailureReasonsScope}</code>만 셉니다.<br>
+        소스별 수집량·품질은 ${basis.collectionWindow.start} ~ ${basis.collectionWindow.end} (UTC 기준 ${basis.collectionWindow.days}×24시간, 현지 날짜·시간대 아님) 동안 실제로 저장된(중복 제거 후) 건수입니다.<br>
+        소스 오류는 각 소스의 가장 최근 실행 결과만 반영하며, 다음 성공 시 자동으로 지워집니다.
+      </p>
+    </details>
 
     <div class="ops-stats-row">
       <div class="ops-stat"><span class="ops-stat-value">${backlog.ok ? backlog.total : '-'}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>

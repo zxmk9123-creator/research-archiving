@@ -763,6 +763,19 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .ref-add-details summary::-webkit-details-marker { display: none; }
 .ref-add-form-wrap { margin: 0 0 var(--sp-5); }
 
+/* Ops page's "집계 기준 자세히 보기" — the methodology prose (window
+   definitions, scope caveats) is real but secondary; collapsed by default
+   so the page lede stays a one-line summary instead of a wall of text. */
+.ops-basis-details { margin: var(--sp-2) 0 var(--sp-5); }
+.ops-basis-details summary {
+  list-style: none; cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+}
+.ops-basis-details summary::-webkit-details-marker { display: none; }
+.ops-basis-details p {
+  margin-top: var(--sp-2); font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+}
+
 /* "대표 링크로 메타데이터 자동 채우기" — pastes into the extraction
    endpoint rather than directly into the URL field, so re-running it
    after editing the link never clobbers a URL the reviewer already
