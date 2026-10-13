@@ -1,3 +1,5 @@
+const { readResponseText } = require('../boundedResponse');
+
 // LLM provider abstraction. No SDK dependency — uses the same global
 // `fetch` already used by extractMetadata.js/collector.js.
 //
@@ -87,7 +89,7 @@ async function fetchProvider(providerLabel, url, init, timeoutMs = 20000, extern
     throw markFallback(new Error(`AI provider unavailable (${failureType})`), failureType);
   }
   if (!res.ok) {
-    const bodyText = await res.text().catch(() => '');
+    const bodyText = await readResponseText(res, 64 * 1024, 'AI provider error body').catch(() => '');
     console.error(`${providerLabel} request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     const err = new Error(`AI provider request failed (${res.status})`);
     err.status = res.status;
@@ -148,7 +150,7 @@ async function callFreeLLMAPI({ system, user }, { signal } = {}) {
     }),
   }, FREELLMAPI_TIMEOUT_MS, signal);
 
-  const data = await res.json();
+  const data = JSON.parse(await readResponseText(res, 4 * 1024 * 1024, 'AI provider response'));
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
   requireNonEmptyText(text, 'freellmapi');
   requireNonDegenerateText(text, 'freellmapi');
@@ -274,7 +276,7 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
     clearTimeout(overallTimeout);
     if (firstTokenTimer) clearTimeout(firstTokenTimer);
     externalSignal?.removeEventListener('abort', abortFromCaller);
-    const bodyText = await res.text().catch(() => '');
+    const bodyText = await readResponseText(res, 64 * 1024, 'AI provider error body').catch(() => '');
     console.error(`freellmapi stream request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     const err = new Error(`AI provider request failed (${res.status})`);
     err.status = res.status;
