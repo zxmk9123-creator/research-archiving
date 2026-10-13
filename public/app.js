@@ -1616,63 +1616,103 @@ function opsFailureLabel(failureType) {
   return LABELS[failureType] || failureType;
 }
 
-async function renderOps() {
-  const stats = await api('/stats/overview');
+const OPS_LAST_SNAPSHOT_KEY = 'ra_ops_last_snapshot';
+
+// A section-level fetch failure (reported by the server as {ok:false,
+// error}) renders this row instead of silently showing an empty table —
+// "집계 실패" must never look the same as "집계 결과 0건".
+function opsSectionErrorRow(colspan, error) {
+  return `<tr><td colspan="${colspan}" class="stale">집계 실패: ${error}</td></tr>`;
+}
+
+function renderOpsHtml(stats) {
   const { basis, backlog, aiFailureReasons, sourceErrors, perSource } = stats;
 
-  const backlogRows = Object.entries(backlog.byAiStatus)
-    .map(([k, v]) => `<tr><td>${k === 'null' ? '요청 안 함' : k}</td><td>${v}</td></tr>`).join('');
+  const backlogRows = backlog.ok
+    ? Object.entries(backlog.byAiStatus).map(([k, v]) => `<tr><td>${k === 'null' ? '요청 안 함' : k}</td><td>${v}</td></tr>`).join('')
+    : opsSectionErrorRow(2, backlog.error);
 
-  const failureRows = aiFailureReasons.length
-    ? aiFailureReasons.map((r) => `<tr><td>${opsFailureLabel(r.ai_failure_type)}</td><td>${r.cnt}</td></tr>`).join('')
-    : '<tr><td colspan="2">최근 AI 생성 실패 없음</td></tr>';
+  const failureRows = !aiFailureReasons.ok ? opsSectionErrorRow(2, aiFailureReasons.error)
+    : aiFailureReasons.rows.length
+      ? aiFailureReasons.rows.map((r) => `<tr><td>${opsFailureLabel(r.ai_failure_type)}</td><td>${r.cnt}</td></tr>`).join('')
+      : '<tr><td colspan="2">현재 실패 상태인 Draft 없음</td></tr>';
 
-  const sourceErrorRows = sourceErrors.length
-    ? sourceErrors.map((s) => {
-        const { message, detail } = SourceErrors.translateSourceError(s.last_error);
-        return `<tr><td>${s.name}</td><td>${message}${detail ? ` (${detail})` : ''}</td><td>${formatDateOnly(s.last_error_at)}</td></tr>`;
-      }).join('')
-    : '<tr><td colspan="3">현재 오류 상태인 소스 없음</td></tr>';
+  const sourceErrorRows = !sourceErrors.ok ? opsSectionErrorRow(3, sourceErrors.error)
+    : sourceErrors.rows.length
+      ? sourceErrors.rows.map((s) => {
+          const { message, detail } = SourceErrors.translateSourceError(s.last_error);
+          return `<tr><td>${s.name}</td><td>${message}${detail ? ` (${detail})` : ''}</td><td>${formatDateOnly(s.last_error_at)}</td></tr>`;
+        }).join('')
+      : '<tr><td colspan="3">현재 오류 상태인 소스 없음 (성공 시 자동 초기화됨)</td></tr>';
 
-  const perSourceRows = perSource.map((s) => `<tr>
-    <td>${s.name}</td>
-    <td>${s.method}</td>
-    <td>${s.collected}</td>
-    <td>${s.published}</td>
-    <td>${s.collected ? Math.round((s.published / s.collected) * 100) : 0}%</td>
-    <td>${s.ai_failed}</td>
-  </tr>`).join('');
+  const perSourceRows = !perSource.ok ? opsSectionErrorRow(6, perSource.error)
+    : perSource.rows.map((s) => `<tr>
+      <td>${s.name}</td>
+      <td>${s.method}</td>
+      <td>${s.collected}</td>
+      <td>${s.published}</td>
+      <td>${s.collected ? Math.round((s.published / s.collected) * 100) : 0}%</td>
+      <td>${s.ai_failed}</td>
+    </tr>`).join('');
 
-  app.innerHTML = `
+  const windowCollected = perSource.ok ? perSource.rows.reduce((sum, s) => sum + s.collected, 0) : '-';
+  const sourceErrorCount = sourceErrors.ok ? sourceErrors.rows.length : '-';
+
+  return `
     <h1>운영 현황</h1>
-    <p class="page-lede">파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 봅니다.<br>집계 기준: 소스별 수집량·품질은 최근 ${basis.collectionWindowDays}일, 미검수 적체량은 ${basis.backlogDefinition} 전체. (생성 시각: ${formatDateOnly(basis.generatedAt)})</p>
+    <p class="page-lede">파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 봅니다.<br>
+    미검수 적체량은 <code>${basis.backlogDefinition}</code> 전체를 ai_status별로 나눈 것(상호 배타적, 합계=적체량 총수)이고,
+    AI 실패 원인은 그중 <code>${basis.aiFailureReasonsScope}</code>만 셉니다.<br>
+    소스별 수집량·품질은 ${basis.collectionWindow.start} ~ ${basis.collectionWindow.end} (UTC 기준 ${basis.collectionWindow.days}×24시간, 현지 날짜·시간대 아님) 동안 실제로 저장된(중복 제거 후) 건수입니다.<br>
+    소스 오류는 각 소스의 가장 최근 실행 결과만 반영하며, 다음 성공 시 자동으로 지워집니다.<br>
+    (생성 시각: ${formatDateOnly(basis.generatedAt)})</p>
 
     <div class="ops-stats-row">
-      <div class="ops-stat"><span class="ops-stat-value">${backlog.total}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>
-      <div class="ops-stat"><span class="ops-stat-value">${sourceErrors.length}</span><span class="ops-stat-label">현재 오류 상태 소스</span></div>
-      <div class="ops-stat"><span class="ops-stat-value">${perSource.reduce((sum, s) => sum + s.collected, 0)}</span><span class="ops-stat-label">최근 ${basis.collectionWindowDays}일 수집량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${backlog.ok ? backlog.total : '-'}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${sourceErrorCount}</span><span class="ops-stat-label">현재 오류 상태 소스</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${windowCollected}</span><span class="ops-stat-label">최근 ${basis.collectionWindow.days}일 수집량</span></div>
     </div>
 
     <div class="section">
-      <div class="section-header"><h2>미검수 적체량 (ai_status별)</h2></div>
+      <div class="section-header"><h2>미검수 적체량 (ai_status별, 상호 배타적)</h2></div>
       <table><tr><th>AI 처리 상태</th><th>건수</th></tr>${backlogRows}</table>
     </div>
 
     <div class="section">
-      <div class="section-header"><h2>AI 생성 실패 원인</h2></div>
+      <div class="section-header"><h2>AI 생성 실패 원인 (현재 Draft+failed만)</h2></div>
       <table><tr><th>원인</th><th>건수</th></tr>${failureRows}</table>
     </div>
 
     <div class="section">
-      <div class="section-header"><h2>수집 오류 중인 소스</h2></div>
+      <div class="section-header"><h2>수집 오류 중인 소스 (최근 실행 기준)</h2></div>
       <table><tr><th>소스</th><th>오류</th><th>발생 시각</th></tr>${sourceErrorRows}</table>
     </div>
 
     <div class="section">
-      <div class="section-header"><h2>소스별 수집량·품질 (최근 ${basis.collectionWindowDays}일)</h2></div>
+      <div class="section-header"><h2>소스별 수집량·품질 (최근 ${basis.collectionWindow.days}일, 중복 제거 후 저장분 기준)</h2></div>
       <table><tr><th>소스</th><th>방식</th><th>수집</th><th>발행</th><th>발행률</th><th>AI 실패</th></tr>${perSourceRows}</table>
     </div>
   `;
+}
+
+// Resilient against a total fetch failure (network down, 500, etc.) —
+// never lets the router's generic app-wide error page replace this whole
+// screen. Falls back to the last successfully rendered snapshot (cached
+// per-browser in localStorage) with a clearly dated "갱신 실패" banner,
+// rather than showing nothing or a crash message.
+async function renderOps() {
+  let stats;
+  try {
+    stats = await api('/stats/overview');
+  } catch (err) {
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(OPS_LAST_SNAPSHOT_KEY) || 'null'); } catch { /* ignore corrupt cache */ }
+    const banner = `<p class="stale">갱신 실패: ${err.message}${cached ? ` — 아래는 마지막 갱신 시각(${formatDateOnly(cached.basis.generatedAt)})의 자료입니다.` : ' — 표시할 이전 자료가 없습니다.'}</p>`;
+    app.innerHTML = cached ? banner + renderOpsHtml(cached) : `<h1>운영 현황</h1>${banner}`;
+    return;
+  }
+  try { localStorage.setItem(OPS_LAST_SNAPSHOT_KEY, JSON.stringify(stats)); } catch { /* storage full/blocked — not fatal */ }
+  app.innerHTML = renderOpsHtml(stats);
 }
 
 // AI eligibility=false is a reviewer signal, not a filter — every Draft item
