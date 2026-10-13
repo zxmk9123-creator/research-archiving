@@ -90,6 +90,123 @@ window.toggleSaveFromCard = function toggleSaveFromCard(ev, id) {
   btn.textContent = nowSaved ? '★ 저장됨' : '☆ 저장';
 };
 
+// Team Pick popover — a single shared element appended to <body> and
+// repositioned per click, rather than one hidden menu per card: a page
+// can render the same item in several carousels at once, and only ever
+// one menu needs to be open. No per-member record, no identity check —
+// per the trade-off this feature was built around, anyone can toggle any
+// team's pick on any item; the menu just lists the shared roster and
+// each team's current on/off state for this item.
+let teamPickMenuEl = null;
+function closeTeamPickMenu() {
+  if (!teamPickMenuEl) return;
+  teamPickMenuEl.remove();
+  teamPickMenuEl = null;
+  document.removeEventListener('click', onTeamPickMenuOutsideClick, true);
+  document.removeEventListener('keydown', onTeamPickMenuEscape, true);
+}
+function onTeamPickMenuOutsideClick(ev) {
+  if (teamPickMenuEl && !teamPickMenuEl.contains(ev.target)) closeTeamPickMenu();
+}
+function onTeamPickMenuEscape(ev) {
+  if (ev.key === 'Escape') closeTeamPickMenu();
+}
+
+// Refreshes every on-page rendering of this item's team-pick button (the
+// same item can appear in more than one carousel/section at once) to the
+// current server state, after the popover changes anything.
+async function updateCardTeamPickButton(itemId) {
+  const picks = await api(`/picks?item_id=${itemId}&kind=team`).catch(() => []);
+  const label = picks.length === 0 ? '팀 Pick' : picks.length === 1 ? `팀 Pick · ${picks[0].team}` : `팀 Pick · ${picks.length}팀`;
+  document.querySelectorAll(`[data-team-pick-btn="${itemId}"]`).forEach((btn) => {
+    btn.textContent = label;
+    btn.classList.toggle('is-picked', picks.length > 0);
+  });
+}
+
+async function renderTeamPickMenuContents(itemId) {
+  if (!teamPickMenuEl) return;
+  const [teams, currentPicks] = await Promise.all([
+    api('/picks/teams').catch(() => []),
+    api(`/picks?item_id=${itemId}&kind=team`).catch(() => []),
+  ]);
+  if (!teamPickMenuEl) return; // closed while the above was in flight
+  const pickIdByTeam = new Map(currentPicks.map((p) => [p.team, p.id]));
+  teamPickMenuEl.innerHTML = `
+    <div class="team-pick-menu-list">
+      ${teams.map((t) => `
+        <label class="team-pick-menu-row">
+          <input type="checkbox" data-team="${t}" ${pickIdByTeam.has(t) ? 'checked' : ''}>
+          <span>${t}</span>
+        </label>
+      `).join('') || '<p class="meta">등록된 팀이 없습니다.</p>'}
+    </div>
+    <div class="team-pick-menu-add">
+      <input type="text" id="team-pick-new-name" placeholder="새 팀 이름" maxlength="40">
+      <button type="button" class="btn" id="team-pick-add-btn">추가</button>
+    </div>
+  `;
+  teamPickMenuEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.onchange = async () => {
+      const team = cb.dataset.team;
+      const wasChecked = !cb.checked; // value before this toggle
+      cb.disabled = true;
+      try {
+        if (!wasChecked) {
+          await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: itemId, kind: 'team', team }) });
+        } else {
+          const pickId = pickIdByTeam.get(team);
+          if (pickId) await api(`/picks/${pickId}`, { method: 'DELETE' });
+        }
+      } catch (err) {
+        alert(`변경 실패: ${err.message}`);
+      }
+      await renderTeamPickMenuContents(itemId);
+      await updateCardTeamPickButton(itemId);
+    };
+  });
+  const addBtn = teamPickMenuEl.querySelector('#team-pick-add-btn');
+  if (addBtn) {
+    addBtn.onclick = async () => {
+      const input = teamPickMenuEl.querySelector('#team-pick-new-name');
+      const name = input.value.trim();
+      if (!name) return;
+      addBtn.disabled = true;
+      try {
+        await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: itemId, kind: 'team', team: name }) });
+      } catch (err) {
+        alert(`추가 실패: ${err.message}`);
+      }
+      await renderTeamPickMenuContents(itemId);
+      await updateCardTeamPickButton(itemId);
+    };
+  }
+}
+
+window.toggleTeamPickMenu = function toggleTeamPickMenu(ev, itemId) {
+  ev.stopPropagation();
+  if (teamPickMenuEl) {
+    closeTeamPickMenu();
+    return;
+  }
+  const btn = ev.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  teamPickMenuEl = document.createElement('div');
+  teamPickMenuEl.className = 'team-pick-menu';
+  teamPickMenuEl.style.top = `${rect.bottom + 4}px`;
+  teamPickMenuEl.style.left = `${rect.left}px`;
+  teamPickMenuEl.innerHTML = '<p class="meta">불러오는 중…</p>';
+  document.body.appendChild(teamPickMenuEl);
+  // capture phase so this registers before the click that opened the menu
+  // finishes bubbling — otherwise the very click that opens it would also
+  // immediately close it via the outside-click listener.
+  setTimeout(() => {
+    document.addEventListener('click', onTeamPickMenuOutsideClick, true);
+    document.addEventListener('keydown', onTeamPickMenuEscape, true);
+  }, 0);
+  renderTeamPickMenuContents(itemId);
+};
+
 // "Important" reuses the existing team-pick signal (picks.kind='team',
 // surfaced today via GET /api/picks/ranking) rather than any new field or
 // an invented scoring algorithm — a team pick is already an explicit human
@@ -104,7 +221,21 @@ window.toggleSaveFromCard = function toggleSaveFromCard(ev, id) {
 // text-based source-identity module at the same aspect ratio — never a
 // generated image. The hover/mobile summary reuses existing ai_summary
 // first, then summary, exactly as already stored; no new field.
-function itemCard(item, importantIds, savedIds) {
+// Shared by itemCard() and Detail's own action row — a button whose label
+// always shows current save state at a glance ("팀 Pick" / "팀 Pick ·
+// A팀" / "팀 Pick · 2팀"), per data-team-pick-btn="${itemId}" so
+// updateCardTeamPickButton() can refresh every rendering of the same item
+// on the page (a card can appear in more than one carousel) after a
+// change in the popover.
+function teamPickButtonHtml(itemId, teamPicksByItem, extraClass) {
+  const teamPicks = (teamPicksByItem instanceof Map ? teamPicksByItem.get(itemId) : null) || [];
+  const label = teamPicks.length === 0 ? '팀 Pick'
+    : teamPicks.length === 1 ? `팀 Pick · ${teamPicks[0].team}`
+    : `팀 Pick · ${teamPicks.length}팀`;
+  return `<button type="button" class="${extraClass || ''} card-team-pick-btn ${teamPicks.length ? 'is-picked' : ''}" data-team-pick-btn="${itemId}" onclick="toggleTeamPickMenu(event, ${itemId})">${label}</button>`;
+}
+
+function itemCard(item, importantIds, savedIds, teamPicksByItem) {
   const sectors = (item.sectors || []).map((s) => s.name).join(', ');
   const important = normalizeImportantIds(importantIds);
   const saved = normalizeImportantIds(savedIds);
@@ -125,6 +256,7 @@ function itemCard(item, importantIds, savedIds) {
     <div class="card-body">
       <div class="card-eyebrow">${typeTag(item.type)}<span class="pill">${item.trust_grade || 'A'}</span>
         <button type="button" class="card-save-btn ${isSaved ? 'is-saved' : ''}" onclick="toggleSaveFromCard(event, ${item.id})">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
+        ${teamPickButtonHtml(item.id, teamPicksByItem)}
       </div>
       <h3>${item.title}</h3>
       <div class="meta">${item.source_name || ''} · ${formatDateOnly(item.published_at)}${sectors ? ` · ${sectors}` : ''}</div>
@@ -240,7 +372,7 @@ function initHomeCarousel(containerEl) {
 // heading/entry area of each module is clickable (navigates to the
 // dedicated full-list page); the grid itself reuses the existing
 // itemCard()/Detail-navigation component unchanged.
-function homeCarouselModule(heading, moduleItems, targetHash, importantIds, savedIds, moduleAttrs = '') {
+function homeCarouselModule(heading, moduleItems, targetHash, importantIds, savedIds, teamPicksByItem, moduleAttrs = '') {
   const slides = chunk(moduleItems, 3);
   // moduleAttrs carries the drag-reorder wiring (draggable + data-drag-*)
   // when this module is one of a theme root's reorderable children —
@@ -271,7 +403,7 @@ function homeCarouselModule(heading, moduleItems, targetHash, importantIds, save
       <button type="button" class="home-carousel-nav prev" aria-label="이전 자료">‹</button>
       <div class="home-carousel-viewport">
         <div class="home-carousel-track">
-          ${slides.map((slide) => `<div class="home-carousel-slide">${slide.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>`).join('')}
+          ${slides.map((slide) => `<div class="home-carousel-slide">${slide.map((it) => itemCard(it, importantIds, savedIds, teamPicksByItem)).join('')}</div>`).join('')}
         </div>
       </div>
       <button type="button" class="home-carousel-nav next" aria-label="다음 자료">›</button>
@@ -436,11 +568,11 @@ function homeThemeRootReorderCardHtml() {
 // compact carousel per child theme (팜유, 대두유, ... / UCO, SAF, ...),
 // each reusing homeCarouselModule() unchanged so card/detail behavior and
 // visual language stay exactly as they are elsewhere on Home.
-function homeThemeRoot(root, byParent, items, importantIds, savedIds, isFirstRoot) {
+function homeThemeRoot(root, byParent, items, importantIds, savedIds, teamPicksByItem, isFirstRoot) {
   const children = applyHomeCarouselOrder(root.id, byParent.get(root.id) || []);
   const childModulesHtml = children
     .map((child) => homeCarouselModule(
-      child.name, itemsForSector(items, child.id, homeCarouselWindowDaysFor(child.name)), `#/archive?sector=${child.id}`, importantIds, savedIds,
+      child.name, itemsForSector(items, child.id, homeCarouselWindowDaysFor(child.name)), `#/archive?sector=${child.id}`, importantIds, savedIds, teamPicksByItem,
       `draggable="false" data-drag-sector="${child.id}"`
     ))
     .join('');
@@ -828,20 +960,35 @@ function bindAiSearchForm() {
   };
 }
 
+// Groups the flat picks list (kind='team') by item_id so card rendering
+// can look up "which team(s) picked this item" with one Map.get() instead
+// of filtering the whole list per card. Shared by every page that renders
+// itemCard() so the lookup/display logic never duplicates.
+function buildTeamPicksMap(teamPicks) {
+  const map = new Map();
+  for (const p of teamPicks) {
+    if (!map.has(p.item_id)) map.set(p.item_id, []);
+    map.get(p.item_id).push(p);
+  }
+  return map;
+}
+
 async function renderHome() {
-  const [sectors, items, ranking] = await Promise.all([
+  const [sectors, items, ranking, teamPicks] = await Promise.all([
     api('/sectors'),
     api('/items?status=Published'),
     api('/picks/ranking').catch(() => []),
+    api('/picks?kind=team').catch(() => []),
   ]);
   const importantIds = new Set(ranking.map((r) => r.id));
   const savedIds = getPersonalSaveIds();
+  const teamPicksByItem = buildTeamPicksMap(teamPicks);
   const { byParent } = buildSectorMaps(sectors);
   const roots = applyHomeRootOrder((byParent.get(null) || []).filter((s) => HOME_THEME_ROOT_NAMES.includes(s.name)));
   homeThemeRootsCache = roots;
 
   const themesHtml = roots.length
-    ? roots.map((root, i) => homeThemeRoot(root, byParent, items, importantIds, savedIds, i === 0)).join('')
+    ? roots.map((root, i) => homeThemeRoot(root, byParent, items, importantIds, savedIds, teamPicksByItem, i === 0)).join('')
     : '<p class="meta">표시할 테마가 없습니다.</p>';
 
   app.innerHTML = `
@@ -867,10 +1014,12 @@ async function renderArchive(query = {}) {
   // 보여주는 "전체" — 명시적으로 탭을 선택해야 좁혀진다.
   const category = query.category === 'archive' || query.category === 'daily_report' ? query.category : null;
   const itemsQuery = category ? { ...query, category } : query;
-  const [sectors, usages, sources, items, ranking] = await Promise.all([
+  const [sectors, usages, sources, items, ranking, teamPicks] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(itemsQuery)),
     api('/picks/ranking').catch(() => []),
+    api('/picks?kind=team').catch(() => []),
   ]);
+  const teamPicksByItem = buildTeamPicksMap(teamPicks);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
   const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
 
@@ -990,7 +1139,7 @@ async function renderArchive(query = {}) {
           ${emptyState}
           ${monthGroups.map((g) => `
             <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
-            <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds)).join('')}</div>
+            <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds, teamPicksByItem)).join('')}</div>
           `).join('')}
         </div>
       </div>
@@ -1130,16 +1279,6 @@ function toQuery(obj) {
 
 // Lightweight per-browser identity (no auth system) used only to tell "my"
 // personal saves / team picks apart from everyone else's, and to avoid
-// double-counting the same person's team pick in the ranking.
-function getUserEmail(promptIfMissing) {
-  let email = localStorage.getItem('ra_user_email');
-  if (!email && promptIfMissing) {
-    email = (prompt('팀 Pick은 이메일로 구분됩니다. 이메일을 입력해주세요:') || '').trim();
-    if (email) localStorage.setItem('ra_user_email', email);
-  }
-  return email || null;
-}
-
 async function renderDetail(id) {
   const [item, picks, related, isAdmin] = await Promise.all([
     api(`/items/${id}`),
@@ -1151,10 +1290,8 @@ async function renderDetail(id) {
   const sectorTags = (item.sectors || []).map((s) => `<span class="pill">${s.name}</span>`).join('');
   const companyTags = (item.companies || []).map((c) => `<span class="pill">🏢 ${c.name}</span>`).join('');
 
-  const myEmail = getUserEmail(false);
   const isSaved = getPersonalSaveIds().has(item.id);
-  const myTeamPick = myEmail ? picks.find((p) => p.kind === 'team' && p.user_email === myEmail) : null;
-  const teamPickCount = picks.filter((p) => p.kind === 'team').length;
+  const teamPicksByItem = buildTeamPicksMap(picks.filter((p) => p.kind === 'team'));
 
   app.innerHTML = `
     <div class="detail">
@@ -1175,8 +1312,7 @@ async function renderDetail(id) {
       </div>
       <div class="section" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <button class="btn compact-save-btn ${isSaved ? 'is-saved' : ''}" id="personal-pick-btn">${isSaved ? '★ 저장됨' : '☆ 저장'}</button>
-        <button class="btn ${myTeamPick ? 'primary' : ''}" id="team-pick-btn">${myTeamPick ? '팀 Pick 취소' : '팀 Pick 저장'}</button>
-        <span class="meta">팀 Pick ${teamPickCount}명</span>
+        ${teamPickButtonHtml(item.id, teamPicksByItem, 'btn')}
         ${isAdmin ? '<button class="btn" id="delete-item-btn" style="margin-left:auto;color:#b91c1c">삭제</button>' : ''}
       </div>
       ${related.length ? `
@@ -1190,16 +1326,6 @@ async function renderDetail(id) {
 
   document.getElementById('personal-pick-btn').onclick = () => {
     setPersonalSaveIds(toggleSavedId(getPersonalSaveIds(), item.id));
-    renderDetail(id);
-  };
-  document.getElementById('team-pick-btn').onclick = async () => {
-    if (myTeamPick) {
-      await api(`/picks/${myTeamPick.id}`, { method: 'DELETE' });
-    } else {
-      const email = getUserEmail(true);
-      if (!email) return;
-      await api('/picks', { method: 'POST', body: JSON.stringify({ item_id: item.id, kind: 'team', user_email: email }) });
-    }
     renderDetail(id);
   };
   const deleteItemBtn = document.getElementById('delete-item-btn');

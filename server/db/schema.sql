@@ -699,6 +699,23 @@ CREATE TABLE IF NOT EXISTS picks (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Named Team Pick: which team saved an item, not just "some team did".
+-- Deliberately shared/anonymous within a team by design (see routes/
+-- picks.js) — no per-member record, anyone can add or remove any team's
+-- pick on an item. `team` is free text, not a FK to a managed table: the
+-- team roster is just "whatever distinct values already exist in this
+-- column" (see GET /api/picks/teams), seeded with the two team names
+-- given at launch — so adding a new team is just picking it once, no
+-- admin screen needed.
+ALTER TABLE picks ADD COLUMN IF NOT EXISTS team TEXT;
+
+-- One team can pick a given item at most once — the UI toggles a team's
+-- pick on/off rather than ever allowing a second identical row. Partial
+-- (kind='team' only) since 'personal' picks never set `team` and were
+-- never meant to be deduped by it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_picks_team_item_unique
+  ON picks (item_id, team) WHERE kind = 'team';
+
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
 CREATE INDEX IF NOT EXISTS idx_items_published_at ON items(published_at);
