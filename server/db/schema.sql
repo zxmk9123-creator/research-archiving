@@ -660,6 +660,18 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS content_category TEXT CHECK (content_
 UPDATE items SET content_category = CASE WHEN type = '뉴스' THEN 'daily_report' ELSE 'archive' END
   WHERE status = 'Published' AND content_category IS NULL;
 
+-- Gate audit trail: WHY applyAiDraftIfEligible held an AI-eligible item at
+-- Draft instead of auto-publishing it (trust gate, sector-grounding
+-- check, or the pre-existing no-classification invariant), and which
+-- version of that gate's rules made the call. Without this, a held item
+-- in Review was indistinguishable from "just not reviewed yet" — a
+-- reviewer had no way to tell a structural gate rejection from an
+-- ordinary unreviewed Draft, and there was no way to later audit how many
+-- holds a given rule version produced. NULL means either never evaluated
+-- by a gate (ai_eligible isn't true yet) or it passed every gate cleanly.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS gate_hold_reason TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS gate_hold_rule_version TEXT;
+
 CREATE TABLE IF NOT EXISTS item_sectors (
   item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
   sector_id INTEGER REFERENCES sectors(id) ON DELETE CASCADE,

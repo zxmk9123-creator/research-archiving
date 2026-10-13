@@ -13,6 +13,7 @@ const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
 // helper. Reused here rather than writing a second extractor: an RSS
 // item's own page is fetched the same way a Web Discovery candidate's is.
 const extractMetadataModule = require('./extractMetadata');
+const { safeFetch } = require('./safeUrl');
 
 // One acquisition-method dispatcher shared by the scheduler and manual
 // "지금 수집"/collect-all — the orchestration loop (due-source selection,
@@ -69,7 +70,7 @@ async function acquireRssArticleContent(url) {
 }
 
 async function fetchFeedItems(url) {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
     signal: AbortSignal.timeout(15000),
   });

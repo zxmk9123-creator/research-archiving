@@ -37,6 +37,10 @@ const UNGROUNDABLE_SECTOR_NAMES = new Set([
   '식용유지', '비식용유지', '기타 식용유지', '기타 비식용유지', '기타', '물류', '운임료', '국제 정세',
 ]);
 
+// Bumped whenever SECTOR_KEYWORD_PATTERNS or UNGROUNDABLE_SECTOR_NAMES
+// changes — persisted alongside gate_hold_reason (see aiDraft.js).
+const CLASSIFICATION_SANITY_VERSION = 'classification-sanity-v1';
+
 async function hasGroundedClassification(item) {
   const suggestedIds = item.ai_suggested_sectors || [];
   if (!suggestedIds.length) return true; // hasValidClassification already covers the empty case
@@ -51,4 +55,6 @@ async function hasGroundedClassification(item) {
   });
 }
 
-module.exports = { hasGroundedClassification, SECTOR_KEYWORD_PATTERNS, UNGROUNDABLE_SECTOR_NAMES };
+module.exports = {
+  hasGroundedClassification, SECTOR_KEYWORD_PATTERNS, UNGROUNDABLE_SECTOR_NAMES, CLASSIFICATION_SANITY_VERSION,
+};

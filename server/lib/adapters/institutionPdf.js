@@ -45,6 +45,7 @@ const GENERIC_TITLE_PATTERN = /^(download|다운로드|pdf|file|report|full text
 // (&#8217;, the curly right-single-quote entity) neither file's list
 // covered. See feedParser.js's decodeEntities for the fuller history.
 const { decodeHTML } = require('entities');
+const { safeFetch } = require('../safeUrl');
 function decodeEntities(str) {
   return decodeHTML(str);
 }
@@ -112,7 +113,7 @@ function discoverFromCgspaceHtml(html) {
 }
 
 async function discoverReports(source) {
-  const res = await fetch(source.url, {
+  const res = await safeFetch(source.url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
     signal: AbortSignal.timeout(15000),
   });

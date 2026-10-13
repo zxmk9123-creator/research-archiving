@@ -13,6 +13,7 @@
 // without special-casing.
 const cheerio = require('cheerio');
 const { decodeHTML } = require('entities');
+const { safeFetch } = require('./safeUrl');
 
 // Bot-block/CAPTCHA interstitials (Radware, Akamai, Cloudflare, generic
 // "verify you are human" pages) return HTTP 200 with a real <title> —
@@ -126,7 +127,7 @@ function extractBodyText(html) {
 }
 
 async function extractMetadata(url) {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
     signal: AbortSignal.timeout(10000),
   });

@@ -21,6 +21,12 @@ const { isBotBlockPage } = require('./extractMetadata');
 const MIN_SUMMARY_CHARS = 10;
 const FUTURE_GRACE_DAYS = 2;
 
+// Bumped whenever a check below is added, removed, or has its threshold
+// changed — persisted alongside gate_hold_reason (see aiDraft.js) so a
+// held item can always be traced to exactly which ruleset made the call,
+// not just "the trust gate, whenever that was".
+const TRUST_GATE_VERSION = 'trust-gate-v1';
+
 function hasValidSourceUrl(item) {
   try {
     const url = new URL(item.source_url);
@@ -53,21 +59,29 @@ function hasSaneMetadata(item) {
   return !isBotBlockPage(title);
 }
 
+// Returns the first failing check's machine-readable name, or null if
+// every check passes — same checks/order passesTrustGate uses, just
+// surfaced as a reason instead of collapsed into one boolean.
+function trustGateFailureReason(item) {
+  if (!hasValidSourceUrl(item)) return 'invalid_source_url';
+  if (!hasPlausiblePublishedAt(item)) return 'implausible_published_at';
+  if (!hasUsableSummary(item)) return 'unusable_ai_summary';
+  if (!hasSaneMetadata(item)) return 'bot_block_or_empty_title';
+  return null;
+}
+
 function passesTrustGate(item) {
-  return (
-    hasValidSourceUrl(item) &&
-    hasPlausiblePublishedAt(item) &&
-    hasUsableSummary(item) &&
-    hasSaneMetadata(item)
-  );
+  return trustGateFailureReason(item) === null;
 }
 
 module.exports = {
   passesTrustGate,
+  trustGateFailureReason,
   hasValidSourceUrl,
   hasPlausiblePublishedAt,
   hasUsableSummary,
   hasSaneMetadata,
   MIN_SUMMARY_CHARS,
   FUTURE_GRACE_DAYS,
+  TRUST_GATE_VERSION,
 };

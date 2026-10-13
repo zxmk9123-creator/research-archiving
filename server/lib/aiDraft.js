@@ -2,8 +2,10 @@ const pool = require('../db/pool');
 const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
-const { passesTrustGate } = require('./trustGate');
-const { hasGroundedClassification } = require('./classificationSanity');
+const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
+const { hasGroundedClassification, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
+
+const NO_CLASSIFICATION_GATE_VERSION = 'no-classification-invariant-v1';
 const { titleSimilarity } = require('./similarity');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
@@ -495,12 +497,31 @@ async function requeueStalledPendingDrafts() {
 // HOLD/REJECT items are untouched by this function — they simply stay
 // whatever they already were (normally Draft), still fully visible and
 // actionable in Review, never silently discarded.
+//
+// Every hold a gate below produces is persisted (gate_hold_reason +
+// gate_hold_rule_version) so Review can show a reviewer WHY an
+// AI-eligible item is stuck instead of leaving it indistinguishable from
+// "just not reviewed yet" — and so a later audit of a specific rule
+// version's hold rate is possible at all. A re-run that clears every gate
+// (e.g. after a human fixes the underlying data and retriggers AI
+// drafting) always resets both columns back to NULL first — see the
+// clearGateHold() call right before the initial status/eligibility guard
+// below, which runs unconditionally so a hold from a previous attempt
+// never outlives this one.
+async function clearGateHold(itemId) {
+  await pool.query('UPDATE items SET gate_hold_reason = NULL, gate_hold_rule_version = NULL WHERE id = $1', [itemId]);
+}
+async function recordGateHold(itemId, reason, ruleVersion) {
+  await pool.query('UPDATE items SET gate_hold_reason = $1, gate_hold_rule_version = $2 WHERE id = $3', [reason, ruleVersion, itemId]);
+}
+
 async function applyAiDraftIfEligible(itemId) {
   const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
   const item = rows[0];
   if (!item || item.ai_status !== 'completed' || item.ai_eligible !== true || item.ai_qa_decision !== 'PASS') {
     return { archived: false };
   }
+  await clearGateHold(itemId);
 
   await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
   await pool.query('DELETE FROM item_usages WHERE item_id = $1', [itemId]);
@@ -521,14 +542,17 @@ async function applyAiDraftIfEligible(itemId) {
   // eligible=true but no (or only invalid) tag suggestions.
   if (!(await hasValidClassification(itemId))) {
     console.log(`applyAiDraftIfEligible: item ${itemId} is AI-eligible but has no sector/usage classification — not publishing`);
+    await recordGateHold(itemId, 'no_sector_or_usage_tag', NO_CLASSIFICATION_GATE_VERSION);
     return { archived: false };
   }
 
   // Trust Gate: source URL/published-date sanity, bot-block/empty title,
   // and summary-generation-failure checks — independent of the AI's own
   // eligibility/QA verdict. See trustGate.js for what each check catches.
-  if (!passesTrustGate(item)) {
-    console.log(`applyAiDraftIfEligible: item ${itemId} failed the trust gate — not publishing`);
+  const trustFailure = trustGateFailureReason(item);
+  if (trustFailure) {
+    console.log(`applyAiDraftIfEligible: item ${itemId} failed the trust gate (${trustFailure}) — not publishing`);
+    await recordGateHold(itemId, trustFailure, TRUST_GATE_VERSION);
     return { archived: false };
   }
 
@@ -537,6 +561,7 @@ async function applyAiDraftIfEligible(itemId) {
   // see classificationSanity.js.
   if (!(await hasGroundedClassification(item))) {
     console.log(`applyAiDraftIfEligible: item ${itemId}'s suggested sector(s) have no textual grounding — not publishing`);
+    await recordGateHold(itemId, 'no_grounded_sector', CLASSIFICATION_SANITY_VERSION);
     return { archived: false };
   }
 

@@ -11,6 +11,7 @@
 // here specifically because this adapter parses an externally-fetched
 // file — exactly the untrusted-input path those advisories are about.
 const ExcelJS = require('exceljs');
+const { safeFetch } = require('../safeUrl');
 
 const SHEET_NAME = 'Monthly Prices';
 // 1-indexed row numbers (exceljs convention) — row 5 holds commodity
@@ -105,7 +106,7 @@ async function parseWorkbook(buffer) {
 }
 
 async function fetchAndParse(url) {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
     signal: AbortSignal.timeout(30000),
   });

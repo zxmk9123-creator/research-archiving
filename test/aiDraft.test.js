@@ -654,6 +654,9 @@ test('applyAiDraftIfEligible: does NOT publish an eligible item with no suggeste
     const result = await applyAiDraftIfEligible(6);
     assert.equal(result.archived, false);
     assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+    const holdCall = calls.find((c) => c.text.includes('gate_hold_reason = $1'));
+    assert.ok(holdCall, 'expected the hold reason/version to be persisted');
+    assert.deepEqual(holdCall.params, ['no_sector_or_usage_tag', 'no-classification-invariant-v1', 6]);
   } finally {
     restore();
   }
@@ -670,6 +673,78 @@ test('applyAiDraftIfEligible: does NOT publish when only a sector (no usage) end
     const result = await applyAiDraftIfEligible(7);
     assert.equal(result.archived, false);
     assert.equal(calls.filter((c) => c.text.includes('UPDATE items SET summary')).length, 0);
+  } finally {
+    restore();
+  }
+});
+
+// --- Gate audit trail: every hold persists a machine-readable reason +
+// rule version, and a successful publish clears any stale hold from a
+// previous attempt ---
+
+test('applyAiDraftIfEligible: a trust-gate failure persists its reason and rule version', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 60, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
+        source_url: 'not a valid url', title: '뉴스 제목', ai_summary: '팜유 가격이 상승했다.',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(60);
+    assert.equal(result.archived, false);
+    const holdCall = calls.find((c) => c.text.includes('gate_hold_reason = $1'));
+    assert.deepEqual(holdCall.params, ['invalid_source_url', 'trust-gate-v1', 60]);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: a sector-grounding failure persists its reason and rule version', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 61, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
+        source_url: 'https://example.org/soy', title: 'ADM expands soybean oil crushing capacity',
+        ai_summary: '대두유 압착 시설을 확장한다.', ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(61);
+    assert.equal(result.archived, false);
+    const holdCall = calls.find((c) => c.text.includes('gate_hold_reason = $1'));
+    assert.deepEqual(holdCall.params, ['no_grounded_sector', 'classification-sanity-v1', 61]);
+  } finally {
+    restore();
+  }
+});
+
+test('applyAiDraftIfEligible: a successful publish clears any gate hold left by a previous failed attempt', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 62, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
+        source_url: 'https://example.org/report', title: '보도자료 제목',
+        ai_summary: '팜유 가격이 전월 대비 5% 상승했다.', ai_insight: '인사이트', type: '보고서',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+        gate_hold_reason: 'invalid_source_url', gate_hold_rule_version: 'trust-gate-v1',
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+  ]);
+  try {
+    const result = await applyAiDraftIfEligible(62);
+    assert.equal(result.archived, true);
+    const clearCall = calls.find((c) => c.text.includes('gate_hold_reason = NULL'));
+    assert.ok(clearCall, 'expected the stale hold to be cleared at the start of this run');
+    assert.deepEqual(clearCall.params, [62]);
   } finally {
     restore();
   }

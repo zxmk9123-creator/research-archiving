@@ -616,6 +616,11 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
 .review-section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-2); }
 .review-section-title-row .review-section-title { margin-bottom: 0; }
 .review-body-text { font-size: 15px; font-weight: 400; line-height: 23px; color: var(--text); }
+
+/* AI는 적합 판단했지만 트러스트/분류 게이트가 자동 발행을 보류한 경우 —
+   "아직 검토 안 함"과 구분되는 상태라는 걸 눈에 띄게 알려야 한다. */
+.gate-hold-notice { padding: var(--sp-3); border: 1px solid var(--danger); border-radius: var(--radius-control); background: #fef2f2; }
+.gate-hold-notice .review-subhead { color: var(--danger); }
 .review-insight-text { color: var(--text-secondary); }
 .review-status-text { font-size: 13px; font-weight: 400; color: var(--text-tertiary); }
 

@@ -1607,6 +1607,18 @@ async function renderReference(query = {}) { return renderSourceManager('referen
 // 운영 가시성 대시보드: 실패 원인, 소스별 수집량/품질, 미검수 적체량을
 // 한 화면에 모아 보여준다. 숫자마다 집계 기준(기간/정의)을 함께 표시해,
 // "지금 세고 있는 게 정확히 뭔지" 숫자만 봐서는 알 수 없는 상태를 피한다.
+// Shared by Review's gate-hold notice below — human-readable labels for
+// the machine reasons aiDraft.js's applyAiDraftIfEligible() persists to
+// gate_hold_reason, so a reviewer sees plain language, not an enum value.
+const GATE_HOLD_LABELS = {
+  no_sector_or_usage_tag: 'AI가 섹터/용도 분류를 제시하지 않았습니다.',
+  invalid_source_url: '원문 URL이 올바르지 않습니다.',
+  implausible_published_at: '발행일이 비정상적입니다(미래 날짜 등).',
+  unusable_ai_summary: 'AI 요약 생성에 실패했거나 내용이 비정상적입니다.',
+  bot_block_or_empty_title: '제목이 비었거나 봇 차단 페이지로 추정됩니다.',
+  no_grounded_sector: 'AI가 제시한 섹터가 본문 내용과 연결되지 않습니다.',
+};
+
 function opsFailureLabel(failureType) {
   const LABELS = {
     timeout: 'AI 응답 시간 초과', server_error: 'AI 제공처 서버 오류',
@@ -2007,6 +2019,12 @@ async function renderReview() {
             <div class="verdict-badge ${verdictClass}">${verdictLabel}</div>
             <p class="review-body-text">${item.ai_eligibility_reason || ''}</p>
           </div>
+          ${item.gate_hold_reason ? `
+          <div class="review-section gate-hold-notice">
+            <span class="review-subhead">자동 발행 보류됨</span>
+            <p class="review-body-text">AI는 이 자료를 적합 판단했지만, 별도의 자동 점검에서 발행을 보류했습니다: ${GATE_HOLD_LABELS[item.gate_hold_reason] || item.gate_hold_reason}<br>
+            아래에서 직접 확인 후 "자료 발행"을 누르면 수동으로 발행할 수 있습니다. (판정 규칙: ${item.gate_hold_rule_version || '-'})</p>
+          </div>` : ''}
           <div class="review-my-decision">
             <div class="review-subhead">내 판단</div>
             <div class="review-verdict-actions">
