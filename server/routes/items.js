@@ -87,7 +87,7 @@ const ITEM_SELECT = `
 router.get('/', async (req, res) => {
   const { q, sector, usage, type, source_id, status, from, to, category } = req.query;
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
-  const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+  const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
   const clauses = [];
   const params = [];
 
