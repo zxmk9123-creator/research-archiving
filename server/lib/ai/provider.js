@@ -21,6 +21,22 @@ function markFallback(err, failureType) {
   return err;
 }
 
+// Production incident: an AI search answer about SAF feedstock constraints
+// cut off mid-sentence ("...폐식용유는") with no error — the model simply
+// hit max_tokens and the OpenAI-compatible response's finish_reason
+// ('length' instead of 'stop') was never read anywhere in this file, so a
+// token-budget truncation was indistinguishable from a clean completion:
+// the truncated text got citation-verified, source-linked, and shown to
+// the user as if it were the whole answer. Rather than silently serving a
+// cut-off answer (or discarding it outright — a long, mostly-good answer
+// is still useful), this appends a visible Korean notice so the truncation
+// is never mistaken for a complete response.
+function appendTruncationNoticeIfNeeded(text, finishReason) {
+  if (finishReason !== 'length') return text;
+  console.error('freellmapi response truncated by max_tokens (finish_reason=length)');
+  return `${text}\n\n⚠ 답변이 길이 제한으로 인해 중간에 잘렸습니다. 더 좁은 질문으로 다시 물어보시면 전체 답변을 받을 수 있습니다.`;
+}
+
 function requireNonEmptyText(text, providerLabel) {
   if (text) return text;
   console.error(`${providerLabel} returned HTTP 200 with empty/null content`);
@@ -142,7 +158,12 @@ async function callFreeLLMAPI({ system, user }, { signal } = {}) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4000,
+      // Production incident: a legitimately long, multi-section answer
+      // (multiple candidates, each with its own paragraph/table) hit this
+      // cap mid-sentence — see appendTruncationNoticeIfNeeded's own
+      // comment for how that went undetected. Raised from 4000; still
+      // bounded, not unlimited.
+      max_tokens: 6000,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -151,10 +172,11 @@ async function callFreeLLMAPI({ system, user }, { signal } = {}) {
   }, FREELLMAPI_TIMEOUT_MS, signal);
 
   const data = JSON.parse(await readResponseText(res, 4 * 1024 * 1024, 'AI provider response'));
-  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  const choice = data && data.choices && data.choices[0];
+  const text = choice && choice.message && choice.message.content;
   requireNonEmptyText(text, 'freellmapi');
   requireNonDegenerateText(text, 'freellmapi');
-  return text;
+  return appendTruncationNoticeIfNeeded(text, choice && choice.finish_reason);
 }
 
 async function callProvider(promptMessages) {
@@ -203,6 +225,11 @@ function buildStreamingAttempts() {
 function extractSseDeltas(buffer) {
   const deltas = [];
   let done = false;
+  // The chunk carrying finish_reason (e.g. 'length' when max_tokens cuts
+  // the answer off, vs 'stop' on a clean finish) has no delta.content of
+  // its own, so it's only ever visible here, never in streamFreeLLMAPIAttempt's
+  // per-delta loop — surfaced separately rather than folded into `deltas`.
+  let finishReason = null;
   const lines = buffer.split('\n');
   const remainder = lines.pop(); // last element may be an incomplete line
   for (const line of lines) {
@@ -212,15 +239,17 @@ function extractSseDeltas(buffer) {
     if (payload === '[DONE]') { done = true; continue; }
     try {
       const parsed = JSON.parse(payload);
-      const delta = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content;
+      const choice = parsed && parsed.choices && parsed.choices[0];
+      const delta = choice && choice.delta && choice.delta.content;
       if (delta) deltas.push(delta);
+      if (choice && choice.finish_reason) finishReason = choice.finish_reason;
     } catch {
       // A line split exactly on a chunk boundary can be invalid JSON even
       // though it belongs to a complete SSE "line" — rare, and silently
       // dropping one delta is far better than aborting the whole stream.
     }
   }
-  return { deltas, remainder, done };
+  return { deltas, remainder, done, finishReason };
 }
 
 // Streams one model attempt. onToken(delta) fires for every chunk of
@@ -255,7 +284,7 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model, max_tokens: 4000, stream: true,
+        model, max_tokens: 6000, stream: true,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       }),
       signal: controller.signal,
@@ -291,13 +320,15 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
   let buffer = '';
   let fullText = '';
   let ttftMs = null;
+  let finishReason = null;
   try {
     while (true) {
       const { value, done: streamDone } = await reader.read();
       if (streamDone) break;
       buffer += decoder.decode(value, { stream: true });
-      const { deltas, remainder, done } = extractSseDeltas(buffer);
+      const { deltas, remainder, done, finishReason: chunkFinishReason } = extractSseDeltas(buffer);
       buffer = remainder;
+      if (chunkFinishReason) finishReason = chunkFinishReason;
       for (const delta of deltas) {
         if (ttftMs === null) {
           ttftMs = Date.now() - startedAt;
@@ -321,7 +352,7 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
 
   requireNonEmptyText(fullText, 'freellmapi');
   requireNonDegenerateText(fullText, 'freellmapi');
-  return { text: fullText, ttftMs };
+  return { text: appendTruncationNoticeIfNeeded(fullText, finishReason), ttftMs };
 }
 
 // Orchestrates buildStreamingAttempts() the same way runProviderChain()

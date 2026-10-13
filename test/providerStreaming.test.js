@@ -55,6 +55,12 @@ function sseResponse(events, { status = 200, signal } = {}) {
 function deltaChunk(text) {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 }
+// The chunk that carries finish_reason (e.g. 'length' when max_tokens cuts
+// the answer off mid-sentence) — no delta.content of its own, same shape
+// FreeLLMAPI's real OpenAI-compatible stream sends on its last event.
+function finishReasonChunk(reason) {
+  return `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}\n\n`;
+}
 const DONE_CHUNK = 'data: [DONE]\n\n';
 
 // --- extractSseDeltas ---
@@ -102,6 +108,43 @@ test('callProviderWithFallbackStreaming: streams every delta via onToken and res
     assert.equal(result.text, '안녕하세요');
     assert.ok(result.ttftMs >= 0);
     assert.equal(result.model, 'auto');
+  } finally {
+    restore();
+  }
+}));
+
+// Production incident: a streamed answer cut off mid-sentence by
+// max_tokens looked identical to a clean finish — nothing read
+// finish_reason:'length' on the stream's final chunk, so the truncated
+// text was finalized and shown to the user as if it were complete.
+test('callProviderWithFallbackStreaming: finish_reason="length" mid-stream appends a visible Korean notice to the resolved text', () => withEnv(BASE_ENV, async () => {
+  const restore = mockFetch(async () => sseResponse([
+    { chunk: deltaChunk('...기존 주요 원료인 폐식용유는') },
+    { chunk: finishReasonChunk('length') },
+    { chunk: DONE_CHUNK },
+  ]));
+  const tokens = [];
+  try {
+    const result = await callProviderWithFallbackStreaming({ system: 's', user: 'u' }, (t) => tokens.push(t));
+    // onToken only ever streamed the raw (unmodified) deltas as they
+    // arrived — the notice is appended once, to the final resolved text.
+    assert.deepEqual(tokens, ['...기존 주요 원료인 폐식용유는']);
+    assert.match(result.text, /폐식용유는/);
+    assert.match(result.text, /길이 제한으로 인해 중간에 잘렸습니다/);
+  } finally {
+    restore();
+  }
+}));
+
+test('callProviderWithFallbackStreaming: finish_reason="stop" (a clean completion) never appends the truncation notice', () => withEnv(BASE_ENV, async () => {
+  const restore = mockFetch(async () => sseResponse([
+    { chunk: deltaChunk('완결된 답변입니다.') },
+    { chunk: finishReasonChunk('stop') },
+    { chunk: DONE_CHUNK },
+  ]));
+  try {
+    const result = await callProviderWithFallbackStreaming({ system: 's', user: 'u' }, () => {});
+    assert.equal(result.text, '완결된 답변입니다.');
   } finally {
     restore();
   }

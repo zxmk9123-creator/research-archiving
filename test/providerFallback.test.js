@@ -257,6 +257,47 @@ test('callFreeLLMAPI: sends the configured model and returns the response text',
   }
 });
 
+// Production incident: an answer cut off mid-sentence by max_tokens was
+// indistinguishable from a clean completion — finish_reason:'length' on
+// the response was never read anywhere, so the truncated text was
+// finalized, cited and shown to the user as if it were the whole answer.
+test('callFreeLLMAPI: finish_reason="length" (max_tokens truncation) appends a visible Korean notice to the returned text', async () => {
+  const restore = mockFetchByUrl([
+    ['router.example.com', async () => jsonResponse(200, {
+      choices: [{ message: { content: '...기존 주요 원료인 폐식용유는' }, finish_reason: 'length' }],
+    })],
+  ]);
+  try {
+    process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+    process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
+    const text = await callFreeLLMAPI({ system: 's', user: 'u' });
+    assert.match(text, /폐식용유는/);
+    assert.match(text, /길이 제한으로 인해 중간에 잘렸습니다/);
+  } finally {
+    restore();
+    delete process.env.FREELLMAPI_API_KEY;
+    delete process.env.FREELLMAPI_BASE_URL;
+  }
+});
+
+test('callFreeLLMAPI: finish_reason="stop" (a clean completion) never appends the truncation notice', async () => {
+  const restore = mockFetchByUrl([
+    ['router.example.com', async () => jsonResponse(200, {
+      choices: [{ message: { content: '완결된 답변입니다.' }, finish_reason: 'stop' }],
+    })],
+  ]);
+  try {
+    process.env.FREELLMAPI_API_KEY = 'freellmapi-test';
+    process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
+    const text = await callFreeLLMAPI({ system: 's', user: 'u' });
+    assert.equal(text, '완결된 답변입니다.');
+  } finally {
+    restore();
+    delete process.env.FREELLMAPI_API_KEY;
+    delete process.env.FREELLMAPI_BASE_URL;
+  }
+});
+
 test('callFreeLLMAPI: throws when FREELLMAPI_API_KEY is missing', async () => {
   delete process.env.FREELLMAPI_API_KEY;
   process.env.FREELLMAPI_BASE_URL = 'https://router.example.com/v1';
