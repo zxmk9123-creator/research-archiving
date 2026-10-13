@@ -14,6 +14,7 @@
 const cheerio = require('cheerio');
 const { decodeHTML } = require('entities');
 const { safeFetch } = require('./safeUrl');
+const { readResponseText } = require('./boundedResponse');
 
 // Bot-block/CAPTCHA interstitials (Radware, Akamai, Cloudflare, generic
 // "verify you are human" pages) return HTTP 200 with a real <title> —
@@ -132,7 +133,7 @@ async function extractMetadata(url) {
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const rawHtml = await res.text();
+  const rawHtml = await readResponseText(res, 2 * 1024 * 1024, 'article HTML');
   // Production incident: an unbounded-size page fed into the previous
   // regex parser froze the whole Node process for minutes — GET / (a
   // static file, no DB query) took 4+ minutes to respond while a
