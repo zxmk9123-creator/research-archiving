@@ -1,3 +1,4 @@
+const { readResponseText } = require('../boundedResponse');
 // SerpApi adapter — third search tier for Web Research Discovery, used
 // only when both Brave (tier 1, adapters/webSearch.js) and Firecrawl
 // (tier 2, adapters/firecrawlSearch.js) fail. Kept as its own module/env
@@ -33,12 +34,12 @@ async function searchWeb(query, options = {}) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) {
-        const bodyText = await res.text().catch(() => '');
+        const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
         console.error(`serpapi search failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
         lastError = new Error(`search failed: ${res.status}`);
         continue;
       }
-      const data = await res.json();
+      const data = JSON.parse(await readResponseText(res, 1024 * 1024, 'search API response'));
       const rawResults = Array.isArray(data && data.organic_results) ? data.organic_results : [];
       return rawResults
         .map((r) => ({ title: (r.title || '').trim(), link: (r.link || '').trim() }))

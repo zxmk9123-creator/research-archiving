@@ -1,5 +1,6 @@
 const { PDFParse } = require('pdf-parse');
 const { safeFetch } = require('./safeUrl');
+const { readResponseBuffer } = require('./boundedResponse');
 
 // Fetches a PDF as a raw buffer — separate from extraction so a fetch
 // failure (network/404) and an extraction failure (corrupt/scanned PDF)
@@ -10,7 +11,7 @@ async function fetchPdfBuffer(url) {
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`pdf fetch failed: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  return readResponseBuffer(res, 25 * 1024 * 1024, 'PDF');
 }
 
 // PDF is a first-class material: text-based PDFs go through the normal AI

@@ -1,3 +1,5 @@
+const { readResponseText } = require('../boundedResponse');
+
 // LLM provider abstraction. No SDK dependency — uses the same global
 // `fetch` already used by extractMetadata.js/collector.js.
 //
@@ -75,17 +77,19 @@ function requireNonDegenerateText(text, providerLabel) {
 //   other non-ok   -> unmarked (application/contract-ish)
 //   network/DNS/refused connection, or our own AbortSignal timeout firing
 //                  -> 'timeout' / 'network' (transient)
-async function fetchProvider(providerLabel, url, init, timeoutMs = 20000) {
+async function fetchProvider(providerLabel, url, init, timeoutMs = 20000, externalSignal) {
   let res;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal;
   try {
-    res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetch(url, { ...init, signal });
   } catch (err) {
     const failureType = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
     console.error(`${providerLabel} request failed: ${failureType} (${err.message})`);
     throw markFallback(new Error(`AI provider unavailable (${failureType})`), failureType);
   }
   if (!res.ok) {
-    const bodyText = await res.text().catch(() => '');
+    const bodyText = await readResponseText(res, 64 * 1024, 'AI provider error body').catch(() => '');
     console.error(`${providerLabel} request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     const err = new Error(`AI provider request failed (${res.status})`);
     err.status = res.status;
@@ -98,7 +102,7 @@ async function fetchProvider(providerLabel, url, init, timeoutMs = 20000) {
 }
 
 // FreeLLMAPI: self-hosted OpenAI-compatible chat completions router.
-async function callFreeLLMAPI({ system, user }) {
+async function callFreeLLMAPI({ system, user }, { signal } = {}) {
   const apiKey = process.env.FREELLMAPI_API_KEY;
   if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
   const baseUrl = process.env.FREELLMAPI_BASE_URL;
@@ -144,9 +148,9 @@ async function callFreeLLMAPI({ system, user }) {
         { role: 'user', content: user },
       ],
     }),
-  }, FREELLMAPI_TIMEOUT_MS);
+  }, FREELLMAPI_TIMEOUT_MS, signal);
 
-  const data = await res.json();
+  const data = JSON.parse(await readResponseText(res, 4 * 1024 * 1024, 'AI provider response'));
   const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
   requireNonEmptyText(text, 'freellmapi');
   requireNonDegenerateText(text, 'freellmapi');
@@ -228,13 +232,16 @@ function extractSseDeltas(buffer) {
 // transient so the caller's chain can move to its next attempt), or the
 // same empty/degenerate-output checks requireNonEmptyText/
 // requireNonDegenerateText already apply to a full response.
-async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTimeoutMs }, onToken) {
+async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTimeoutMs }, onToken, { signal: externalSignal } = {}) {
   const apiKey = process.env.FREELLMAPI_API_KEY;
   if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
   const baseUrl = process.env.FREELLMAPI_BASE_URL;
   if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
 
   const controller = new AbortController();
+  if (externalSignal?.aborted) throw externalSignal.reason || Object.assign(new Error('request cancelled'), { name: 'AbortError' });
+  const abortFromCaller = () => controller.abort(externalSignal.reason);
+  externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const overallTimeout = setTimeout(() => controller.abort(), FREELLMAPI_TIMEOUT_MS);
   let firstTokenTimer = null;
   if (firstTokenTimeoutMs) {
@@ -256,6 +263,8 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
   } catch (err) {
     clearTimeout(overallTimeout);
     if (firstTokenTimer) clearTimeout(firstTokenTimer);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
+    if (externalSignal?.aborted) throw externalSignal.reason || Object.assign(new Error('request cancelled'), { name: 'AbortError' });
     // An abort before any byte of the response arrived is indistinguishable
     // from a first-token stall here (both fire controller.abort()) — both
     // are transient and both should let the caller try its next attempt,
@@ -266,7 +275,8 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
   if (!res.ok) {
     clearTimeout(overallTimeout);
     if (firstTokenTimer) clearTimeout(firstTokenTimer);
-    const bodyText = await res.text().catch(() => '');
+    externalSignal?.removeEventListener('abort', abortFromCaller);
+    const bodyText = await readResponseText(res, 64 * 1024, 'AI provider error body').catch(() => '');
     console.error(`freellmapi stream request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
     const err = new Error(`AI provider request failed (${res.status})`);
     err.status = res.status;
@@ -306,6 +316,7 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
   } finally {
     clearTimeout(overallTimeout);
     if (firstTokenTimer) clearTimeout(firstTokenTimer);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
   }
 
   requireNonEmptyText(fullText, 'freellmapi');
@@ -320,14 +331,14 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
 // attempt that's actually running — a fast-model stream that gets
 // aborted mid-token never leaks partial text into the caller, since
 // onToken simply stops being called once that attempt's promise rejects.
-async function callProviderWithFallbackStreaming({ system, user }, onToken) {
+async function callProviderWithFallbackStreaming({ system, user }, onToken, { signal } = {}) {
   const attempts = buildStreamingAttempts();
   let lastErr;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
     console.log(`ai_provider stream_request_started model=${attempt.model}`);
     try {
-      const { text, ttftMs } = await streamFreeLLMAPIAttempt({ system, user }, attempt, onToken);
+      const { text, ttftMs } = await streamFreeLLMAPIAttempt({ system, user }, attempt, onToken, { signal });
       console.log(`ai_provider stream_request_succeeded model=${attempt.model} ttft_ms=${ttftMs}`);
       return { text, ttftMs, model: attempt.model };
     } catch (err) {
@@ -368,16 +379,16 @@ async function runProviderChain(providers) {
 }
 
 // Single-entry chain: just FreeLLMAPI, when configured.
-function buildProviderChain(promptMessages) {
+function buildProviderChain(promptMessages, { signal } = {}) {
   const chain = [];
-  if (process.env.FREELLMAPI_API_KEY) chain.push({ name: 'freellmapi', run: () => callFreeLLMAPI(promptMessages) });
+  if (process.env.FREELLMAPI_API_KEY) chain.push({ name: 'freellmapi', run: () => callFreeLLMAPI(promptMessages, { signal }) });
   return chain;
 }
 
 // The entry point aiDraft.js uses in place of callProvider: same prompt
 // shape in, same raw text contract out (plus which provider produced it).
-async function callProviderWithFallback(promptMessages) {
-  return runProviderChain(buildProviderChain(promptMessages));
+async function callProviderWithFallback(promptMessages, options = {}) {
+  return runProviderChain(buildProviderChain(promptMessages, options));
 }
 
 module.exports = {

@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { parseFeed, toDateOnly } = require('./feedParser');
+const { readResponseText } = require('./boundedResponse');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
@@ -75,7 +76,7 @@ async function fetchFeedItems(url) {
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const xml = await res.text();
+  const xml = await readResponseText(res, 2 * 1024 * 1024, 'RSS/Atom feed');
   return parseFeed(xml).slice(0, MAX_ITEMS_PER_RUN);
 }
 

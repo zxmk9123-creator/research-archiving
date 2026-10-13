@@ -86,6 +86,8 @@ const ITEM_SELECT = `
 
 router.get('/', async (req, res) => {
   const { q, sector, usage, type, source_id, status, from, to, category } = req.query;
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+  const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
   const clauses = [];
   const params = [];
 
@@ -110,7 +112,14 @@ router.get('/', async (req, res) => {
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC`, params);
+  params.push(limit + 1, offset);
+  const orderBy = status === 'Draft'
+    ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
+    : 'ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC';
+  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ${orderBy} LIMIT ${params.length - 1} OFFSET ${params.length}`, params);
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
+  res.set('X-Has-More', String(hasMore));
   res.json(rows);
 });
 
