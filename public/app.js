@@ -2163,17 +2163,6 @@ async function renderOps() {
   app.innerHTML = renderOpsHtml(stats);
 }
 
-// AI eligibility=false is a reviewer signal, not a filter — every Draft item
-// stays in the dropdown and reviewable, just reordered so items the AI
-// flagged as questionable surface first. eligible === null means "no AI
-// recommendation yet" (draft/failed/not requested), sorted after false but
-// before true so it's still seen ahead of items the AI is fine with.
-function reviewPriority(d) {
-  if (d.ai_eligible === false) return 0;
-  if (d.ai_eligible === null || d.ai_eligible === undefined) return 1;
-  return 2;
-}
-
 // 리뷰어가 아직 적합/비적합을 확정하지 않은 항목 — "판단 미완료" 그룹을
 // 상단에 띄우는 기준. reviewer_eligible은 "적합으로 확정"/"비적합으로
 // 확정" 버튼을 눌러야만 true/false가 되고, 그 전까지는 null.
@@ -2218,15 +2207,39 @@ function reviewTipCardHtml() {
   `;
 }
 
-async function renderReview(offset = 0) {
-  const [draftsPage, sectors, usages, sources] = await Promise.all([
-    api('/items?status=Draft' + toQuery({ limit: 100, offset }), { includeMeta: true }), api('/sectors'), api('/usages'), api('/sources'),
+// /api/items caps limit at 100 per request (see server/routes/items.js) —
+// a deliberate bound against sending the whole table to one query, not a
+// UI pagination choice. Review used to expose that cap directly as its own
+// "이전/다음 100개" paging, which meant the dropdown (and prev/next-draft
+// navigation, which walks the SAME `drafts` array) only ever covered
+// whichever 100-item page was currently loaded. Fetching every page here
+// instead keeps the dropdown showing the full Draft backlog while leaving
+// the server's own per-request cap untouched.
+async function fetchAllDrafts() {
+  const limit = 100;
+  let offset = 0;
+  let all = [];
+  while (true) {
+    const page = await api('/items?status=Draft' + toQuery({ limit, offset }), { includeMeta: true });
+    all = all.concat(page.data);
+    if (!page.hasMore) break;
+    offset += limit;
+  }
+  return all;
+}
+
+async function renderReview() {
+  const [draftsRaw, sectors, usages, sources] = await Promise.all([
+    fetchAllDrafts(), api('/sectors'), api('/usages'), api('/sources'),
   ]);
-  const draftsRaw = draftsPage.data;
+  // 판단 미완료 그룹이 먼저, 그 안에서는 제목 기준 a-z/가나다 순 — 판단
+  // 완료 그룹도 동일하게 제목 순으로 정렬. localeCompare('ko')가 로마자와
+  // 한글을 한 기준으로 같이 정렬해준다.
+  const titleCompare = (a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'ko');
   const drafts = [...draftsRaw].sort((a, b) => {
     const pendingDiff = (isReviewerPending(a) ? 0 : 1) - (isReviewerPending(b) ? 0 : 1);
     if (pendingDiff !== 0) return pendingDiff;
-    return reviewPriority(a) - reviewPriority(b);
+    return titleCompare(a, b);
   });
 
   // Comparison view: only Drafts the reviewer has actually confirmed/
@@ -2257,10 +2270,6 @@ async function renderReview(offset = 0) {
     <h1>Review</h1>
     <p class="page-lede">AI가 자동으로 수집·판단한 초안을 발행 전에 사람이 직접 검수해, 적합성 판단의 정확도를 보장하는 화면입니다.<br>내가 AI 판단을 뒤집은 사례는 주제가 비슷한 새 기사를 판단할 때 AI에게 우선 참고 자료로 제공되어, 검수가 쌓일수록 관련 주제의 AI 판단이 보정됩니다.</p>
     ${reviewTipCardHtml()}
-    <div class="pagination-controls">
-      ${offset > 0 ? `<button class="btn" id="draft-prev-page" type="button">이전 100개</button>` : ''}
-      ${draftsPage.hasMore ? `<button class="btn" id="draft-next-page" type="button">다음 100개</button>` : ''}
-    </div>
     <div class="review-toolbar">
       <select id="draft-select">
         ${(() => {
@@ -2281,8 +2290,6 @@ async function renderReview(offset = 0) {
     <div id="review-body"></div>
     ${comparisonSection}
   `;
-  document.getElementById('draft-prev-page')?.addEventListener('click', () => renderReview(Math.max(0, offset - 100)));
-  document.getElementById('draft-next-page')?.addEventListener('click', () => renderReview(offset + 100));
   const reviewTipCloseBtn = document.getElementById('review-tip-close');
   if (reviewTipCloseBtn) {
     reviewTipCloseBtn.onclick = () => {
