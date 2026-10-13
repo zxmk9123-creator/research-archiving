@@ -1017,6 +1017,18 @@ CREATE TABLE IF NOT EXISTS ai_search_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_search_logs_created_at ON ai_search_logs(created_at);
 
+-- Time-to-first-token: the actual perceived-latency number for a
+-- streamed request (NULL for a non-streaming request, since there is no
+-- single "first token" to measure there — latency_ms already covers the
+-- whole thing). Added so a provider/model whose total latency_ms varies
+-- wildly (see provider.js's FreeLLMAPI comments) can still be judged on
+-- what the user actually waited to see something, not just the final
+-- total. `streamed` records which code path served the request, so the
+-- two populations are never silently averaged together.
+ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS ttft_ms INTEGER;
+ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS streamed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS model_used TEXT;
+
 -- Exact-URL dedup, made reliable at the DB level. Production investigation
 -- (confirmed via the live items table) found two genuine exact-duplicate
 -- source_url pairs — ids [233,234] (barchart.com futures quote) and

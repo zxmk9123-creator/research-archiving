@@ -24,12 +24,14 @@ async function recordSearchTelemetry(fields) {
     await pool.query(
       `INSERT INTO ai_search_logs (
          request_id, operation, outcome, http_status, latency_ms,
-         candidate_count, source_count, provider, failure_type, is_followup, question_fingerprint
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         candidate_count, source_count, provider, failure_type, is_followup, question_fingerprint,
+         ttft_ms, streamed, model_used
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         fields.requestId, 'ai_search', fields.outcome, fields.httpStatus, fields.latencyMs,
         fields.candidateCount ?? null, fields.sourceCount ?? null, fields.provider ?? null,
         fields.failureType ?? null, Boolean(fields.isFollowup), fields.questionFingerprint ?? null,
+        fields.ttftMs ?? null, Boolean(fields.streamed), fields.model ?? null,
       ]
     );
   } catch (err) {
@@ -137,13 +139,28 @@ Rules:
 - If earlier conversation turns are given, treat them as context for a follow-up question, but still ground every claim only in the materials given now.
 - Respond in Korean.`;
 
+// Prompt-prep trim: a hard cap per field so one unusually long AI_summary/
+// insight doesn't blow up the user message size (MAX_CANDIDATES=8
+// materials, each potentially contributing two long fields) — the time
+// the provider spends just reading a longer prompt before it emits a
+// first token is real and scales with this, not just with how long the
+// model's own answer ends up being. 320/240 chars keep each field at
+// roughly 2-3 sentences, enough for the model to cite accurately without
+// the full original text.
+const MAX_SUMMARY_CHARS = 320;
+const MAX_INSIGHT_CHARS = 240;
+function truncateField(text, maxChars) {
+  const str = String(text || '');
+  return str.length > maxChars ? `${str.slice(0, maxChars)}…` : str;
+}
+
 function buildMaterialsBlock(candidates) {
   return candidates.map((m, i) => [
     `자료 ${i + 1} — 제목: ${m.title}`,
     `출처: ${m.source_name || '미확인'}`,
     `발행일: ${m.published_at ? String(m.published_at).slice(0, 10) : '미확인'}`,
-    `요약: ${m.summary || m.ai_summary || '(요약 없음)'}`,
-    (m.insight || m.ai_insight) ? `인사이트: ${m.insight || m.ai_insight}` : null,
+    `요약: ${truncateField(m.summary || m.ai_summary || '(요약 없음)', MAX_SUMMARY_CHARS)}`,
+    (m.insight || m.ai_insight) ? `인사이트: ${truncateField(m.insight || m.ai_insight, MAX_INSIGHT_CHARS)}` : null,
   ].filter(Boolean).join('\n')).join('\n\n');
 }
 
@@ -284,62 +301,14 @@ async function verifyCitations(text, candidates) {
   }
 }
 
-router.post('/', async (req, res) => {
-  const startedAt = Date.now();
-  const requestId = crypto.randomUUID();
-  const isFollowup = Array.isArray(req.body.history) && req.body.history.length > 0;
-
-  // Not logged to ai_search_logs — an empty query never reaches retrieval
-  // or the provider, so there's no operation to report telemetry for
-  // (existing callers/tests rely on this guard touching the DB at all).
-  const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
-  if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
-  const fingerprint = questionFingerprint(question);
-
-  let candidates;
-  try {
-    candidates = await retrieveCandidates(question, req.body.history);
-  } catch (err) {
-    console.error('ai-search retrieval failed:', err.message);
-    const httpStatus = 500;
-    await recordSearchTelemetry({ requestId, outcome: 'retrieval_error', httpStatus, latencyMs: Date.now() - startedAt, isFollowup, questionFingerprint: fingerprint });
-    return res.status(httpStatus).json({ error: '검색 중 오류가 발생했습니다.' });
-  }
-
-  if (!candidates.length) {
-    const httpStatus = 200;
-    await recordSearchTelemetry({
-      requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
-      candidateCount: 0, sourceCount: 0, isFollowup, questionFingerprint: fingerprint,
-    });
-    return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
-  }
-
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}`;
-
-  let text;
-  let providerName;
-  try {
-    const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user });
-    text = result.text;
-    providerName = result.provider;
-  } catch (err) {
-    // Never leak provider credentials/internal error details to the browser.
-    console.error('ai-search provider failed:', err.message);
-    const httpStatus = 502;
-    await recordSearchTelemetry({
-      requestId, outcome: 'provider_error', httpStatus, latencyMs: Date.now() - startedAt,
-      candidateCount: candidates.length, failureType: err.failureType || null, isFollowup, questionFingerprint: fingerprint,
-    });
-    return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
-  }
-
-  // Verify each citation against its claim before deciding what counts as
-  // "actually cited" below — an unsupported citation gets its marker
-  // stripped here, so it naturally falls out of `sources` below rather
-  // than needing a separate filter pass.
-  text = await verifyCitations(text, candidates);
-
+// Shared by both the streaming and non-streaming paths: turns a raw
+// model answer into the final {answer, sources} the client renders.
+// Citation verification (an extra provider round-trip) used to run
+// before ANY output reached the browser, doubling perceived latency on
+// every single request — now it only ever delays this final polish
+// step, never the first visible token (see the streaming path below).
+async function finalizeAnswer(rawText, candidates) {
+  const text = await verifyCitations(rawText, candidates);
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -356,13 +325,126 @@ router.post('/', async (req, res) => {
     source: c.source_name || null,
     published_at: c.published_at,
   }));
-  const httpStatus = 200;
-  await recordSearchTelemetry({
-    requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
-    candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
-    isFollowup, questionFingerprint: fingerprint,
+  return { answer, sources };
+}
+
+// A client that can render incrementally sends Accept: text/event-stream
+// to opt in; anything else (including no Accept header at all) gets
+// today's plain JSON response, completely unchanged — this is additive,
+// not a breaking change to the existing contract.
+function wantsStream(req) {
+  return (req.get('accept') || '').includes('text/event-stream');
+}
+
+router.post('/', async (req, res) => {
+  const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+  const isFollowup = Array.isArray(req.body.history) && req.body.history.length > 0;
+  const streaming = wantsStream(req);
+
+  // Not logged to ai_search_logs — an empty query never reaches retrieval
+  // or the provider, so there's no operation to report telemetry for
+  // (existing callers/tests rely on this guard touching the DB at all).
+  const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
+  if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
+  const fingerprint = questionFingerprint(question);
+
+  let candidates;
+  try {
+    candidates = await retrieveCandidates(question, req.body.history);
+  } catch (err) {
+    console.error('ai-search retrieval failed:', err.message);
+    const httpStatus = 500;
+    await recordSearchTelemetry({ requestId, outcome: 'retrieval_error', httpStatus, latencyMs: Date.now() - startedAt, isFollowup, questionFingerprint: fingerprint, streamed: streaming });
+    return res.status(httpStatus).json({ error: '검색 중 오류가 발생했습니다.' });
+  }
+
+  if (!candidates.length) {
+    const httpStatus = 200;
+    await recordSearchTelemetry({
+      requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
+      candidateCount: 0, sourceCount: 0, isFollowup, questionFingerprint: fingerprint, streamed: streaming,
+    });
+    // Never opens an SSE stream for this case — nothing was ever going to
+    // stream, so the client's own content-type check (see app.js) just
+    // treats this exactly like a non-streaming response.
+    return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
+  }
+
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}`;
+
+  if (!streaming) {
+    let text;
+    let providerName;
+    try {
+      const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user });
+      text = result.text;
+      providerName = result.provider;
+    } catch (err) {
+      console.error('ai-search provider failed:', err.message);
+      const httpStatus = 502;
+      await recordSearchTelemetry({
+        requestId, outcome: 'provider_error', httpStatus, latencyMs: Date.now() - startedAt,
+        candidateCount: candidates.length, failureType: err.failureType || null, isFollowup, questionFingerprint: fingerprint, streamed: false,
+      });
+      return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
+    }
+    const { answer, sources } = await finalizeAnswer(text, candidates);
+    await recordSearchTelemetry({
+      requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
+      candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
+      isFollowup, questionFingerprint: fingerprint, streamed: false,
+    });
+    return res.json({ answer, insufficient: false, sources });
+  }
+
+  // --- Streaming path ---
+  // Raw model tokens (including their own [N] markers, un-remapped) are
+  // forwarded to the browser as they arrive, purely so the user sees
+  // something within seconds instead of waiting for the full answer AND
+  // the citation-verification pass on top of it. The client renders this
+  // raw stream as plain text, then swaps to the polished, citation-linked
+  // version the instant the `done` event arrives — see renderHome()'s
+  // runAiSearchTurn in app.js.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no', // disable any reverse-proxy response buffering, or token events arrive in one late burst
   });
-  res.json({ answer, insufficient: false, sources });
+  const sendEvent = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  let rawText;
+  let ttftMs = null;
+  let modelUsed = null;
+  try {
+    const result = await provider.callProviderWithFallbackStreaming(
+      { system: SYSTEM_PROMPT, user },
+      (delta) => sendEvent('token', { delta })
+    );
+    rawText = result.text;
+    ttftMs = result.ttftMs;
+    modelUsed = result.model;
+  } catch (err) {
+    console.error('ai-search streaming provider failed:', err.message);
+    sendEvent('error', { message: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
+    res.end();
+    await recordSearchTelemetry({
+      requestId, outcome: 'provider_error', httpStatus: 502, latencyMs: Date.now() - startedAt,
+      candidateCount: candidates.length, failureType: err.failureType || null, isFollowup, questionFingerprint: fingerprint,
+      streamed: true, ttftMs,
+    });
+    return;
+  }
+
+  const { answer, sources } = await finalizeAnswer(rawText, candidates);
+  sendEvent('done', { answer, insufficient: false, sources });
+  res.end();
+  await recordSearchTelemetry({
+    requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
+    candidateCount: candidates.length, sourceCount: sources.length, provider: 'freellmapi', model: modelUsed,
+    isFollowup, questionFingerprint: fingerprint, streamed: true, ttftMs,
+  });
 });
 
 module.exports = router;
@@ -379,3 +461,6 @@ module.exports.moveCitationsAfterPunctuation = moveCitationsAfterPunctuation;
 module.exports.splitClaimLines = splitClaimLines;
 module.exports.parseUnsupportedClaimNumbers = parseUnsupportedClaimNumbers;
 module.exports.VERIFICATION_SYSTEM_PROMPT = VERIFICATION_SYSTEM_PROMPT;
+module.exports.wantsStream = wantsStream;
+module.exports.finalizeAnswer = finalizeAnswer;
+module.exports.truncateField = truncateField;

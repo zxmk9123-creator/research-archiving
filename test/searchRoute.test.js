@@ -473,6 +473,19 @@ test('buildMaterialsBlock labels retrieved materials without bracket-style numbe
   assert.ok(!block.includes('[1]'));
 });
 
+test('buildMaterialsBlock: truncates an unusually long summary/insight so prompt size stays bounded', () => {
+  const longSummary = '가'.repeat(500);
+  const longInsight = '나'.repeat(500);
+  const block = searchRouter.buildMaterialsBlock([
+    { title: 't', source_name: 's', published_at: null, summary: longSummary, insight: longInsight, ai_summary: null, ai_insight: null },
+  ]);
+  const summaryLine = block.split('\n').find((l) => l.startsWith('요약:'));
+  const insightLine = block.split('\n').find((l) => l.startsWith('인사이트:'));
+  assert.ok(summaryLine.length < longSummary.length);
+  assert.ok(summaryLine.endsWith('…'));
+  assert.ok(insightLine.length < longInsight.length);
+});
+
 test('POST /: conversation history is folded into the provider prompt as prior turns', async () => {
   const { restore } = mockPool([
     ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],

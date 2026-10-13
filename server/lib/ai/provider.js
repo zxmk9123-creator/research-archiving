@@ -157,6 +157,191 @@ async function callProvider(promptMessages) {
   return callFreeLLMAPI(promptMessages);
 }
 
+// --- Streaming path (AI Research Search's perceived-latency fix) ---
+//
+// FreeLLMAPI's total latency varies wildly (confirmed in production:
+// anywhere from a few seconds to 135s+ depending on which upstream its
+// own cascade lands on) — not because our side calls different providers,
+// but because that single router's internal fallback chain does. Waiting
+// for the complete answer before showing anything means every request
+// feels as slow as the worst case. Streaming the model's own token-by-
+// token output (stream:true, same OpenAI-compatible wire format) lets the
+// browser start rendering as soon as the FIRST chunk arrives — the total
+// time to finish is unchanged, but the user sees progress immediately
+// instead of a blank wait.
+//
+// Two-tier model attempt, both optional and off-by-default (unset env ->
+// identical single-call behavior to today): if FREELLMAPI_FAST_MODEL is
+// configured, it's tried first with a short first-token timeout
+// (FREELLMAPI_FAST_MODEL_TIMEOUT_MS, default 8s) — a stall there aborts
+// and falls through to the normal model with no first-token timeout of
+// its own (that one must be allowed FreeLLMAPI's full cascade budget, or
+// a legitimately-slow-but-correct answer would be killed early for
+// nothing). The fast tier is deliberately bounded only by "did a token
+// show up in time", never by total completion time — a fast model that
+// starts responding but takes a while to finish is still a perceived-
+// latency win and is never aborted mid-stream for being slow overall.
+function buildStreamingAttempts() {
+  const attempts = [];
+  const fastModel = (process.env.FREELLMAPI_FAST_MODEL || '').trim();
+  if (fastModel) {
+    const firstTokenTimeoutMs = Number(process.env.FREELLMAPI_FAST_MODEL_TIMEOUT_MS) || 8000;
+    attempts.push({ model: fastModel, firstTokenTimeoutMs });
+  }
+  attempts.push({ model: process.env.FREELLMAPI_MODEL || 'auto', firstTokenTimeoutMs: null });
+  return attempts;
+}
+
+// Parses one or more complete SSE "data: ..." lines out of a running text
+// buffer (chunks from the network don't align with SSE event boundaries),
+// returning the parsed delta content strings and whatever incomplete tail
+// is left to prepend to the next chunk.
+function extractSseDeltas(buffer) {
+  const deltas = [];
+  let done = false;
+  const lines = buffer.split('\n');
+  const remainder = lines.pop(); // last element may be an incomplete line
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const payload = trimmed.slice(5).trim();
+    if (payload === '[DONE]') { done = true; continue; }
+    try {
+      const parsed = JSON.parse(payload);
+      const delta = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content;
+      if (delta) deltas.push(delta);
+    } catch {
+      // A line split exactly on a chunk boundary can be invalid JSON even
+      // though it belongs to a complete SSE "line" — rare, and silently
+      // dropping one delta is far better than aborting the whole stream.
+    }
+  }
+  return { deltas, remainder, done };
+}
+
+// Streams one model attempt. onToken(delta) fires for every chunk of
+// text as it arrives; the call resolves with the full accumulated text
+// and ttftMs (time from this function's own start to the first token),
+// or rejects — classified with markFallback exactly like the
+// non-streaming path — on a transport failure, a first-token stall past
+// firstTokenTimeoutMs (failureType 'first_token_timeout', always
+// transient so the caller's chain can move to its next attempt), or the
+// same empty/degenerate-output checks requireNonEmptyText/
+// requireNonDegenerateText already apply to a full response.
+async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTimeoutMs }, onToken) {
+  const apiKey = process.env.FREELLMAPI_API_KEY;
+  if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
+  const baseUrl = process.env.FREELLMAPI_BASE_URL;
+  if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
+
+  const controller = new AbortController();
+  const overallTimeout = setTimeout(() => controller.abort(), FREELLMAPI_TIMEOUT_MS);
+  let firstTokenTimer = null;
+  if (firstTokenTimeoutMs) {
+    firstTokenTimer = setTimeout(() => controller.abort(), firstTokenTimeoutMs);
+  }
+
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model, max_tokens: 4000, stream: true,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(overallTimeout);
+    if (firstTokenTimer) clearTimeout(firstTokenTimer);
+    // An abort before any byte of the response arrived is indistinguishable
+    // from a first-token stall here (both fire controller.abort()) — both
+    // are transient and both should let the caller try its next attempt,
+    // so there's no need to tell them apart by which timer fired.
+    const failureType = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'first_token_timeout' : 'network';
+    throw markFallback(new Error(`AI provider unavailable (${failureType})`), failureType);
+  }
+  if (!res.ok) {
+    clearTimeout(overallTimeout);
+    if (firstTokenTimer) clearTimeout(firstTokenTimer);
+    const bodyText = await res.text().catch(() => '');
+    console.error(`freellmapi stream request failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
+    const err = new Error(`AI provider request failed (${res.status})`);
+    err.status = res.status;
+    if (res.status === 429) markFallback(err, 'rate_limit');
+    else if (res.status >= 500) markFallback(err, 'server_error');
+    else if (res.status === 401 || res.status === 403) markFallback(err, 'auth');
+    throw err;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let ttftMs = null;
+  try {
+    while (true) {
+      const { value, done: streamDone } = await reader.read();
+      if (streamDone) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { deltas, remainder, done } = extractSseDeltas(buffer);
+      buffer = remainder;
+      for (const delta of deltas) {
+        if (ttftMs === null) {
+          ttftMs = Date.now() - startedAt;
+          if (firstTokenTimer) { clearTimeout(firstTokenTimer); firstTokenTimer = null; }
+        }
+        fullText += delta;
+        onToken(delta);
+      }
+      if (done) break;
+    }
+  } catch (err) {
+    const failureType = err.name === 'TimeoutError' || err.name === 'AbortError'
+      ? (ttftMs === null ? 'first_token_timeout' : 'timeout')
+      : 'network';
+    throw markFallback(new Error(`AI provider unavailable (${failureType})`), failureType);
+  } finally {
+    clearTimeout(overallTimeout);
+    if (firstTokenTimer) clearTimeout(firstTokenTimer);
+  }
+
+  requireNonEmptyText(fullText, 'freellmapi');
+  requireNonDegenerateText(fullText, 'freellmapi');
+  return { text: fullText, ttftMs };
+}
+
+// Orchestrates buildStreamingAttempts() the same way runProviderChain()
+// orchestrates the non-streaming provider list: try each in order, move
+// to the next only on a transient failure (markFallback'd err.transient),
+// otherwise throw immediately. onToken is only ever wired up to the
+// attempt that's actually running — a fast-model stream that gets
+// aborted mid-token never leaks partial text into the caller, since
+// onToken simply stops being called once that attempt's promise rejects.
+async function callProviderWithFallbackStreaming({ system, user }, onToken) {
+  const attempts = buildStreamingAttempts();
+  let lastErr;
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    console.log(`ai_provider stream_request_started model=${attempt.model}`);
+    try {
+      const { text, ttftMs } = await streamFreeLLMAPIAttempt({ system, user }, attempt, onToken);
+      console.log(`ai_provider stream_request_succeeded model=${attempt.model} ttft_ms=${ttftMs}`);
+      return { text, ttftMs, model: attempt.model };
+    } catch (err) {
+      lastErr = err;
+      const failureType = err.failureType || 'application_error';
+      console.error(`ai_provider stream_request_failed model=${attempt.model} failure_type=${failureType} reason=${err.message}`);
+      if (!err.transient) throw err;
+      const next = attempts[i + 1];
+      if (next) console.log(`ai_provider stream_fallback from=${attempt.model} to=${next.model}`);
+    }
+  }
+  throw lastErr;
+}
+
 // Pure orchestration, no network calls of its own — testable in isolation
 // with fake providers.
 async function runProviderChain(providers) {
@@ -205,4 +390,8 @@ module.exports = {
   hasDegenerateRepetition,
   requireNonDegenerateText,
   FREELLMAPI_TIMEOUT_MS,
+  callProviderWithFallbackStreaming,
+  buildStreamingAttempts,
+  extractSseDeltas,
+  streamFreeLLMAPIAttempt,
 };

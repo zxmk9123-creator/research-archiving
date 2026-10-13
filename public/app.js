@@ -879,6 +879,38 @@ function stopAiSearchStatus(moduleEl) {
 // Pulled out of the form's submit handler so a failed turn can retry
 // itself in place — same turn element, same question — without the user
 // having to retype it into the input box.
+// Records a successful turn and flips the module into its "answered"
+// state — shared by both the non-streaming JSON branch (insufficient-
+// evidence, or a client too old/odd to get a stream) and the streaming
+// branch's `done` event, so the two paths never duplicate this bookkeeping.
+function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources) {
+  aiSearchHistory.push({ role: 'user', content: question });
+  aiSearchHistory.push({ role: 'assistant', content: answer });
+  bodyEl.innerHTML = `
+    ${renderAnswerHtml(answer, sources)}
+    ${aiSearchSourcesHtml(sources)}
+  `;
+  // On a retry, this turn wasn't recorded the first time around (only a
+  // successful turn gets persisted) — push now, and only now, so a
+  // Home re-render replays exactly the turns that actually succeeded.
+  aiSearchTurnsHtml.push(turnEl.outerHTML);
+  const resetBtn = document.getElementById('ai-search-reset-btn');
+  if (resetBtn) resetBtn.disabled = false;
+}
+
+// Runs (or re-runs, via the error state's "재검색" button) one turn's
+// search request against `question`, rendering into `turnEl`'s body.
+// Pulled out of the form's submit handler so a failed turn can retry
+// itself in place — same turn element, same question — without the user
+// having to retype it into the input box.
+//
+// Requests streaming (Accept: text/event-stream) so the model's own
+// tokens render as they arrive instead of waiting for the full answer
+// AND the citation-verification pass on top of it — see
+// server/routes/search.js's wantsStream()/finalizeAnswer(). A response
+// whose content-type comes back as JSON anyway (the insufficient-
+// evidence case, or a 4xx/5xx before any stream could start) is handled
+// exactly like before streaming existed; this is purely additive.
 async function runAiSearchTurn(turnEl, question, submitBtn) {
   const moduleEl = document.getElementById('ai-search');
   const bodyEl = turnEl.querySelector('.ai-search-turn-body');
@@ -889,26 +921,59 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify({ question, history: aiSearchHistory }),
     });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      bodyEl.innerHTML = aiSearchErrorHtml(body.error || 'AI 검색 중 오류가 발생했습니다.');
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        bodyEl.innerHTML = aiSearchErrorHtml(body.error || 'AI 검색 중 오류가 발생했습니다.');
+        return;
+      }
+      finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources);
       return;
     }
-    aiSearchHistory.push({ role: 'user', content: question });
-    aiSearchHistory.push({ role: 'assistant', content: body.answer });
-    bodyEl.innerHTML = `
-      ${renderAnswerHtml(body.answer, body.sources)}
-      ${aiSearchSourcesHtml(body.sources)}
-    `;
-    // On a retry, this turn wasn't recorded the first time around (only a
-    // successful turn gets persisted) — push now, and only now, so a
-    // Home re-render replays exactly the turns that actually succeeded.
-    aiSearchTurnsHtml.push(turnEl.outerHTML);
-    const resetBtn = document.getElementById('ai-search-reset-btn');
-    if (resetBtn) resetBtn.disabled = false;
+
+    // Streaming: raw model tokens (including their own un-remapped [N]
+    // markers) render as plain text the instant they arrive — correctness
+    // (citation verification/remapping) only ever delays the swap to the
+    // polished version on `done`, never the first visible output.
+    bodyEl.innerHTML = '<div class="ai-search-streaming-text"></div>';
+    const streamEl = bodyEl.querySelector('.ai-search-streaming-text');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let rawText = '';
+    let firstTokenSeen = false;
+    let finished = false;
+    while (!finished) {
+      const { value, done: streamDone } = await reader.read();
+      if (streamDone) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop();
+      for (const block of blocks) {
+        const eventLine = block.split('\n').find((l) => l.startsWith('event:'));
+        const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!eventLine || !dataLine) continue;
+        let data;
+        try { data = JSON.parse(dataLine.slice(5).trim()); } catch { continue; }
+        const eventName = eventLine.slice(6).trim();
+        if (eventName === 'token') {
+          if (!firstTokenSeen) { firstTokenSeen = true; stopAiSearchStatus(moduleEl); }
+          rawText += data.delta;
+          streamEl.textContent = rawText;
+        } else if (eventName === 'done') {
+          finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
+          finished = true;
+        } else if (eventName === 'error') {
+          bodyEl.innerHTML = aiSearchErrorHtml(data.message || 'AI 검색 중 오류가 발생했습니다.');
+          finished = true;
+        }
+        if (finished) break;
+      }
+    }
   } catch (err) {
     bodyEl.innerHTML = aiSearchErrorHtml('AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
   } finally {
