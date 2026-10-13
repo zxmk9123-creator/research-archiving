@@ -963,7 +963,14 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
         if (eventName === 'token') {
           if (!firstTokenSeen) { firstTokenSeen = true; stopAiSearchStatus(moduleEl); }
           rawText += data.delta;
-          streamEl.textContent = rawText;
+          // Strips only leading whitespace — a model's completion commonly
+          // opens with a stray newline/space before the real content, and
+          // with pre-wrap that rendered as a visible blank line pushing the
+          // text away from the question above it, a gap the final polished
+          // render never had (renderAnswerHtml() already trims each block).
+          // Trailing whitespace is left alone; it has no visible effect
+          // while more tokens are still arriving.
+          streamEl.textContent = rawText.replace(/^\s+/, '');
         } else if (eventName === 'done') {
           finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
           finished = true;
