@@ -586,6 +586,7 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
       }],
     })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
   ]);
   try {
     const result = await applyAiDraftIfEligible(42);
@@ -612,6 +613,7 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
       }],
     })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
   ]);
   try {
     await applyAiDraftIfEligible(43);

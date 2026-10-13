@@ -176,6 +176,25 @@ const MAJOR_OIL_FAT_COMPANIES = [
 
 const COMPANY_DEVELOPMENT_CONTEXT = /\b(acqui(?:res?|sition|ring)|invest(?:s|ment|ing)?|capital expenditure|capex|new plant|new (?:factory|refinery|facility)|crushing facility|expan(?:d|ds|sion)|shut ?down|clos(?:e|es|ing) (?:a )?(?:plant|facility|refinery)|partnership|joint venture|supply agreement|sourcing|product launch|enters? (?:the )?market|exits? (?:the )?market|restructur(?:e|ing)|sustainability initiative|procurement)\b/i;
 
+// Generic reference/listicle/vendor-SEO pages: confirmed in production
+// (2026-10-13) reaching Draft despite matching a real product term —
+// "Palm oil - Wikipedia" and "Top 10 Edible Vegetable Oil Companies |
+// Report Prime" both passed scope3RegulationsPolicies purely because the
+// title contains "palm oil"/"vegetable oil", even though neither is a
+// market-news article. These pages have no date, no specific
+// deal/policy/price fact, and recur every time a Web Discovery query runs
+// (the encyclopedia entry and market-research directory page are static) —
+// pure review-queue noise, excluded regardless of which scope otherwise
+// matches.
+const GENERIC_REFERENCE_PAGE_PATTERNS = [
+  /\s[-–]\s*Wikipedia\s*$/i,
+  /^top\s+\d+\b.*\bcompanies\b/i,
+  /\|\s*(report prime|market(?:s)?\.us|verified market research|market research (?:future|report)|grand view research|precedence research|fortune business insights|imarc group)\s*$/i,
+];
+function isGenericReferencePage(text) {
+  return GENERIC_REFERENCE_PAGE_PATTERNS.some((p) => p.test(text));
+}
+
 // Normalizes typographic hyphen variants (e.g. U+2011 non-breaking
 // hyphen, as seen in a real "plant‑based" production title) to a plain
 // ASCII hyphen, so every pattern above only has to spell "-" once.
@@ -216,6 +235,11 @@ function scope4MajorCompanies(text) {
 // where the specific scope term appears even when the title is generic.
 function isRelevantToOilFatsScope(title, description) {
   const text = normalizeHyphens(`${title || ''} ${description || ''}`);
+  // Checked first and exclusively on the title — a generic reference page
+  // is never relevant regardless of which scope its wording otherwise
+  // matches (an encyclopedia entry can legitimately contain "Brent crude"
+  // or "ADM" without being market news about either).
+  if (isGenericReferencePage(normalizeHyphens(title || ''))) return false;
 
   if (scope1LogisticsShipping(text)) return true;
   if (scope2CrudeEnergy(text)) return true;
@@ -227,6 +251,7 @@ function isRelevantToOilFatsScope(title, description) {
 
 module.exports = {
   isRelevantToOilFatsScope,
+  isGenericReferencePage,
   scope1LogisticsShipping,
   scope2CrudeEnergy,
   scope3RegulationsPolicies,

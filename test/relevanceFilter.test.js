@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isRelevantToOilFatsScope } = require('../server/lib/relevanceFilter');
+const { isRelevantToOilFatsScope, isGenericReferencePage } = require('../server/lib/relevanceFilter');
 
 // ---------------------------------------------------------------------
 // Scope 1: Logistics & Shipping Market
@@ -342,6 +342,51 @@ test('Plant-based: "plant-based" (regular hyphen) is relevant', () => {
 test('Plant-based: "plant‑based" (non-breaking hyphen, U+2011) is relevant', () => {
   assert.equal(
     isRelevantToOilFatsScope('Gut feeling: Biomel’s UK plant‑based gut‑health push', null),
+    true
+  );
+});
+
+// ---------------------------------------------------------------------
+// Generic reference/listicle/vendor-SEO pages: excluded regardless of
+// which scope their wording would otherwise match. Confirmed in
+// production (2026-10-13): both examples below reached Draft purely
+// because the title contains a real product term.
+// ---------------------------------------------------------------------
+
+test('isGenericReferencePage: a Wikipedia article title is a generic reference page', () => {
+  assert.equal(isGenericReferencePage('Palm oil - Wikipedia'), true);
+  assert.equal(isGenericReferencePage('Palm oil – Wikipedia'), true);
+});
+
+test('isGenericReferencePage: a "Top N ... Companies" listicle title is a generic reference page', () => {
+  assert.equal(isGenericReferencePage('Top 10 Edible Vegetable Oil Companies | Report Prime'), true);
+});
+
+test('isGenericReferencePage: a market-research-directory vendor title is a generic reference page', () => {
+  assert.equal(isGenericReferencePage('Palm Oil Market Size, Share | Grand View Research'), true);
+  assert.equal(isGenericReferencePage('Vegetable Oil Market Report | Markets.us'), true);
+});
+
+test('isGenericReferencePage: an ordinary news headline is not a generic reference page', () => {
+  assert.equal(isGenericReferencePage('Indonesia raises palm oil export tariff'), false);
+});
+
+test('Generic reference page: a Wikipedia entry is excluded even though it contains a real product term', () => {
+  assert.equal(isRelevantToOilFatsScope('Palm oil - Wikipedia', 'Palm oil is an edible vegetable oil...'), false);
+});
+
+test('Generic reference page: a "Top N companies" listicle is excluded even though it matches Scope 4 companies', () => {
+  assert.equal(
+    isRelevantToOilFatsScope('Top 10 Edible Vegetable Oil Companies | Report Prime', 'ADM, Cargill, Wilmar, Bunge...'),
+    false
+  );
+});
+
+test('Generic reference page: the exclusion only checks the title, never the description', () => {
+  // A real news article that happens to link to or quote a Wikipedia page
+  // in its body text must not be excluded on that account alone.
+  assert.equal(
+    isRelevantToOilFatsScope('Indonesia raises palm oil export tariff', 'See also: Palm oil - Wikipedia'),
     true
   );
 });

@@ -3,6 +3,7 @@ const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
 const { passesTrustGate } = require('./trustGate');
+const { hasGroundedClassification } = require('./classificationSanity');
 const { titleSimilarity } = require('./similarity');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
@@ -528,6 +529,14 @@ async function applyAiDraftIfEligible(itemId) {
   // eligibility/QA verdict. See trustGate.js for what each check catches.
   if (!passesTrustGate(item)) {
     console.log(`applyAiDraftIfEligible: item ${itemId} failed the trust gate — not publishing`);
+    return { archived: false };
+  }
+
+  // Sector misclassification check: hasValidClassification above only
+  // confirms *some* tag exists, not that it's grounded in the article —
+  // see classificationSanity.js.
+  if (!(await hasGroundedClassification(item))) {
+    console.log(`applyAiDraftIfEligible: item ${itemId}'s suggested sector(s) have no textual grounding — not publishing`);
     return { archived: false };
   }
 
