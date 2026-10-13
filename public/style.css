@@ -252,6 +252,7 @@ p { margin: 0; }
 .ai-answer-heading { font-size: 16px; font-weight: 700; margin: var(--sp-4) 0 var(--sp-2); color: var(--text); }
 .ai-answer-list { margin: 0 0 var(--sp-3); padding-left: 1.3em; }
 .ai-answer-list li { margin-bottom: 6px; }
+.ai-answer-sublist { margin: 4px 0 0; }
 .ai-answer-p:last-child, .ai-answer-list:last-child { margin-bottom: 0; }
 
 /* Streamed answer, rendered through the same renderAnswerHtml() the final

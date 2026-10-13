@@ -811,31 +811,45 @@ function normalizeAnswerMarkdown(rawAnswer) {
     .replace(/\\(?=\s*(?:\n|$))/g, '');
 }
 
+// block is {type, lines} (or {type:'ordered-merged', items} — see the
+// merge pass in renderAnswerHtml below). Dispatches purely on `type`,
+// already determined while chunking — no re-detection from re-joined text.
 function renderAnswerBlock(block, sources) {
-  const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return '';
-  const headingMatch = lines.length === 1 && lines[0].match(/^#{1,6}\s+(.*)$/);
-  if (headingMatch) {
-    return `<h3 class="ai-answer-heading">${renderInlineAnswerText(headingMatch[1], sources)}</h3>`;
+  if (block.type === 'heading') {
+    return block.lines.map((l) => `<h3 class="ai-answer-heading">${renderInlineAnswerText(l.replace(/^#{1,6}\s+/, ''), sources)}</h3>`).join('');
   }
-  if (lines.every((l) => /^[-*•]\s+/.test(l))) {
-    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
+  if (block.type === 'unordered') {
+    return `<ul class="ai-answer-list">${block.lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
   }
-  if (lines.every((l) => /^\d+[.)]\s+/.test(l))) {
-    return `<ol class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^\d+[.)]\s+/, ''), sources)}</li>`).join('')}</ol>`;
+  // Production bug: "1. A" / "* detail" / "1. PVOIL" / "* detail" (the model
+  // restarting numbering at 1 for every item once its own detail bullet
+  // breaks up the list) used to split into four separate single-item
+  // blocks — each rendered as its own <ol>, and a lone <ol> always starts
+  // at 1 regardless of what digit was in the source text, so every item
+  // showed "1." no matter how many there were. The merge pass below folds
+  // a whole ordered/unordered-detail run into one 'ordered-merged' block
+  // first, so this case is just a single real <ol> that numbers itself
+  // correctly, with each item's own detail nested under it instead of
+  // floating as an unrelated top-level bullet.
+  if (block.type === 'ordered-merged') {
+    return `<ol class="ai-answer-list">${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
+      item.subLines.length
+        ? `<ul class="ai-answer-list ai-answer-sublist">${item.subLines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`
+        : ''
+    }</li>`).join('')}</ol>`;
   }
-  return `<p class="ai-answer-p">${lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
+  return `<p class="ai-answer-p">${block.lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
 }
 
 function renderAnswerHtml(rawAnswer, sources) {
   const normalized = normalizeAnswerMarkdown(rawAnswer).trim();
   const lines = normalized.split('\n');
-  const blocks = [];
+  const rawBlocks = [];
   let current = [];
   let currentType = null;
 
   const flush = () => {
-    if (current.length) blocks.push(current.join('\n'));
+    if (current.length) rawBlocks.push({ type: currentType, lines: current });
     current = [];
     currentType = null;
   };
@@ -866,6 +880,32 @@ function renderAnswerHtml(rawAnswer, sources) {
     current.push(line);
   }
   flush();
+
+  // Merge pass: a run of ordered-list blocks, each possibly followed by one
+  // unordered block that's really THAT item's own detail (not a separate
+  // top-level bullet list), becomes one 'ordered-merged' block — see
+  // renderAnswerBlock's own comment for the exact incident this fixes.
+  const blocks = [];
+  let i = 0;
+  while (i < rawBlocks.length) {
+    const b = rawBlocks[i];
+    if (b.type !== 'ordered') { blocks.push(b); i++; continue; }
+    const items = [];
+    while (i < rawBlocks.length && rawBlocks[i].type === 'ordered') {
+      const orderedLines = rawBlocks[i].lines;
+      i++;
+      let subLines = [];
+      if (i < rawBlocks.length && rawBlocks[i].type === 'unordered') {
+        subLines = rawBlocks[i].lines;
+        i++;
+      }
+      orderedLines.forEach((line, idx) => {
+        const isLast = idx === orderedLines.length - 1;
+        items.push({ text: line.replace(/^\d+[.)]\s+/, ''), subLines: isLast ? subLines : [] });
+      });
+    }
+    blocks.push({ type: 'ordered-merged', items });
+  }
 
   return `<div class="ai-answer">${blocks.map((block) => renderAnswerBlock(block, sources)).join('')}</div>`;
 }
