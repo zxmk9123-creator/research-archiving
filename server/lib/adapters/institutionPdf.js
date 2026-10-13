@@ -46,6 +46,7 @@ const GENERIC_TITLE_PATTERN = /^(download|다운로드|pdf|file|report|full text
 // covered. See feedParser.js's decodeEntities for the fuller history.
 const { decodeHTML } = require('entities');
 const { safeFetch } = require('../safeUrl');
+const { readResponseText } = require('../boundedResponse');
 function decodeEntities(str) {
   return decodeHTML(str);
 }
@@ -118,7 +119,7 @@ async function discoverReports(source) {
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const html = await res.text();
+  const html = await readResponseText(res, 2 * 1024 * 1024, 'institution listing HTML');
   // CGSpace-backed pages (detected by their distinctive download-endpoint
   // shape) need the title/link join above; every other institutional page
   // — World Bank's included — keeps using the original anchor-text scan,
