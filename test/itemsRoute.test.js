@@ -467,3 +467,44 @@ test('GET /:id: a lookup-query failure returns 500 instead of crashing the proce
     restore();
   }
 });
+
+// Production bug: the 자료 tab's year-month sidebar was built only from the
+// current 100-item page, so a month before that page looked like it had
+// vanished. /month-counts must report counts independent of limit/offset,
+// and apply the exact same filters GET / uses — otherwise the sidebar
+// could promise a month a filtered list doesn't actually contain.
+test('GET /month-counts: groups by month independent of limit/offset, applying the same filters as GET /', async () => {
+  const { calls, restore } = mockPool([
+    ['GROUP BY month_key', () => ({ rows: [{ month_key: '2026-10', count: 3 }, { month_key: '2026-08', count: 1 }] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/month-counts?status=Published&source_id=5`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.deepEqual(body, [{ month_key: '2026-10', count: 3 }, { month_key: '2026-08', count: 1 }]);
+      const call = calls.find((c) => c.text.includes('GROUP BY month_key'));
+      assert.ok(call, 'expected the month-counts query to run');
+      assert.ok(!/LIMIT|OFFSET/.test(call.text), 'month-counts must not be paginated');
+      assert.ok(call.params.includes('Published') && call.params.includes('5'), 'expected the same status/source_id filters as GET /');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('GET /month-counts: a query failure returns 500 instead of crashing the process', async () => {
+  const { restore } = mockPool([
+    ['GROUP BY month_key', () => { throw new Error('connection terminated unexpectedly'); }],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/month-counts?status=Published`);
+      assert.equal(res.status, 500);
+      const body = await res.json();
+      assert.ok(body.error);
+    });
+  } finally {
+    restore();
+  }
+});

@@ -1161,10 +1161,16 @@ async function renderArchive(query = {}) {
   const category = query.category === 'archive' || query.category === 'daily_report' ? query.category : null;
   const itemsQuery = category ? { ...query, category } : query;
   const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
-  const [sectors, usages, sources, itemsPage, ranking, teamPicks] = await Promise.all([
+  const [sectors, usages, sources, itemsPage, ranking, teamPicks, monthCounts] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery({ ...itemsQuery, limit: 100, offset }), { includeMeta: true }),
     api('/picks/ranking').catch(() => []),
     api('/picks?kind=team').catch(() => []),
+    // Independent of this page's limit/offset — see month-counts' own
+    // comment in items.js for why the sidebar can't be built from
+    // `items` alone (a month before the current 100-item page would
+    // otherwise look like it had vanished rather than just being on a
+    // later page).
+    api('/items/month-counts?status=Published' + toQuery(itemsQuery)).catch(() => []),
   ]);
   const items = itemsPage.data;
   const teamPicksByItem = buildTeamPicksMap(teamPicks);
@@ -1232,16 +1238,28 @@ async function renderArchive(query = {}) {
         ${view === 'saved' ? '아직 저장한 자료가 없습니다.' : view === 'team' ? '아직 팀 Pick이 없습니다.' : hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
       </div>`;
 
-  // Year-month jump sidebar (ChatGPT's conversation-history-by-date
-  // sidebar as the reference) — computed once and shared with the
-  // month-divider list below it, so the two never fall out of sync.
+  // Month-divider list for whichever page is currently loaded (purely a
+  // display grouping of the already-fetched `visibleItems`).
   const monthGroups = groupByMonth(visibleItems);
-  const monthNavHtml = monthGroups.length
-    ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthGroups.map((g) => `
-        <button type="button" class="archive-month-nav-item" data-jump="archive-month-${g.key}">
-          <span class="archive-month-nav-label">${g.label}</span>
-          <span class="archive-month-nav-count">${g.items.length}</span>
-        </button>`).join('')}</nav>`
+  // Year-month jump sidebar — built from the server's month-counts (every
+  // month matching the active filters, independent of this page's
+  // limit/offset), NOT from monthGroups above. A click re-queries with
+  // from/to set to that month's bounds (offset reset to 0) instead of
+  // scrolling within the current page, so a month before the current
+  // 100-item page is still reachable rather than looking like it's gone.
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const monthNavHtml = monthCounts.length
+    ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthCounts.filter((r) => r.month_key).map((r) => {
+        const [y, m] = r.month_key.split('-').map(Number);
+        const from = `${y}-${pad2(m)}-01`;
+        const to = `${y}-${pad2(m)}-${pad2(new Date(y, m, 0).getDate())}`;
+        const active = query.from === from && query.to === to;
+        const href = '#/archive?' + toQuery({ ...query, from, to, offset: '' }).slice(1);
+        return `<a class="archive-month-nav-item ${active ? 'active' : ''}" href="${href}">
+          <span class="archive-month-nav-label">${y}년 ${m}월</span>
+          <span class="archive-month-nav-count">${r.count}</span>
+        </a>`;
+      }).join('')}</nav>`
     : '';
 
   app.innerHTML = `
@@ -1301,12 +1319,6 @@ async function renderArchive(query = {}) {
   const pageHash = (nextOffset) => '#/archive?' + toQuery({ ...query, offset: nextOffset }).slice(1);
   document.getElementById('archive-prev-page')?.addEventListener('click', () => { location.hash = pageHash(Math.max(0, offset - 100)); });
   document.getElementById('archive-next-page')?.addEventListener('click', () => { location.hash = pageHash(offset + 100); });
-
-  document.querySelectorAll('.archive-month-nav-item').forEach((btn) => {
-    btn.onclick = () => {
-      document.getElementById(btn.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
-  });
 
   const treeEl = document.getElementById('sector-tree');
   const chipsEl = document.getElementById('sector-chips');

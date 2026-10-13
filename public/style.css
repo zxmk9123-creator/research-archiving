@@ -817,10 +817,14 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 5px 8px; border: none; background: none; border-radius: var(--radius-control);
   font-size: 12px; color: var(--text-secondary); text-align: left; cursor: pointer;
+  text-decoration: none;
   transition: background .15s var(--ease), color .15s var(--ease);
 }
 .archive-month-nav-item:hover, .archive-month-nav-item:focus-visible {
   background: var(--action-soft); color: var(--action-hover); outline: none;
+}
+.archive-month-nav-item.active {
+  background: var(--action-soft); color: var(--action-hover); font-weight: 600;
 }
 .archive-month-nav-count { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); }
 .archive-month-nav-item:hover .archive-month-nav-count,

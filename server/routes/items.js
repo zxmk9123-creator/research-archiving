@@ -84,10 +84,12 @@ const ITEM_SELECT = `
   ) co ON true
 `;
 
-router.get('/', async (req, res) => {
-  const { q, sector, usage, type, source_id, status, from, to, category } = req.query;
-  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
-  const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
+// Shared by GET / and GET /month-counts so the two can never drift apart —
+// a filter that narrows the page's items must narrow the sidebar's month
+// counts by the exact same rule, or the sidebar would promise months the
+// filtered list doesn't actually contain.
+function buildItemFilterClauses(query) {
+  const { q, sector, usage, type, source_id, status, from, to, category } = query;
   const clauses = [];
   const params = [];
 
@@ -111,9 +113,42 @@ router.get('/', async (req, res) => {
     clauses.push(`EXISTS (SELECT 1 FROM item_usages iu WHERE iu.item_id = i.id AND iu.usage_id = $${params.length})`);
   }
 
-  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+}
+
+// Full-result month counts for the 자료 tab's year-month sidebar — computed
+// against the SAME filters as GET / but independent of its limit/offset, so
+// a month from before the current 100-item page never silently disappears
+// from the sidebar (production bug: the sidebar used to be built from only
+// the already-paginated page of items, so months outside that page looked
+// like they'd vanished rather than just being on a later page). The client
+// jumps to a month by re-querying GET / with from/to set to that month's
+// bounds, not by fetching everything at once — so pagination's performance
+// benefit for the main list is unaffected.
+router.get('/month-counts', async (req, res) => {
+  const { where, params } = buildItemFilterClauses(req.query);
+  try {
+    const { rows } = await pool.query(
+      `SELECT to_char(date_trunc('month', i.published_at), 'YYYY-MM') AS month_key, COUNT(*)::int AS count
+       FROM items i
+       ${where}
+       GROUP BY month_key
+       ORDER BY month_key DESC NULLS LAST`,
+      params
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/items/month-counts failed:', err.message);
+    res.status(500).json({ error: '월별 집계를 불러오는 중 오류가 발생했습니다.' });
+  }
+});
+
+router.get('/', async (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+  const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
+  const { where, params } = buildItemFilterClauses(req.query);
   params.push(limit + 1, offset);
-  const orderBy = status === 'Draft'
+  const orderBy = req.query.status === 'Draft'
     ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
     : 'ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC';
   try {
