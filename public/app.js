@@ -1345,17 +1345,17 @@ async function renderArchive(query = {}) {
   // one-shot scrollTo param afterward without firing another hashchange/
   // re-render.
   //
-  // Deferred with setTimeout: router() (the hashchange handler that called
-  // this function) does its own `window.scrollTo(0, 0)` immediately after
-  // renderArchive() returns, on every route change — called synchronously
-  // in the same tick, it would otherwise cancel this scrollIntoView before
-  // the smooth animation ever started, snapping back to the top instead of
-  // to the clicked month. Queuing this for the next tick lets that scrollTo
-  // run first.
+  // skipNextScrollReset (declared with router() further down) tells
+  // router() to skip its own window.scrollTo(0, 0) for this one render —
+  // without it, that reset runs right after this function returns and
+  // instantly snaps to the top BEFORE this scrollIntoView gets a chance to
+  // animate, so the visible result was always "jump to the very top, then
+  // smooth-scroll back down" no matter where the click happened from.
+  // Skipping it lets the animation start from wherever the user actually
+  // was.
   if (scrollToMonth) {
-    setTimeout(() => {
-      document.getElementById(`archive-month-${scrollToMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 0);
+    skipNextScrollReset = true;
+    document.getElementById(`archive-month-${scrollToMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     history.replaceState(null, '', '#/archive?' + toQuery(query).slice(1));
   }
 
@@ -2853,6 +2853,13 @@ const HOME_TOUR_STEPS = [
 ];
 function startHomeTour() { runSpotlightTour(HOME_TOUR_STEPS, HOME_TOUR_SEEN_KEY); }
 
+// Set by renderArchive() just before it returns, only when this render is a
+// month-sidebar jump: suppresses router()'s own scrollTo(0,0) below for
+// that one render, so the month-sidebar's own scrollIntoView animates from
+// wherever the user already is, instead of being preceded by an instant
+// snap to the top that the smooth scroll then has to climb back down from.
+let skipNextScrollReset = false;
+
 async function router() {
   const { path, param, query } = parseHash();
   updateActiveNavTab(path);
@@ -2874,8 +2881,10 @@ async function router() {
     // position across a hash change or back/forward navigation (see the
     // history.scrollRestoration override below) — every route, including
     // switching between Latest and All Results (or returning to a tab left
-    // earlier), always opens at its own top instead.
-    window.scrollTo(0, 0);
+    // earlier), always opens at its own top instead. Suppressed just this
+    // once for a month-sidebar jump — see skipNextScrollReset above.
+    if (skipNextScrollReset) skipNextScrollReset = false;
+    else window.scrollTo(0, 0);
   } catch (err) {
     app.innerHTML = `<p>오류: ${err.message}</p>`;
   }
