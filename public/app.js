@@ -1032,20 +1032,41 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
   const statusEl = bodyEl.querySelector('.ai-search-status');
   if (submitBtn) submitBtn.disabled = true;
   startAiSearchStatus(moduleEl, statusEl);
+  // Follow-up questions only — the opening question's turn sits right
+  // where the user already is (just below the search box they typed
+  // into), so it needs no scroll at all; forcing one there was pure
+  // unwanted motion. aiSearchHistory only gains entries once a turn
+  // actually finishes (see finishAiSearchTurn), so checking its length
+  // here — before this turn's own outcome is known — correctly reflects
+  // whether an earlier turn already completed, including on a retry of
+  // this exact turn.
+  const isFollowup = aiSearchHistory.length > 0;
   // Follows the growing answer down the page as it streams in — a long
   // follow-up answer otherwise scrolls past the bottom of the viewport
   // with nothing bringing it back into view until streaming finishes.
   // Throttled rather than called on every token: scrollIntoView's smooth
   // animation re-targeting dozens of times a second (token arrival rate)
   // is unnecessary work and reads as jitter rather than a smooth follow.
+  //
+  // Production bug: block: 'end' aligns the element's BOTTOM edge to the
+  // viewport's bottom edge — for an answer taller than one screen, that
+  // pushes its TOP (the question itself) up above the visible area
+  // entirely, which is exactly the "even the question got covered" report.
+  // window.scrollBy only ever advances by the actual overflow amount
+  // instead of re-aligning the whole element, so each call moves the view
+  // exactly as far as the newly-streamed content actually grew — it can
+  // still scroll the question off the top for a genuinely long answer
+  // (unavoidable once content exceeds one screen), but never overshoots
+  // past what the content growth itself justifies.
   let lastFollowAt = 0;
   const followGrowingAnswer = () => {
+    if (!isFollowup) return;
     const now = Date.now();
     if (now - lastFollowAt < 150) return;
     lastFollowAt = now;
-    const bottom = turnEl.getBoundingClientRect().bottom;
-    if (bottom > window.innerHeight) {
-      turnEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const overflow = turnEl.getBoundingClientRect().bottom - window.innerHeight;
+    if (overflow > 0) {
+      window.scrollBy({ top: overflow, behavior: 'smooth' });
     }
   };
   try {
@@ -1184,12 +1205,17 @@ function bindAiSearchForm() {
       <div class="ai-search-turn-body"><p class="ai-search-status"></p></div>
     `;
     resultEl.appendChild(turnEl);
-    // block: 'start' (not 'nearest') — a follow-up's new question/answer
-    // must land at the TOP of the viewport, not just barely scrolled into
-    // view at the bottom edge behind whatever answer came before it.
+    // The opening question's turn appears right where the user already
+    // is — no scroll needed, and forcing one there was unwanted motion
+    // (reported: it could scroll clear past the search module into page
+    // content further down, like the Home carousels). Only a follow-up's
+    // new question/answer needs to jump to the TOP of the viewport — it
+    // appears below whatever earlier turn(s) are already on screen, often
+    // out of view entirely. block: 'start' (not 'nearest') so it lands at
+    // the top, not just barely scrolled into view at the bottom edge.
     // runAiSearchTurn's own followGrowingAnswer() then keeps the view
     // tracking downward as the streamed answer grows past one screen.
-    turnEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (isFollowup) turnEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // Cleared immediately, not just on success — otherwise the same
     // question sits visible twice while the request is in flight: once
     // still in the input box, once in the new turn's question label below.
