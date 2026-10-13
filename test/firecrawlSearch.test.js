@@ -91,3 +91,19 @@ test('searchWeb: rotates to the next key when one fails, same as Brave\'s adapte
     if (prev === undefined) delete process.env.FIRECRAWL_API_KEYS; else process.env.FIRECRAWL_API_KEYS = prev;
   }
 });
+
+test('searchWeb: FIRECRAWL_API_KEY is merged into the rotation alongside FIRECRAWL_API_KEYS, not dropped', () => withApiKey('single-key', async () => {
+  process.env.FIRECRAWL_API_KEYS = 'multi-key-a';
+  const seenKeys = [];
+  const restore = mockFetch(async (url, init) => {
+    seenKeys.push(init.headers.Authorization);
+    return { ok: false, status: 500, text: async () => '' };
+  });
+  try {
+    await assert.rejects(() => searchWeb('q'), /search failed: 500/);
+    assert.deepEqual(new Set(seenKeys), new Set(['Bearer single-key', 'Bearer multi-key-a']));
+  } finally {
+    restore();
+    delete process.env.FIRECRAWL_API_KEYS;
+  }
+}));

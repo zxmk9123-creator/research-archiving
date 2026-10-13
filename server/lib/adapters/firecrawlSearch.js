@@ -8,13 +8,16 @@
 const FIRECRAWL_SEARCH_ENDPOINT = 'https://api.firecrawl.dev/v1/search';
 const MAX_RESULTS = 10;
 
-// Same multi-key convention as webSearch.js's getConfiguredKeys(): read
-// fresh on every call, not cached at module load.
+// Same multi-key convention as webSearch.js's getConfiguredKeys(): both
+// FIRECRAWL_API_KEY (singular) and FIRECRAWL_API_KEYS (plural) are merged
+// rather than one overriding the other — read fresh on every call, not
+// cached at module load, and deduped so a key listed in both isn't tried
+// twice.
 function getConfiguredKeys() {
-  const multi = process.env.FIRECRAWL_API_KEYS;
-  if (multi && multi.trim()) return multi.split(',').map((k) => k.trim()).filter(Boolean);
+  const multi = (process.env.FIRECRAWL_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
   const single = (process.env.FIRECRAWL_API_KEY || '').trim();
-  return single ? [single] : [];
+  const all = single ? [single, ...multi] : multi;
+  return [...new Set(all)];
 }
 
 async function searchWeb(query, options = {}) {

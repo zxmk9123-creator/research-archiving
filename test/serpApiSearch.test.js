@@ -94,3 +94,19 @@ test('searchWeb: rotates to the next key when one fails, same as the other tiers
     if (prev === undefined) delete process.env.SERPAPI_API_KEYS; else process.env.SERPAPI_API_KEYS = prev;
   }
 });
+
+test('searchWeb: SERPAPI_API_KEY is merged into the rotation alongside SERPAPI_API_KEYS, not dropped', () => withApiKey('single-key', async () => {
+  process.env.SERPAPI_API_KEYS = 'multi-key-a';
+  const seenKeys = [];
+  const restore = mockFetch(async (url) => {
+    seenKeys.push(new URL(url).searchParams.get('api_key'));
+    return { ok: false, status: 500, text: async () => '' };
+  });
+  try {
+    await assert.rejects(() => searchWeb('q'), /search failed: 500/);
+    assert.deepEqual(new Set(seenKeys), new Set(['single-key', 'multi-key-a']));
+  } finally {
+    restore();
+    delete process.env.SERPAPI_API_KEYS;
+  }
+}));
