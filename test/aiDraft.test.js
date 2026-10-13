@@ -580,7 +580,8 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
         id: 42, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
-        ai_summary: '요약문', ai_insight: '인사이트', type: '보고서',
+        source_url: 'https://example.org/report', title: '보도자료 제목',
+        ai_summary: '팜유 가격이 전월 대비 5% 상승했다.', ai_insight: '인사이트', type: '보고서',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
     })],
@@ -591,7 +592,7 @@ test('applyAiDraftIfEligible: copies ai_summary/ai_insight to canonical fields a
     assert.equal(result.archived, true);
     const publishCall = calls.find((c) => c.text.includes('UPDATE items SET summary'));
     assert.ok(publishCall);
-    assert.deepEqual(publishCall.params, ['요약문', '인사이트', 'archive', 42]);
+    assert.deepEqual(publishCall.params, ['팜유 가격이 전월 대비 5% 상승했다.', '인사이트', 'archive', 42]);
     assert.match(publishCall.text, /status = 'Published'/);
     assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_sectors') && c.text.includes('(42, 3)')));
     assert.ok(calls.some((c) => c.text.includes('INSERT INTO item_usages') && c.text.includes('(42, 7)')));
@@ -605,7 +606,8 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
         id: 43, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
-        ai_summary: 's', ai_insight: 'i', type: '뉴스',
+        source_url: 'https://example.org/news', title: '뉴스 제목',
+        ai_summary: '인도네시아가 팜유 수출세를 인상했다.', ai_insight: 'i', type: '뉴스',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
     })],
@@ -614,7 +616,7 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
   try {
     await applyAiDraftIfEligible(43);
     const publishCall = calls.find((c) => c.text.includes('UPDATE items SET summary'));
-    assert.deepEqual(publishCall.params, ['s', 'i', 'daily_report', 43]);
+    assert.deepEqual(publishCall.params, ['인도네시아가 팜유 수출세를 인상했다.', 'i', 'daily_report', 43]);
   } finally {
     restore();
   }

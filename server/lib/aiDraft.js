@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
+const { passesTrustGate } = require('./trustGate');
 const { titleSimilarity } = require('./similarity');
 
 // Collector fires generateAiDraftForItem once per new item, unawaited — a
@@ -519,6 +520,14 @@ async function applyAiDraftIfEligible(itemId) {
   // eligible=true but no (or only invalid) tag suggestions.
   if (!(await hasValidClassification(itemId))) {
     console.log(`applyAiDraftIfEligible: item ${itemId} is AI-eligible but has no sector/usage classification — not publishing`);
+    return { archived: false };
+  }
+
+  // Trust Gate: source URL/published-date sanity, bot-block/empty title,
+  // and summary-generation-failure checks — independent of the AI's own
+  // eligibility/QA verdict. See trustGate.js for what each check catches.
+  if (!passesTrustGate(item)) {
+    console.log(`applyAiDraftIfEligible: item ${itemId} failed the trust gate — not publishing`);
     return { archived: false };
   }
 

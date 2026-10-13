@@ -308,7 +308,7 @@ test('RSS: a relevant item that AI finds eligible AND fully classified is auto-p
     ['INSERT INTO items', () => ({ rows: [{ id: 701 }] })],
     ["ai_status = 'completed'", () => { draftCompleted = true; return { rows: [] }; }],
     ['SELECT * FROM items WHERE id', () => (draftCompleted
-      ? { rows: [{ id: 701, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', ai_summary: 's', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [3] }] }
+      ? { rows: [{ id: 701, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', source_url: 'https://example.com/published', title: 'Indonesia raises palm oil export tariff', ai_summary: '인도네시아가 팜유 수출세를 인상했다.', ai_insight: 'i', ai_suggested_sectors: [3], ai_suggested_usages: [3] }] }
       : { rows: [{ id: 701, ai_status: null, ai_eligible: null }] })],
     ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
     ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '시장 전망' }] })],
