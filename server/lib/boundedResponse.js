@@ -9,7 +9,22 @@ async function readResponseBuffer(response, maxBytes, label = 'upstream response
   }
 
   if (!response.body || typeof response.body.getReader !== 'function') {
-    const buffer = Buffer.from(await response.arrayBuffer());
+    // Real fetch() Responses always expose arrayBuffer(); this falls back
+    // to text()/json() only for duck-typed mocks (test doubles) that don't
+    // bother implementing it.
+    let buffer;
+    if (typeof response.arrayBuffer === 'function') {
+      buffer = Buffer.from(await response.arrayBuffer());
+    } else if (typeof response.json === 'function') {
+      // Mocks in this codebase that stub both json() and text() use json()
+      // for the real payload and text() as an unused error-body placeholder
+      // (e.g. `text: async () => ''`) — json() must win when both exist.
+      buffer = Buffer.from(JSON.stringify(await response.json()), 'utf8');
+    } else if (typeof response.text === 'function') {
+      buffer = Buffer.from(await response.text(), 'utf8');
+    } else {
+      throw new Error(`${label}: response exposes no arrayBuffer/text/json method`);
+    }
     if (buffer.length > maxBytes) throw new Error(`${label} exceeds ${maxBytes} byte limit`);
     return buffer;
   }
