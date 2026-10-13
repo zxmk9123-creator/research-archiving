@@ -523,7 +523,7 @@ async function handleSearch(req, res, signal) {
     candidateCount: candidates.length, sourceCount: sources.length, provider: 'freellmapi', model: modelUsed,
     isFollowup, questionFingerprint: fingerprint, streamed: true, ttftMs,
   });
-});
+}
 
 module.exports = router;
 module.exports.extractKeywords = extractKeywords;
