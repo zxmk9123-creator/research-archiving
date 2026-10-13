@@ -112,15 +112,22 @@ router.get('/', async (req, res) => {
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const limitParam = params.length + 1;
+  const offsetParam = params.length + 2;
   params.push(limit + 1, offset);
   const orderBy = status === 'Draft'
     ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
     : 'ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC';
-  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ${orderBy} LIMIT ${params.length - 1} OFFSET ${params.length}`, params);
-  const hasMore = rows.length > limit;
-  if (hasMore) rows.pop();
-  res.set('X-Has-More', String(hasMore));
-  res.json(rows);
+  try {
+    const { rows } = await pool.query(`${ITEM_SELECT} ${where} ${orderBy} LIMIT ${limitParam} OFFSET ${offsetParam}`, params);
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    res.set('X-Has-More', String(hasMore));
+    return res.json(rows);
+  } catch (err) {
+    console.error('items list query failed:', err.message);
+    return res.status(500).json({ error: '자료 목록을 불러오지 못했습니다.' });
+  }
 });
 
 router.get('/:id', async (req, res) => {
