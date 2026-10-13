@@ -116,17 +116,39 @@ router.get('/', async (req, res) => {
   const orderBy = status === 'Draft'
     ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
     : 'ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC';
-  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ${orderBy} LIMIT ${params.length - 1} OFFSET ${params.length}`, params);
-  const hasMore = rows.length > limit;
-  if (hasMore) rows.pop();
-  res.set('X-Has-More', String(hasMore));
-  res.json(rows);
+  try {
+    // LIMIT/OFFSET must be bind placeholders ($N), not the raw param-array
+    // length spliced into the SQL text — that previously left `params`
+    // carrying 2 values the query text never referenced, which Postgres
+    // rejects ("bind message supplies N parameters, but prepared statement
+    // requires M"). An unhandled rejection from that mismatch crashed the
+    // whole Node process (unhandled rejection terminates by default),
+    // taking down every other in-flight request until Railway restarted
+    // the container — so this query is now also wrapped like the INSERT
+    // above.
+    const { rows } = await pool.query(
+      `${ITEM_SELECT} ${where} ${orderBy} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.pop();
+    res.set('X-Has-More', String(hasMore));
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/items failed:', err.message);
+    res.status(500).json({ error: '목록을 불러오는 중 오류가 발생했습니다.' });
+  }
 });
 
 router.get('/:id', async (req, res) => {
-  const { rows } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  res.json(rows[0]);
+  try {
+    const { rows } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('GET /api/items/:id failed:', err.message);
+    res.status(500).json({ error: '항목을 불러오는 중 오류가 발생했습니다.' });
+  }
 });
 
 // Related = published items sharing at least one sector or usage tag,

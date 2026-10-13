@@ -406,3 +406,64 @@ test('POST /:id/ai-draft: skips re-extraction when extracted_text is already pro
     restore();
   }
 }));
+
+// Production incident: LIMIT/OFFSET were spliced into the SQL text as the
+// literal VALUE of params.length (e.g. "LIMIT 1 OFFSET 2") instead of as
+// $N bind placeholders — leaving the real limit/offset values sitting
+// unused at the end of the params array. Postgres rejects that mismatch
+// ("bind message supplies N parameters, but prepared statement requires
+// M"), and the resulting unhandled rejection crashed the whole process.
+// mockPool's dispatcher never validates $N-vs-params.length (it just runs
+// a JS function), so this can only be caught by inspecting the query text
+// itself — not by any assertion on the returned rows.
+test('GET /: LIMIT and OFFSET are bound as $N placeholders, not literal param-count values spliced into the SQL', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [itemRow({ id: 30 })] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}?status=Draft&q=palm`);
+      assert.equal(res.status, 200);
+      const call = calls.find((c) => c.text.includes('FROM items i'));
+      assert.ok(call, 'expected the list query to run');
+      const placeholderNumbers = [...call.text.matchAll(/\$(\d+)/g)].map((m) => Number(m[1]));
+      const maxPlaceholder = Math.max(...placeholderNumbers);
+      assert.equal(maxPlaceholder, call.params.length, 'every param must be referenced by a $N placeholder, including LIMIT/OFFSET');
+      assert.match(call.text, /LIMIT \$\d+ OFFSET \$\d+/, 'LIMIT/OFFSET must be bind placeholders, not literal numbers');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('GET /: a list-query failure (e.g. a real Postgres bind-param mismatch) returns 500 instead of crashing the process', async () => {
+  const { restore } = mockPool([
+    ['FROM items i', () => { throw new Error('bind message supplies 3 parameters, but prepared statement requires 1'); }],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}?status=Draft`);
+      assert.equal(res.status, 500);
+      const body = await res.json();
+      assert.ok(body.error);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('GET /:id: a lookup-query failure returns 500 instead of crashing the process', async () => {
+  const { restore } = mockPool([
+    ['FROM items i', () => { throw new Error('connection terminated unexpectedly'); }],
+  ]);
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/999`);
+      assert.equal(res.status, 500);
+      const body = await res.json();
+      assert.ok(body.error);
+    });
+  } finally {
+    restore();
+  }
+});
