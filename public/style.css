@@ -254,10 +254,11 @@ p { margin: 0; }
 .ai-answer-list li { margin-bottom: 6px; }
 .ai-answer-p:last-child, .ai-answer-list:last-child { margin-bottom: 0; }
 
-/* Raw streamed tokens before the `done` event swaps this out for the
-   polished, citation-linked render — a trailing blinking cursor makes
-   clear that text is actively arriving, not a finished, static answer. */
-.ai-search-streaming-text { white-space: pre-wrap; color: var(--text); font-size: 15px; line-height: 1.6; }
+/* Streamed answer, rendered through the same renderAnswerHtml() the final
+   polished version uses (so it already carries .ai-answer's own
+   typography) — before the `done` event swaps this out for the
+   citation-linked version, a trailing blinking cursor makes clear that
+   text is actively arriving, not a finished, static answer. */
 .ai-search-streaming-text::after {
   content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 2px;
   background: var(--action); vertical-align: text-bottom; animation: ai-search-cursor-blink 1s step-end infinite;

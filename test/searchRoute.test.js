@@ -449,6 +449,51 @@ test('POST /: a citation the verification pass flags as unsupported is stripped 
   }
 });
 
+test('withTimeout: resolves with the original promise\'s value when it finishes first', async () => {
+  const result = await searchRouter.withTimeout(Promise.resolve('fast'), 50, () => { throw new Error('must not fire'); });
+  assert.equal(result, 'fast');
+});
+
+test('withTimeout: rejects with onTimeout\'s thrown error when the timeout fires first, not an uncaught exception', async () => {
+  const neverResolves = new Promise(() => {});
+  await assert.rejects(
+    () => searchRouter.withTimeout(neverResolves, 10, () => { throw new Error('timed out'); }),
+    /timed out/
+  );
+});
+
+test('POST /: a citation-verification call that exceeds the timeout fails open (unverified text, not a crash or a long wait)', async () => {
+  const prevTimeout = process.env.AI_SEARCH_VERIFICATION_TIMEOUT_MS;
+  process.env.AI_SEARCH_VERIFICATION_TIMEOUT_MS = '20';
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) {
+      // Never resolves within the 20ms test budget.
+      await new Promise((r) => setTimeout(r, 5000));
+      return { text: '[1]', provider: 'freellmapi' };
+    }
+    return { text: '답변 본문입니다. [1]', provider: 'freellmapi' };
+  });
+  try {
+    await withServer(async (base) => {
+      const startedAt = Date.now();
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '질문' }),
+      });
+      const body = await res.json();
+      assert.ok(Date.now() - startedAt < 2000, 'must not wait anywhere near the full verification attempt');
+      assert.match(body.answer, /\[1\]/, 'citation is kept as-is when verification times out, not stripped');
+    });
+  } finally {
+    restore();
+    restoreProvider();
+    if (prevTimeout === undefined) delete process.env.AI_SEARCH_VERIFICATION_TIMEOUT_MS;
+    else process.env.AI_SEARCH_VERIFICATION_TIMEOUT_MS = prevTimeout;
+  }
+});
+
 test('questionFingerprint: one-way hash, stable for the same question, different for different questions', () => {
   const a = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');
   const b = searchRouter.questionFingerprint('팜유 가격이 왜 올랐어?');

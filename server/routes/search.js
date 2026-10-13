@@ -270,6 +270,39 @@ function parseUnsupportedClaimNumbers(verificationText, claimCount) {
   }
 }
 
+// Production incident: this is the step between "streamed answer
+// finished" and "the polished done event lands" — it used to inherit
+// callProviderWithFallback's full FREELLMAPI_TIMEOUT_MS (150s), so a
+// slow verification call could make the user wait up to two and a half
+// minutes AFTER already watching the full answer stream in, just for the
+// citation-link swap. This is a nice-to-have quality pass, never worth
+// that wait: bounded to a short budget of its own, and racing past it
+// fails open (returns the unverified text) exactly the same way an
+// outright error already does below — the user just gets the streamed
+// citations kept as-is a little sooner instead of a corrected version
+// much later.
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 12000;
+// Read fresh on every call (not cached at module load), same convention
+// adapters/webSearch.js's getConfiguredKeys() already uses for its own
+// env-driven config — lets this be tuned (or overridden in a test)
+// without a process restart.
+function getVerificationTimeoutMs() {
+  return Number(process.env.AI_SEARCH_VERIFICATION_TIMEOUT_MS) || DEFAULT_VERIFICATION_TIMEOUT_MS;
+}
+function withTimeout(promise, ms, onTimeout) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    // onTimeout() is expected to throw (verifyCitations' only caller
+    // passes a function that does) — caught here and turned into a
+    // rejection rather than an uncaught exception in this timer callback,
+    // which runs outside any surrounding try/catch.
+    timer = setTimeout(() => {
+      try { resolve(onTimeout()); } catch (err) { reject(err); }
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Second-pass check layered on top of the base answer: a [N] marker only
 // proves the model POINTED at a material, never that the material backs
 // that specific sentence (the gap a reviewer flagged — a biofuel-policy
@@ -277,16 +310,22 @@ function parseUnsupportedClaimNumbers(verificationText, claimCount) {
 // re-asks the model, focused only on claim-vs-material support, and
 // strips the citation marker(s) from any claim it flags as unsupported —
 // the sentence stays, it just stops claiming that material as evidence.
-// Fails open (changes nothing) on any error or unparseable response: this
-// is a quality layer on the base answer, never allowed to break it.
+// Fails open (changes nothing) on any error, timeout, or unparseable
+// response: this is a quality layer on the base answer, never allowed to
+// block or break it.
 async function verifyCitations(text, candidates) {
   const claims = splitClaimLines(text, candidates.length);
   if (!claims.length) return text;
   try {
-    const result = await provider.callProviderWithFallback({
-      system: VERIFICATION_SYSTEM_PROMPT,
-      user: buildVerificationPrompt(claims, candidates),
-    });
+    const timeoutMs = getVerificationTimeoutMs();
+    const result = await withTimeout(
+      provider.callProviderWithFallback({
+        system: VERIFICATION_SYSTEM_PROMPT,
+        user: buildVerificationPrompt(claims, candidates),
+      }),
+      timeoutMs,
+      () => { throw new Error(`citation verification timed out after ${timeoutMs}ms`); }
+    );
     const unsupported = parseUnsupportedClaimNumbers(result.text, claims.length);
     if (!unsupported.length) return text;
     let corrected = text;
@@ -464,3 +503,5 @@ module.exports.VERIFICATION_SYSTEM_PROMPT = VERIFICATION_SYSTEM_PROMPT;
 module.exports.wantsStream = wantsStream;
 module.exports.finalizeAnswer = finalizeAnswer;
 module.exports.truncateField = truncateField;
+module.exports.withTimeout = withTimeout;
+module.exports.getVerificationTimeoutMs = getVerificationTimeoutMs;

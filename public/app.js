@@ -963,14 +963,17 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
         if (eventName === 'token') {
           if (!firstTokenSeen) { firstTokenSeen = true; stopAiSearchStatus(moduleEl); }
           rawText += data.delta;
-          // Strips only leading whitespace — a model's completion commonly
-          // opens with a stray newline/space before the real content, and
-          // with pre-wrap that rendered as a visible blank line pushing the
-          // text away from the question above it, a gap the final polished
-          // render never had (renderAnswerHtml() already trims each block).
-          // Trailing whitespace is left alone; it has no visible effect
-          // while more tokens are still arriving.
-          streamEl.textContent = rawText.replace(/^\s+/, '');
+          // Reuses the exact same Markdown-ish renderer the final polished
+          // answer uses (renderAnswerHtml), with no `sources` — so **bold**
+          // actually renders instead of showing literal asterisks while
+          // streaming, and [N] citation markers are simply dropped (not
+          // shown as dangling brackets) until the done event supplies real
+          // source links for them. It also trims each block's own leading/
+          // trailing whitespace already, so the stray leading newline a
+          // model's completion commonly opens with never shows as a blank
+          // line pushing the answer away from the question above it, the
+          // same gap the final render never had.
+          streamEl.innerHTML = renderAnswerHtml(rawText, null);
         } else if (eventName === 'done') {
           finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
           finished = true;
