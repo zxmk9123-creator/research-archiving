@@ -1638,11 +1638,14 @@ async function renderSourceManager(view, query = {}) {
     <div class="collect-all-result" id="collect-all-result"></div>
     <table class="sources-table">
       <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
-      ${sources.map((s) => `<tr>
+      ${sources.map((s) => `<tr class="${s.is_active === false ? 'source-row-inactive' : ''}">
         <td class="cell-strong">${s.name}${s.is_reference ? ' <span class="pill">Reference</span>' : ''}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
         <td class="cell-muted">${s.trust_grade}</td><td class="cell-muted">${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
-        <td>${s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
-        <td><button class="btn-text-action" data-delete-source="${s.id}">삭제</button></td>
+        <td>${s.is_active === false ? '<span class="pill">비활성화됨</span>' : s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
+        <td>
+          ${s.is_reference ? '' : `<button class="btn-text-action" data-toggle-active-source="${s.id}">${s.is_active === false ? '활성화' : '비활성화'}</button>`}
+          <button class="btn-text-action" data-delete-source="${s.id}">삭제</button>
+        </td>
       </tr>`).join('')}
     </table>
     <details class="section" id="s-form-section">
@@ -1763,6 +1766,20 @@ async function renderSourceManager(view, query = {}) {
   // 편집/삭제 against whatever [data-edit-source]/[data-delete-source]
   // buttons currently exist in the DOM.
   function bindReferenceSourceRowActions() {
+    document.querySelectorAll('[data-toggle-active-source]').forEach((btn) => {
+      btn.onclick = async () => {
+        const s = sources.find((row) => String(row.id) === btn.dataset.toggleActiveSource);
+        if (!s) return;
+        const nextActive = s.is_active === false;
+        try {
+          await api(`/sources/${s.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: nextActive }) });
+        } catch (err) {
+          alert(`변경 실패: ${err.message}`);
+          return;
+        }
+        renderSourceManager(view, query);
+      };
+    });
     document.querySelectorAll('[data-delete-source]').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('이 소스를 삭제하시겠습니까? 기존에 수집된 자료는 유지됩니다.')) return;
@@ -1901,11 +1918,22 @@ const GATE_HOLD_LABELS = {
   no_grounded_sector: 'AI가 제시한 섹터가 본문 내용과 연결되지 않습니다.',
 };
 
+// Mirrors the exact failureType strings provider.js's markFallback()/
+// inline classification actually assign (timeout, network, rate_limit,
+// server_error, auth, empty_response, degenerate_output,
+// first_token_timeout) plus 'unclassified' (stats.js's label for a NULL
+// ai_failure_type — an application-level failure, e.g. invalid JSON from
+// the model, never gets a transport-level failureType at all). Any value
+// outside this set (a future provider.js addition this list hasn't
+// caught up with yet) still shows as its own raw string rather than
+// disappearing, so nothing is ever silently unlabeled.
 function opsFailureLabel(failureType) {
   const LABELS = {
-    timeout: 'AI 응답 시간 초과', server_error: 'AI 제공처 서버 오류',
-    rate_limited: 'AI 호출 제한(rate limit)', invalid_json: 'AI 응답 형식 오류',
-    none: 'AI 제공처 미설정',
+    timeout: 'AI 응답 시간 초과', network: '네트워크 오류',
+    rate_limit: 'AI 호출 제한(rate limit)', server_error: 'AI 제공처 서버 오류',
+    auth: 'AI 제공처 인증 실패', empty_response: 'AI 응답 없음(빈 응답)',
+    degenerate_output: 'AI 응답 반복 오류', first_token_timeout: '첫 토큰 응답 지연',
+    unclassified: '미분류 (원인 기록 없음)',
   };
   return LABELS[failureType] || failureType;
 }

@@ -90,6 +90,26 @@ test('getDueSources: query includes both the frequency_days due-check and the fa
   }
 });
 
+test('getDueSources: query excludes is_active=false sources', async () => {
+  const { calls, restore } = mockPool([]);
+  try {
+    await getDueSources();
+    assert.match(calls[0].text, /is_active = true/);
+  } finally {
+    restore();
+  }
+});
+
+test('collectAllSourcesNow: query excludes is_active=false sources — a disabled source is never force-collected', async () => {
+  const { calls, restore } = mockPool([]);
+  try {
+    await require('../server/lib/collector').collectAllSourcesNow();
+    assert.match(calls[0].text, /is_active = true/);
+  } finally {
+    restore();
+  }
+});
+
 // --- runDueCollections: scheduled-run logging/flow ---
 
 test('runDueCollections: logs run_started/run_completed with due-source count, even with zero due sources', async () => {

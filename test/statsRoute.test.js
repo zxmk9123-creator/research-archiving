@@ -93,6 +93,29 @@ test('GET /overview: AI failure reasons are scoped to Draft+failed only, matchin
   }
 }));
 
+test('GET /overview: a NULL ai_failure_type (application-level failure) is reported as \'unclassified\', not dropped from the count', () => withServer(async (base) => {
+  const restore = mockPool([
+    [`WHERE status = 'Draft'\n      GROUP BY ai_status`, () => ({ rows: [{ ai_status: 'failed', cnt: 198 }] })],
+    ["WHERE status = 'Draft' AND ai_status = 'failed'", () => ({
+      rows: [{ ai_failure_type: 'timeout', cnt: 9 }, { ai_failure_type: 'server_error', cnt: 3 }, { ai_failure_type: null, cnt: 186 }],
+    })],
+  ]);
+  try {
+    const res = await fetch(`${base}/overview`);
+    const body = await res.json();
+    assert.deepEqual(body.aiFailureReasons.rows, [
+      { ai_failure_type: 'timeout', cnt: 9 },
+      { ai_failure_type: 'server_error', cnt: 3 },
+      { ai_failure_type: 'unclassified', cnt: 186 },
+    ]);
+    const failureSum = body.aiFailureReasons.rows.reduce((sum, r) => sum + r.cnt, 0);
+    assert.equal(failureSum, 198);
+    assert.equal(failureSum, body.backlog.byAiStatus.failed);
+  } finally {
+    restore();
+  }
+}));
+
 test('GET /overview: returns sources currently in a collection-error state (most recent run only)', () => withServer(async (base) => {
   const restore = mockPool([
     ['FROM sources\n      WHERE last_error IS NOT NULL', () => ({

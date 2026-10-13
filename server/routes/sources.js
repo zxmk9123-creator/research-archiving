@@ -264,7 +264,7 @@ router.post('/', requireAuth, async (req, res) => {
 const PATCHABLE_SOURCE_FIELDS = [
   'name', 'publisher', 'url', 'method', 'frequency_days', 'owner', 'trust_grade',
   'is_reference', 'source_type', 'region', 'commodities', 'coverage_note',
-  'access_format', 'update_frequency', 'usage_note', 'last_verified_at', 'rss_available',
+  'access_format', 'update_frequency', 'usage_note', 'last_verified_at', 'rss_available', 'is_active',
 ];
 router.patch('/:id', requireAuth, async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT id FROM sources WHERE id = $1', [req.params.id]);

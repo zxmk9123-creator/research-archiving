@@ -21,9 +21,15 @@
 //   counting failures with no status filter would have mixed in items
 //   that are no longer actually sitting in the backlog. This way,
 //   aiFailureReasons' counts always sum to exactly
-//   backlog.byAiStatus.failed. A *successful* retry also always clears
-//   ai_failure_type back to NULL (see aiDraft.js) — nothing here can
-//   double-count a resolved failure as current.
+//   backlog.byAiStatus.failed — including a NULL ai_failure_type
+//   (an application-level failure, e.g. invalid JSON from the model,
+//   never got a transport-level failureType — see provider.js's
+//   markFallback), reported as the explicit 'unclassified' bucket rather
+//   than silently filtered out of the count entirely (a real incident:
+//   this filter once hid 186 of 198 failed Drafts from the table). A
+//   *successful* retry also always clears ai_failure_type back to NULL
+//   (see aiDraft.js) — nothing here can double-count a resolved failure
+//   as current.
 // - perSource's `collected` is the count of items actually inserted for
 //   that source (i.e. already past the relevance pre-filter and exact-
 //   URL/near-duplicate-title dedup every ingestion path applies before
@@ -77,7 +83,7 @@ router.get('/overview', async (req, res) => {
     settleSection(pool.query(`
       SELECT ai_failure_type, count(*)::int AS cnt
       FROM items
-      WHERE status = 'Draft' AND ai_status = 'failed' AND ai_failure_type IS NOT NULL
+      WHERE status = 'Draft' AND ai_status = 'failed'
       GROUP BY ai_failure_type
       ORDER BY cnt DESC
     `)),
@@ -106,6 +112,21 @@ router.get('/overview', async (req, res) => {
   const backlogByAiStatus = Object.fromEntries(backlogSection.rows.map((r) => [r.ai_status || 'null', r.cnt]));
   const backlogTotal = backlogSection.rows.reduce((sum, r) => sum + r.cnt, 0);
 
+  // Production incident: the failure-reasons table showed 12 while the
+  // backlog showed 198 failed Drafts — ai_failure_type is only ever set
+  // for a transport/provider-level failure (err.failureType, see
+  // provider.js's markFallback); an application-level failure (invalid
+  // JSON from the model, a downstream parsing error) leaves it NULL, and
+  // the query used to filter those rows out entirely instead of counting
+  // them under an explicit bucket. Normalized to 'unclassified' here so
+  // the rows still sum to backlog.byAiStatus.failed exactly, and an
+  // operator can tell "186 failures with no recorded reason" apart from
+  // "186 failures we forgot to query" at a glance.
+  const aiFailureReasons = aiFailureSection.rows.map((r) => ({
+    ai_failure_type: r.ai_failure_type || 'unclassified',
+    cnt: r.cnt,
+  }));
+
   res.json({
     basis: {
       collectionWindow: {
@@ -116,7 +137,7 @@ router.get('/overview', async (req, res) => {
       },
       backlogDefinition: "status = 'Draft'",
       backlogPartitionedBy: 'ai_status (mutually exclusive, sums to backlog.total)',
-      aiFailureReasonsScope: "status = 'Draft' AND ai_status = 'failed' (sums to backlog.byAiStatus.failed)",
+      aiFailureReasonsScope: "status = 'Draft' AND ai_status = 'failed' (sums to backlog.byAiStatus.failed; a NULL ai_failure_type — an application-level failure, never a transport/provider one — is reported as 'unclassified', not dropped)",
       perSourceCollectedDefinition: 'items actually inserted (post relevance-filter, post dedup) — not raw candidates found',
       sourceErrorsDefinition: "each source's most recent run only — cleared to NULL on that source's next successful run",
       generatedAt: generatedAt.toISOString(),
@@ -127,7 +148,7 @@ router.get('/overview', async (req, res) => {
       ok: backlogSection.ok,
       error: backlogSection.ok ? null : backlogSection.error,
     },
-    aiFailureReasons: { rows: aiFailureSection.rows, ok: aiFailureSection.ok, error: aiFailureSection.ok ? null : aiFailureSection.error },
+    aiFailureReasons: { rows: aiFailureReasons, ok: aiFailureSection.ok, error: aiFailureSection.ok ? null : aiFailureSection.error },
     sourceErrors: { rows: sourceErrorSection.rows, ok: sourceErrorSection.ok, error: sourceErrorSection.ok ? null : sourceErrorSection.error },
     perSource: { rows: perSourceSection.rows, ok: perSourceSection.ok, error: perSourceSection.ok ? null : perSourceSection.error },
   });

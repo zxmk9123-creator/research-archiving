@@ -202,7 +202,7 @@ const FAILURE_BACKOFF_INTERVAL = '1 day';
 async function getDueSources() {
   const { rows } = await pool.query(`
     SELECT * FROM sources
-    WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL
+    WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL AND is_active = true
       AND (last_collected_at IS NULL OR last_collected_at < now() - (frequency_days || ' days')::interval)
       AND (last_error_at IS NULL OR last_error_at < now() - $1::interval)
   `, [FAILURE_BACKOFF_INTERVAL]);
@@ -229,12 +229,14 @@ async function runDueCollections() {
 
 // Collect every active RSS source now, regardless of frequency_days/
 // last_collected_at — used by the "전체 자료 지금 수집" bulk action.
+// Still excludes is_active=false sources: forcing a known-broken,
+// deliberately-disabled source defeats the entire point of disabling it.
 // collectSource() already catches its own errors and returns
 // { ok: false, ... } rather than throwing, so one source's failure never
 // stops the rest.
 async function collectAllSourcesNow() {
   const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL`
+    `SELECT * FROM sources WHERE method IN ('rss', 'institution', 'structured', 'crawl') AND url IS NOT NULL AND is_active = true`
   );
   const results = [];
   for (const source of sources) {

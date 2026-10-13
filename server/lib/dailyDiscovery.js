@@ -90,7 +90,7 @@ async function claimDailyDiscoveryRunForToday(now = new Date()) {
 // collectAllSourcesNow() in collector.js.
 async function collectDailyDiscoveryNow() {
   const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL`
+    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL AND is_active = true`
   );
   const results = [];
   for (const source of sources) {

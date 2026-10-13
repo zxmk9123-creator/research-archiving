@@ -595,6 +595,9 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
    color alone rather than a colored module. */
 .status-ok { color: var(--text-tertiary); font-size: 12px; }
 .status-fail { color: var(--danger); font-size: 12px; }
+/* 수동으로 비활성화한 소스 — 더 이상 자동 수집 대상이 아니라는 걸
+   표 안에서 바로 구분할 수 있도록 행 전체를 옅게 표시한다. */
+.source-row-inactive { opacity: .55; }
 
 /* Small outline/text-style delete action — compact, visually secondary,
    distinct from the table's default .btn-table-action treatment. */

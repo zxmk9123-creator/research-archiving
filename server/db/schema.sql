@@ -31,6 +31,18 @@ CREATE TABLE IF NOT EXISTS sources (
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 
+-- A source with a permanently broken URL/access policy (confirmed 403/404,
+-- not a transient outage) needs a way to stop being retried forever —
+-- before this, the only two options were "keep failing silently every
+-- cycle" or deleting the row outright (which detaches its already-
+-- collected items via ON DELETE SET NULL, losing provenance). An inactive
+-- source is skipped by every scheduled/bulk collection path
+-- (collector.js's getDueSources()/collectAllSourcesNow(),
+-- dailyDiscovery.js's collectDailyDiscoveryNow()) but its row, history,
+-- and items are otherwise untouched — reversible by flipping the flag
+-- back, unlike a delete.
+ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
 -- Widen method's CHECK to add 'institution' (institutional PDF-report
 -- adapter — see server/lib/institutionalIngest.js) and 'structured'
 -- (structured statistical/data-series adapter — see
