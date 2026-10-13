@@ -1604,6 +1604,77 @@ async function renderSourceManager(view, query = {}) {
 async function renderSources(query = {}) { return renderSourceManager('all', query); }
 async function renderReference(query = {}) { return renderSourceManager('reference', query); }
 
+// 운영 가시성 대시보드: 실패 원인, 소스별 수집량/품질, 미검수 적체량을
+// 한 화면에 모아 보여준다. 숫자마다 집계 기준(기간/정의)을 함께 표시해,
+// "지금 세고 있는 게 정확히 뭔지" 숫자만 봐서는 알 수 없는 상태를 피한다.
+function opsFailureLabel(failureType) {
+  const LABELS = {
+    timeout: 'AI 응답 시간 초과', server_error: 'AI 제공처 서버 오류',
+    rate_limited: 'AI 호출 제한(rate limit)', invalid_json: 'AI 응답 형식 오류',
+    none: 'AI 제공처 미설정',
+  };
+  return LABELS[failureType] || failureType;
+}
+
+async function renderOps() {
+  const stats = await api('/stats/overview');
+  const { basis, backlog, aiFailureReasons, sourceErrors, perSource } = stats;
+
+  const backlogRows = Object.entries(backlog.byAiStatus)
+    .map(([k, v]) => `<tr><td>${k === 'null' ? '요청 안 함' : k}</td><td>${v}</td></tr>`).join('');
+
+  const failureRows = aiFailureReasons.length
+    ? aiFailureReasons.map((r) => `<tr><td>${opsFailureLabel(r.ai_failure_type)}</td><td>${r.cnt}</td></tr>`).join('')
+    : '<tr><td colspan="2">최근 AI 생성 실패 없음</td></tr>';
+
+  const sourceErrorRows = sourceErrors.length
+    ? sourceErrors.map((s) => {
+        const { message, detail } = SourceErrors.translateSourceError(s.last_error);
+        return `<tr><td>${s.name}</td><td>${message}${detail ? ` (${detail})` : ''}</td><td>${formatDateOnly(s.last_error_at)}</td></tr>`;
+      }).join('')
+    : '<tr><td colspan="3">현재 오류 상태인 소스 없음</td></tr>';
+
+  const perSourceRows = perSource.map((s) => `<tr>
+    <td>${s.name}</td>
+    <td>${s.method}</td>
+    <td>${s.collected}</td>
+    <td>${s.published}</td>
+    <td>${s.collected ? Math.round((s.published / s.collected) * 100) : 0}%</td>
+    <td>${s.ai_failed}</td>
+  </tr>`).join('');
+
+  app.innerHTML = `
+    <h1>운영 현황</h1>
+    <p class="page-lede">파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 봅니다.<br>집계 기준: 소스별 수집량·품질은 최근 ${basis.collectionWindowDays}일, 미검수 적체량은 ${basis.backlogDefinition} 전체. (생성 시각: ${formatDateOnly(basis.generatedAt)})</p>
+
+    <div class="ops-stats-row">
+      <div class="ops-stat"><span class="ops-stat-value">${backlog.total}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${sourceErrors.length}</span><span class="ops-stat-label">현재 오류 상태 소스</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${perSource.reduce((sum, s) => sum + s.collected, 0)}</span><span class="ops-stat-label">최근 ${basis.collectionWindowDays}일 수집량</span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>미검수 적체량 (ai_status별)</h2></div>
+      <table><tr><th>AI 처리 상태</th><th>건수</th></tr>${backlogRows}</table>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>AI 생성 실패 원인</h2></div>
+      <table><tr><th>원인</th><th>건수</th></tr>${failureRows}</table>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>수집 오류 중인 소스</h2></div>
+      <table><tr><th>소스</th><th>오류</th><th>발생 시각</th></tr>${sourceErrorRows}</table>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>소스별 수집량·품질 (최근 ${basis.collectionWindowDays}일)</h2></div>
+      <table><tr><th>소스</th><th>방식</th><th>수집</th><th>발행</th><th>발행률</th><th>AI 실패</th></tr>${perSourceRows}</table>
+    </div>
+  `;
+}
+
 // AI eligibility=false is a reviewer signal, not a filter — every Draft item
 // stays in the dropdown and reviewable, just reordered so items the AI
 // flagged as questionable surface first. eligible === null means "no AI
@@ -2178,7 +2249,8 @@ function updateActiveNavTab(path) {
   // 자료 (Archive), so it falls back to that tab rather than Home.
   const activeRoute = path === 'archive' || path === 'detail' ? 'archive'
     : path === 'reference' ? 'reference'
-    : path === 'sources' ? 'sources' : path === 'review' ? 'review' : 'home';
+    : path === 'sources' ? 'sources' : path === 'review' ? 'review'
+    : path === 'ops' ? 'ops' : 'home';
   document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === activeRoute);
   });
@@ -2287,6 +2359,7 @@ const ONBOARDING_STEPS = [
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
   { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 자동 채집·판단한 초안을 발행 전에 사람이 검수하는 화면입니다. 검수 결과는 주제가 비슷한 이후 기사 판단에 우선 참고되어 정확도가 보정됩니다.' },
+  { selector: '[data-route="ops"]', title: '운영 현황', desc: '파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 보는 운영자용 대시보드입니다.' },
 ];
 function startOnboardingTour(onDone) { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY, onDone); }
 
@@ -2369,6 +2442,7 @@ async function router() {
     else if (path === 'reference') await renderReference(query);
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
+    else if (path === 'ops') await renderOps();
     else app.innerHTML = '<p>페이지를 찾을 수 없습니다.</p>';
     // The browser can otherwise preserve/restore the previous page's scroll
     // position across a hash change or back/forward navigation (see the
