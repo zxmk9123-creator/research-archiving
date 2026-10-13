@@ -768,8 +768,8 @@ function aiSearchHtml() {
       <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off" required>
       <button type="button" class="ai-search-reset-btn" id="ai-search-reset-btn" title="대화 내역 초기화" aria-label="대화 내역 초기화" ${hasHistory ? '' : 'disabled'}>
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 12a9 9 0 1 0 2.6-6.4"/>
-          <polyline points="3 6 3 10 7 10"/>
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
         </svg>
       </button>
       <button type="submit" class="btn">검색</button>
