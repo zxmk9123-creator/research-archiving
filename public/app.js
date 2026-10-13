@@ -1032,6 +1032,22 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
   const statusEl = bodyEl.querySelector('.ai-search-status');
   if (submitBtn) submitBtn.disabled = true;
   startAiSearchStatus(moduleEl, statusEl);
+  // Follows the growing answer down the page as it streams in — a long
+  // follow-up answer otherwise scrolls past the bottom of the viewport
+  // with nothing bringing it back into view until streaming finishes.
+  // Throttled rather than called on every token: scrollIntoView's smooth
+  // animation re-targeting dozens of times a second (token arrival rate)
+  // is unnecessary work and reads as jitter rather than a smooth follow.
+  let lastFollowAt = 0;
+  const followGrowingAnswer = () => {
+    const now = Date.now();
+    if (now - lastFollowAt < 150) return;
+    lastFollowAt = now;
+    const bottom = turnEl.getBoundingClientRect().bottom;
+    if (bottom > window.innerHeight) {
+      turnEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  };
   try {
     const res = await fetch('/api/search', {
       method: 'POST',
@@ -1088,8 +1104,15 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
           // line pushing the answer away from the question above it, the
           // same gap the final render never had.
           streamEl.innerHTML = renderAnswerHtml(rawText, null);
+          followGrowingAnswer();
         } else if (eventName === 'done') {
           finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
+          // Bypasses the throttle for this last call — the polished swap
+          // can change the answer's final height, so this makes sure its
+          // actual end is what's left in view, not wherever the last
+          // throttled mid-stream check happened to land.
+          lastFollowAt = 0;
+          followGrowingAnswer();
           finished = true;
         } else if (eventName === 'error') {
           bodyEl.innerHTML = aiSearchErrorHtml(data.message || 'AI 검색 중 오류가 발생했습니다.');
@@ -1161,7 +1184,12 @@ function bindAiSearchForm() {
       <div class="ai-search-turn-body"><p class="ai-search-status"></p></div>
     `;
     resultEl.appendChild(turnEl);
-    turnEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // block: 'start' (not 'nearest') — a follow-up's new question/answer
+    // must land at the TOP of the viewport, not just barely scrolled into
+    // view at the bottom edge behind whatever answer came before it.
+    // runAiSearchTurn's own followGrowingAnswer() then keeps the view
+    // tracking downward as the streamed answer grows past one screen.
+    turnEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // Cleared immediately, not just on success — otherwise the same
     // question sits visible twice while the request is in flight: once
     // still in the input box, once in the new turn's question label below.
