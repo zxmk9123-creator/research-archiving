@@ -54,7 +54,11 @@ const MIN_ACQUIRED_CONTENT_CHARS = 80;
 async function acquireRssArticleContent(url) {
   let meta;
   try {
-    meta = await extractMetadataModule.extractMetadata(url);
+    // extractMetadataWithRetry (see its own comment) gives the very first
+    // draft the same shot at the real article body a later "다시 생성"
+    // would get, instead of permanently settling for acquisition_failed
+    // over a one-off transient fetch/bot-block timeout.
+    meta = await extractMetadataModule.extractMetadataWithRetry(url);
   } catch (err) {
     return { extractedText: undefined, stage: 'acquisition_failed', error: err.message };
   }

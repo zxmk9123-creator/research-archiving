@@ -171,4 +171,49 @@ async function extractMetadata(url) {
   };
 }
 
-module.exports = { extractMetadata, isBotBlockPage, extractBodyText };
+// Production gap: a Draft's AI summary/insight quality depended heavily
+// on luck — whichever single extraction attempt happened to run first
+// (RSS acquisition at collection time, or a manual "AI 초안 작성" click)
+// could hit a transient fetch timeout, a one-off bot-block interstitial
+// (e.g. a Cloudflare JS challenge that doesn't always appear), or a page
+// that just hadn't finished rendering its article body yet — silently
+// falling back to the item's own bare feed description/title instead of
+// the full article text. A later "다시 생성" against the exact same URL
+// then often succeeded cleanly, producing a visibly better draft purely
+// by getting a second try, not because anything about the regeneration
+// path itself was smarter. This gives every caller that same second (and
+// third) chance up front, so the FIRST draft — auto-collected or manually
+// triggered — isn't structurally worse off than a later regeneration.
+// Keeps the best body/summary seen across attempts even if none clears
+// minBodyChars, so a retry can never leave a caller worse off than a
+// single plain extractMetadata() call would have.
+// Only retries on a THROWN error (fetch timeout, non-2xx, bot-block
+// interstitial) — all genuinely transient/inconsistent across attempts.
+// Retrying merely because body_text came back short would be pointless:
+// this is a plain static-HTML fetch+parse with no JS execution, so the
+// same URL returns byte-identical HTML on every attempt — a page whose
+// article text just isn't in a <p> tag stays that way no matter how many
+// times it's re-fetched. Deliberately not exported as the default
+// extractMetadata() behavior — the interactive "메타데이터 자동 채우기"
+// form button stays single-shot (an admin waiting live on a click
+// shouldn't eat a retry delay for a failure they could just retry
+// themselves), while every background path that feeds an AI draft uses
+// this instead.
+async function extractMetadataWithRetry(url, { attempts = 2, delayMs = 1000 } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      // Through module.exports, not the bare local function — tests (and
+      // any other caller) that monkey-patch extractMetadataModule.extractMetadata
+      // must reach this call too, same convention collector.js's own tests
+      // already rely on for extractMetadataModule.extractMetadata itself.
+      return await module.exports.extractMetadata(url);
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+module.exports = { extractMetadata, extractMetadataWithRetry, isBotBlockPage, extractBodyText };

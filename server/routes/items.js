@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
-const { extractMetadata } = require('../lib/extractMetadata');
+const { extractMetadata, extractMetadataWithRetry } = require('../lib/extractMetadata');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('../lib/aiDraft');
 const { requireAuth } = require('../lib/auth');
 const { hasValidClassification, deriveContentCategory } = require('../lib/classification');
@@ -44,7 +44,7 @@ async function reextractDraftsInBackground(rows) {
   console.log(`reextract-drafts started: ${rows.length} Draft item(s)`);
   for (const { id, source_url } of rows) {
     try {
-      const meta = await extractMetadata(source_url);
+      const meta = await extractMetadataWithRetry(source_url);
       const result = await generateAiDraftForItem(id, undefined, meta.body_text || meta.summary);
       if (result.ok) ok++; else failed++;
     } catch (err) {
@@ -250,7 +250,12 @@ router.post('/:id/ai-draft', requireAuth, async (req, res) => {
     let extractedText = providedText;
     if (!extractedText && item.source_url) {
       try {
-        const meta = await extractMetadata(item.source_url);
+        // extractMetadataWithRetry (see its own comment in
+        // extractMetadata.js) — this is the one route both an initial
+        // manual "AI 초안 작성" click and a later "다시 생성" go through,
+        // so giving it the same retry chance on both calls removes the
+        // "regenerate just happens to work better" disparity at the source.
+        const meta = await extractMetadataWithRetry(item.source_url);
         extractedText = meta.body_text || undefined;
       } catch (err) {
         // Not fatal — generateAiDraftForItem falls back to item.summary.
@@ -401,7 +406,7 @@ router.post('/review-audit', requireAuth, async (req, res) => {
     let extractedText;
     if (item.source_url) {
       try {
-        const meta = await extractMetadata(item.source_url);
+        const meta = await extractMetadataWithRetry(item.source_url);
         extractedText = meta.body_text || undefined;
       } catch (err) {
         // Best-effort, same fallback as POST /:id/ai-draft — falls through

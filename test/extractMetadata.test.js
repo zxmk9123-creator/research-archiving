@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isBotBlockPage, extractBodyText, extractMetadata } = require('../server/lib/extractMetadata');
+const extractMetadataModule = require('../server/lib/extractMetadata');
+const { isBotBlockPage, extractBodyText, extractMetadata } = extractMetadataModule;
 
 function mockFetchHtml(html) {
   const original = global.fetch;
@@ -203,6 +204,66 @@ test('extractMetadata: a very large page (well past the truncation cap) still ex
     const elapsedMs = Date.now() - start;
     assert.equal(meta.title, 'Large page title');
     assert.ok(elapsedMs < 2000, `expected fast extraction on a large page, took ${elapsedMs}ms`);
+  } finally {
+    restore();
+  }
+});
+
+// Production gap: a Draft's AI draft quality depended on whichever single
+// extraction attempt happened to run first — RSS collection time, or a
+// manual "AI 초안 작성" click — succeeding. A transient fetch timeout/bot-
+// block there silently fell back to the bare feed description, while a
+// LATER "다시 생성" against the exact same URL often succeeded cleanly on
+// a fresh attempt, purely by getting a second try.
+function mockExtractMetadataSequence(results) {
+  const original = extractMetadataModule.extractMetadata;
+  let call = 0;
+  extractMetadataModule.extractMetadata = async () => {
+    const next = results[Math.min(call, results.length - 1)];
+    call++;
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { restore: () => { extractMetadataModule.extractMetadata = original; }, callCount: () => call };
+}
+
+test('extractMetadataWithRetry: retries once on a thrown error and returns the retry success, instead of failing on a one-off transient failure', async () => {
+  const { restore, callCount } = mockExtractMetadataSequence([
+    new Error('fetch failed: 503'),
+    { title: 't', summary: 's', body_text: 'the real article body' },
+  ]);
+  try {
+    const meta = await extractMetadataModule.extractMetadataWithRetry('https://example.org/a', { delayMs: 1 });
+    assert.equal(meta.body_text, 'the real article body');
+    assert.equal(callCount(), 2);
+  } finally {
+    restore();
+  }
+});
+
+test('extractMetadataWithRetry: exhausting every attempt re-throws the last error', async () => {
+  const { restore } = mockExtractMetadataSequence([
+    new Error('fetch failed: 503'),
+    new Error('fetch failed: 503'),
+  ]);
+  try {
+    await assert.rejects(
+      () => extractMetadataModule.extractMetadataWithRetry('https://example.org/a', { delayMs: 1 }),
+      /fetch failed: 503/
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('extractMetadataWithRetry: a successful first attempt never retries, even when body_text is short — re-fetching identical static HTML can\'t change a deterministic result', async () => {
+  const { restore, callCount } = mockExtractMetadataSequence([
+    { title: 't', summary: 's', body_text: '' },
+  ]);
+  try {
+    const meta = await extractMetadataModule.extractMetadataWithRetry('https://example.org/a', { delayMs: 1 });
+    assert.equal(meta.body_text, '');
+    assert.equal(callCount(), 1);
   } finally {
     restore();
   }
