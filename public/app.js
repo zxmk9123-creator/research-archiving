@@ -2,9 +2,10 @@ const TYPE_CLASS = { '뉴스': 'news', '보고서': 'report', '통계': 'stat', 
 const app = document.getElementById('app');
 
 async function api(path, opts) {
+  const { includeMeta = false, ...requestOptions } = opts || {};
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    ...opts,
+    ...requestOptions,
   });
   if (!res.ok) {
     // Admin write routes (requireAuth in server/lib/auth.js) return a JSON
@@ -20,7 +21,8 @@ async function api(path, opts) {
     throw new Error(message);
   }
   if (res.status === 204) return null;
-  return res.json();
+  const data = await res.json();
+  return includeMeta ? { data, hasMore: res.headers.get('X-Has-More') === 'true' } : data;
 }
 
 // AI draft generation can legitimately take well over a minute (FreeLLMAPI's
@@ -1120,7 +1122,7 @@ function buildTeamPicksMap(teamPicks) {
 async function renderHome() {
   const [sectors, items, ranking, teamPicks] = await Promise.all([
     api('/sectors'),
-    api('/items?status=Published'),
+    api('/items?status=Published&limit=100'),
     api('/picks/ranking').catch(() => []),
     api('/picks?kind=team').catch(() => []),
   ]);
@@ -1158,11 +1160,13 @@ async function renderArchive(query = {}) {
   // 보여주는 "전체" — 명시적으로 탭을 선택해야 좁혀진다.
   const category = query.category === 'archive' || query.category === 'daily_report' ? query.category : null;
   const itemsQuery = category ? { ...query, category } : query;
-  const [sectors, usages, sources, items, ranking, teamPicks] = await Promise.all([
-    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery(itemsQuery)),
+  const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
+  const [sectors, usages, sources, itemsPage, ranking, teamPicks] = await Promise.all([
+    api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery({ ...itemsQuery, limit: 100, offset }), { includeMeta: true }),
     api('/picks/ranking').catch(() => []),
     api('/picks?kind=team').catch(() => []),
   ]);
+  const items = itemsPage.data;
   const teamPicksByItem = buildTeamPicksMap(teamPicks);
   const usageOpts = usages.map((u) => `<option value="${u.id}" ${String(query.usage) === String(u.id) ? 'selected' : ''}>${u.name}</option>`).join('');
   const sourceOpts = sources.map((s) => `<option value="${s.id}" ${String(query.source_id) === String(s.id) ? 'selected' : ''}>${s.name}</option>`).join('');
@@ -1289,6 +1293,10 @@ async function renderArchive(query = {}) {
       </div>
     </div>
   `;
+
+  const pageHash = (nextOffset) => '#/archive?' + toQuery({ ...query, offset: nextOffset }).slice(1);
+  document.getElementById('archive-prev-page')?.addEventListener('click', () => { location.hash = pageHash(Math.max(0, offset - 100)); });
+  document.getElementById('archive-next-page')?.addEventListener('click', () => { location.hash = pageHash(offset + 100); });
 
   document.querySelectorAll('.archive-month-nav-item').forEach((btn) => {
     btn.onclick = () => {
@@ -2052,10 +2060,11 @@ function reviewTipCardHtml() {
   `;
 }
 
-async function renderReview() {
-  const [draftsRaw, sectors, usages, sources] = await Promise.all([
-    api('/items?status=Draft'), api('/sectors'), api('/usages'), api('/sources'),
+async function renderReview(offset = 0) {
+  const [draftsPage, sectors, usages, sources] = await Promise.all([
+    api('/items?status=Draft' + toQuery({ limit: 100, offset }), { includeMeta: true }), api('/sectors'), api('/usages'), api('/sources'),
   ]);
+  const draftsRaw = draftsPage.data;
   const drafts = [...draftsRaw].sort((a, b) => {
     const pendingDiff = (isReviewerPending(a) ? 0 : 1) - (isReviewerPending(b) ? 0 : 1);
     if (pendingDiff !== 0) return pendingDiff;
@@ -2090,6 +2099,10 @@ async function renderReview() {
     <h1>Review</h1>
     <p class="page-lede">AI가 자동으로 수집·판단한 초안을 발행 전에 사람이 직접 검수해, 적합성 판단의 정확도를 보장하는 화면입니다.<br>내가 AI 판단을 뒤집은 사례는 주제가 비슷한 새 기사를 판단할 때 AI에게 우선 참고 자료로 제공되어, 검수가 쌓일수록 관련 주제의 AI 판단이 보정됩니다.</p>
     ${reviewTipCardHtml()}
+    <div class="pagination-controls">
+      ${offset > 0 ? `<button class="btn" id="draft-prev-page" type="button">이전 100개</button>` : ''}
+      ${draftsPage.hasMore ? `<button class="btn" id="draft-next-page" type="button">다음 100개</button>` : ''}
+    </div>
     <div class="review-toolbar">
       <select id="draft-select">
         ${(() => {
@@ -2110,6 +2123,8 @@ async function renderReview() {
     <div id="review-body"></div>
     ${comparisonSection}
   `;
+  document.getElementById('draft-prev-page')?.addEventListener('click', () => renderReview(Math.max(0, offset - 100)));
+  document.getElementById('draft-next-page')?.addEventListener('click', () => renderReview(offset + 100));
   const reviewTipCloseBtn = document.getElementById('review-tip-close');
   if (reviewTipCloseBtn) {
     reviewTipCloseBtn.onclick = () => {
