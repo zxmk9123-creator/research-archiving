@@ -211,8 +211,14 @@ p { margin: 0; }
 .ai-search-result:not(:empty) { margin-top: var(--sp-6); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
 
 /* Each question/answer is its own turn, stacked in order — a follow-up's
-   answer appends below the ones before it instead of replacing them. */
-.ai-search-turn { margin-bottom: var(--sp-5); }
+   answer appends below the ones before it instead of replacing them.
+   scroll-margin-top matches .topbar's sticky height (same 76px other
+   sticky-aware spacing in this file already uses, e.g.
+   .archive-month-nav's own top/max-height) — without it, a follow-up's
+   scrollIntoView({block:'start'}) lands the question flush with the
+   viewport's edge, which the sticky topbar then sits directly on top of,
+   hiding the very text the scroll was supposed to reveal. */
+.ai-search-turn { margin-bottom: var(--sp-5); scroll-margin-top: 76px; }
 .ai-search-turn + .ai-search-turn { padding-top: var(--sp-5); border-top: 1px solid var(--border); }
 /* flex + align-items:center instead of vertical-align tricks — the tag
    (10.5px, its own padding) and the question text (14px) have different
