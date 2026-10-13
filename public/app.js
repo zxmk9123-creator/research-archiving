@@ -2275,7 +2275,20 @@ async function renderReview() {
   // 판정(검토가 가장 급함) → 적합 판정 → 초안 미생성(아직 AI 판정조차
   // 없음) 순, 각 구간 안에서는 다시 제목순.
   const titleCompare = (a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'ko');
-  const aiEligibilityOrder = (d) => (d.ai_eligible === false ? 0 : d.ai_eligible === true ? 1 : 2);
+  // Production bug: ai_eligible is only ever written alongside
+  // ai_status='completed' (see aiDraft.js's success path) — a regeneration
+  // that later FAILS or is still 'pending' never resets ai_eligible, so an
+  // item that previously had a successful draft keeps its old true/false
+  // verdict even though there is currently no valid draft for it. Checking
+  // ai_eligible alone made a "초안 미생성" item (one with no CURRENT draft)
+  // look like a settled 적합 판정 whenever a stale `ai_eligible=true` from
+  // an earlier run was still sitting on the row. ai_status is the
+  // authoritative "is there a draft right now" signal — ai_eligible only
+  // means anything when ai_status is actually 'completed'.
+  const aiEligibilityOrder = (d) => {
+    if (d.ai_status !== 'completed') return 2;
+    return d.ai_eligible === false ? 0 : d.ai_eligible === true ? 1 : 2;
+  };
   const drafts = [...draftsRaw].sort((a, b) => {
     const pendingDiff = (isReviewerPending(a) ? 0 : 1) - (isReviewerPending(b) ? 0 : 1);
     if (pendingDiff !== 0) return pendingDiff;
@@ -2317,7 +2330,14 @@ async function renderReview() {
     <div class="review-toolbar">
       <select id="draft-select">
         ${(() => {
-          const draftOptionMark = (d) => (d.ai_eligible === false ? '⚠ ' : d.ai_eligible === true ? '' : '✕ ');
+          // Same ai_status-first rule as aiEligibilityOrder above — a
+          // stale ai_eligible from a prior completed run must not mark an
+          // item that currently has no draft (failed/pending/not_requested)
+          // as if it were a settled 적합 판정.
+          const draftOptionMark = (d) => {
+            if (d.ai_status !== 'completed') return '✕ ';
+            return d.ai_eligible === false ? '⚠ ' : d.ai_eligible === true ? '' : '✕ ';
+          };
           const draftOptionHtml = (d) => `<option value="${d.id}">${draftOptionMark(d)}${d.title}</option>`;
           const pendingDrafts = drafts.filter(isReviewerPending);
           const completedDrafts = drafts.filter((d) => !isReviewerPending(d));
