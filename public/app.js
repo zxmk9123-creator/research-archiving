@@ -2245,13 +2245,20 @@ async function renderReview() {
   const [draftsRaw, sectors, usages, sources] = await Promise.all([
     fetchAllDrafts(), api('/sectors'), api('/usages'), api('/sources'),
   ]);
-  // 판단 미완료 그룹이 먼저, 그 안에서는 제목 기준 a-z/가나다 순 — 판단
-  // 완료 그룹도 동일하게 제목 순으로 정렬. localeCompare('ko')가 로마자와
-  // 한글을 한 기준으로 같이 정렬해준다.
+  // 판단 미완료 그룹이 먼저, 판단 완료 그룹은 제목 기준 a-z/가나다 순
+  // (localeCompare('ko')가 로마자와 한글을 한 기준으로 같이 정렬해준다).
+  // 판단 미완료 그룹 안에서는 AI 판정 상태로 한 번 더 나눈다 — 비적합
+  // 판정(검토가 가장 급함) → 적합 판정 → 초안 미생성(아직 AI 판정조차
+  // 없음) 순, 각 구간 안에서는 다시 제목순.
   const titleCompare = (a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'ko');
+  const aiEligibilityOrder = (d) => (d.ai_eligible === false ? 0 : d.ai_eligible === true ? 1 : 2);
   const drafts = [...draftsRaw].sort((a, b) => {
     const pendingDiff = (isReviewerPending(a) ? 0 : 1) - (isReviewerPending(b) ? 0 : 1);
     if (pendingDiff !== 0) return pendingDiff;
+    if (isReviewerPending(a)) {
+      const eligDiff = aiEligibilityOrder(a) - aiEligibilityOrder(b);
+      if (eligDiff !== 0) return eligDiff;
+    }
     return titleCompare(a, b);
   });
 
@@ -2286,7 +2293,8 @@ async function renderReview() {
     <div class="review-toolbar">
       <select id="draft-select">
         ${(() => {
-          const draftOptionHtml = (d) => `<option value="${d.id}">${d.ai_eligible === false ? '⚠ ' : ''}${d.title}</option>`;
+          const draftOptionMark = (d) => (d.ai_eligible === false ? '⚠ ' : d.ai_eligible === true ? '' : '✕ ');
+          const draftOptionHtml = (d) => `<option value="${d.id}">${draftOptionMark(d)}${d.title}</option>`;
           const pendingDrafts = drafts.filter(isReviewerPending);
           const completedDrafts = drafts.filter((d) => !isReviewerPending(d));
           if (!drafts.length) return '<option>Draft 없음</option>';
