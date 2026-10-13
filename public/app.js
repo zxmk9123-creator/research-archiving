@@ -1359,7 +1359,20 @@ async function renderArchive(query = {}) {
       <div class="archive-layout">
         ${monthNavHtml}
         <div class="section archive-main">
-          <div class="section-header"><h2>자료</h2><span class="count">${visibleItems.length}개</span></div>
+          <div class="section-header"><h2>자료</h2><span class="count">${
+            // visibleItems.length is only this one page's count (limit=100) —
+            // showing it as "전체" undercounted every filtered result past
+            // the first page. monthCounts (already fetched for the sidebar,
+            // same filters, independent of limit/offset — see its own
+            // comment in items.js) gives the real total for the 전체 view.
+            // 내 저장/팀 Pick views stay page-local counts: they're a
+            // client-side filter over whatever page happens to be loaded,
+            // so there's no cheap way to get their true cross-page total
+            // without fetching every page.
+            view === 'all'
+              ? monthCounts.reduce((sum, r) => sum + Number(r.count), 0)
+              : visibleItems.length
+          }개</span></div>
           ${emptyState}
           ${monthGroups.map((g) => `
             <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
