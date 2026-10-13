@@ -113,7 +113,10 @@ router.get('/', async (req, res) => {
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   params.push(limit + 1, offset);
-  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC LIMIT ${params.length - 1} OFFSET ${params.length}`, params);
+  const orderBy = status === 'Draft'
+    ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
+    : 'ORDER BY i.published_at DESC NULLS LAST, i.collected_at DESC, i.id DESC';
+  const { rows } = await pool.query(`${ITEM_SELECT} ${where} ${orderBy} LIMIT ${params.length - 1} OFFSET ${params.length}`, params);
   const hasMore = rows.length > limit;
   if (hasMore) rows.pop();
   res.set('X-Has-More', String(hasMore));
