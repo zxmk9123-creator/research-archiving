@@ -1,0 +1,110 @@
+name: CI
+
+# Merge gate against two real production incidents:
+#   1. a route's LIMIT/OFFSET value spliced into the SQL text instead of
+#      bound as a $N placeholder — crashed the whole process on every
+#      request, invisible to unit tests because a mocked pool.query never
+#      validates $N count against params.length.
+#   2. a stray `});` left over by a refactor made server/routes/search.js
+#      fail to require() at all, so the server never booted.
+# Every job here must pass before a PR can merge (enable "Require status
+# checks to pass before merging" in the repo's branch protection settings,
+# naming the "test" job below — that setting itself isn't something a
+# workflow file can turn on).
+on:
+  pull_request:
+  push:
+    branches: ['**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: research_archiving
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/research_archiving
+      PGSSL: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Catches incident #2's class of bug (a file that no longer parses)
+      # before anything else runs — cheaper and faster to pinpoint than
+      # waiting for the server-boot step below to time out.
+      - name: Syntax-check every server/public JS file
+        run: |
+          set -e
+          status=0
+          for f in $(git ls-files 'server/**/*.js' 'public/*.js' 'scripts/**/*.js'); do
+            node -c "$f" || status=1
+          done
+          exit $status
+
+      # Unit/route tests against the existing mocked pool.query — includes
+      # the regression tests added for incident #1 (asserts on the actual
+      # $N-vs-params.length shape of the generated SQL, which a mock can
+      # check but never enforces on its own) and for incident #2's route
+      # module loading correctly.
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply schema to the live Postgres service
+        run: npm run db:init
+
+      - name: Seed one Published item for the detail-route smoke check
+        id: seed
+        run: echo "item_id=$(node scripts/ciSeedItem.js)" >> "$GITHUB_OUTPUT"
+
+      # The server-boot check itself: if require()-ing any route module
+      # fails (incident #2's exact failure mode), or the process throws on
+      # startup, this step's wait-loop times out and the job fails here —
+      # before any of the live API checks below even run.
+      - name: Boot the real server against the live Postgres service
+        run: |
+          node server/index.js > server.log 2>&1 &
+          echo $! > server.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/ > /dev/null; then
+              echo "server is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server never came up — log follows:"
+          cat server.log
+          exit 1
+
+      # The live-request layer unit tests structurally cannot reach: an
+      # actual SQL bind-parameter mismatch only surfaces against a real
+      # Postgres connection, never against pool.query's mock. Checks both
+      # the normal AND the error response of the list/detail/month-counts
+      # item APIs, plus the search API.
+      - name: Smoke-test list/detail/month-counts/search — normal and error responses
+        env:
+          SMOKE_SEED_ITEM_ID: ${{ steps.seed.outputs.item_id }}
+        run: node scripts/ciSmokeTest.js
+
+      - name: Server log (for debugging a failure above)
+        if: always()
+        run: cat server.log || true
+
+      - name: Stop the server
+        if: always()
+        run: kill "$(cat server.pid)" 2>/dev/null || true
