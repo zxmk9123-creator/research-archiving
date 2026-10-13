@@ -1682,19 +1682,43 @@ async function renderSourceManager(view, query = {}) {
   const refRegionOpts = refFilterOptions.regions.map((r) => `<option value="${r}" ${query.region === r ? 'selected' : ''}>${r}</option>`).join('');
   const refCommodityOpts = refFilterOptions.commodities.map((c) => `<option value="${c}" ${query.commodity === c ? 'selected' : ''}>${c}</option>`).join('');
 
+  // Sources(전체) 탭은 이제 자동 수집원만 보여준다 — 참고용(is_reference) 소스는
+  // 레퍼런스 탭에 이미 전용 목록이 있고, 활성/일시중지 토글 대상도 아니라서
+  // 여기 같이 섞여 있으면 "이 화면은 무엇을 운영 중인가"를 한눈에 보기 어려웠다
+  // (피드백의 1차 "용도 분리" 항목 — 기존 is_reference 필드만으로 반영 가능,
+  // 스키마/API 변경 없음).
+  const autoSources = view === 'all' ? sources.filter((s) => !s.is_reference) : [];
+  const sourceStatusOf = (s) => (s.is_active === false ? 'paused' : s.last_error ? 'error' : s.stale ? 'stale' : 'ok');
+  const statusFilter = ['paused', 'error', 'stale', 'ok'].includes(query.status) ? query.status : '';
+  const statusLabel = { paused: '일시중지', error: '오류', stale: 'Stale', ok: '정상' };
+  const statusCounts = autoSources.reduce((acc, s) => {
+    const k = sourceStatusOf(s);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const visibleAutoSources = statusFilter ? autoSources.filter((s) => sourceStatusOf(s) === statusFilter) : autoSources;
+
   app.innerHTML = `
     <h1>${view === 'reference' ? '레퍼런스' : 'Sources'}</h1>
-    <p class="page-lede">${view === 'reference' ? '자동 수집 대상이 아니더라도 참고 가치가 높은 유지 시장 리서치/통계 출처를 기록합니다.' : 'RSS 수집 소스 상태를 관리합니다.'}</p>
+    <p class="page-lede">${view === 'reference' ? '자동 수집 대상이 아니더라도 참고 가치가 높은 유지 시장 리서치/통계 출처를 기록합니다.' : 'RSS 등 자동 수집 소스의 상태를 관리합니다. (참고용 출처는 레퍼런스 탭에서 관리)'}</p>
     ${view === 'all' ? `<button class="btn primary btn-compact" id="collect-all-btn">전체 자료 지금 수집</button>
     <div class="collect-all-result" id="collect-all-result"></div>
+    <div class="filters" id="source-status-filter">
+      <select id="s-f-status">
+        <option value="">상태 전체 (${autoSources.length})</option>
+        ${['error', 'paused', 'stale', 'ok'].map((k) => `<option value="${k}" ${statusFilter === k ? 'selected' : ''}>${statusLabel[k]} (${statusCounts[k] || 0})</option>`).join('')}
+      </select>
+    </div>
     <table class="sources-table">
       <tr><th>이름</th><th>수집방식</th><th>오너</th><th>주기(일)</th><th>신뢰등급</th><th>마지막 수집</th><th>상태</th><th></th></tr>
-      ${sources.map((s) => `<tr class="${s.is_active === false ? 'source-row-inactive' : ''}">
-        <td class="cell-strong">${s.name}${s.is_reference ? ' <span class="pill">Reference</span>' : ''}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
+      ${visibleAutoSources.map((s) => `<tr class="${s.is_active === false ? 'source-row-inactive' : ''}">
+        <td class="cell-strong">${s.name}</td><td class="cell-muted">${s.method}</td><td class="cell-muted">${s.owner || '-'}</td><td class="cell-muted">${s.frequency_days}</td>
         <td class="cell-muted">${s.trust_grade}</td><td class="cell-muted">${s.last_collected_at ? new Date(s.last_collected_at).toLocaleDateString() : '-'}</td>
-        <td>${s.is_active === false ? '<span class="pill">비활성화됨</span>' : s.is_reference ? '<span class="pill">참고용</span>' : (s.last_error ? `<span class="status-fail" title="${s.last_error}">실패</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">OK</span>'))}</td>
+        <td>${s.is_active === false
+          ? `<span class="pill"${s.last_error ? ` title="일시중지 전 마지막 오류: ${s.last_error}"` : ''}>일시중지됨</span>`
+          : (s.last_error ? `<span class="status-fail" title="${s.last_error}">오류</span>` : (s.stale ? '<span class="status-fail">Stale</span>' : '<span class="status-ok">정상</span>'))}</td>
         <td>
-          ${s.is_reference ? '' : `<button class="btn-text-action" data-toggle-active-source="${s.id}">${s.is_active === false ? '활성화' : '비활성화'}</button>`}
+          <button class="btn-text-action" data-toggle-active-source="${s.id}">${s.is_active === false ? '활성화' : '일시중지'}</button>
           <button class="btn-text-action" data-delete-source="${s.id}">삭제</button>
         </td>
       </tr>`).join('')}
@@ -1718,6 +1742,13 @@ async function renderSourceManager(view, query = {}) {
     <div id="ref-sources-result">${referenceSourcesTable(sources, { region: query.region, commodity: query.commodity })}</div>
     `}
   `;
+  // Sources(전체) 상태 필터 — 해시 쿼리(?status=)를 바꿔 같은 route를 다시
+  // 그린다. ref-f-region/commodity처럼 제자리 재렌더만 해도 되지만, 이
+  // 필터는 브라우저 뒤로가기로 이전 상태를 복원할 수 있는 편이 운영자가
+  // "오류만 보던 중" 다른 탭에 갔다와도 맥락을 잃지 않아 더 낫다.
+  document.getElementById('s-f-status')?.addEventListener('change', (e) => {
+    location.hash = '#/sources' + toQuery({ status: e.target.value }).replace(/^&/, '?');
+  });
   const collectAllBtn = document.getElementById('collect-all-btn');
   if (collectAllBtn) {
     collectAllBtn.onclick = async (e) => {
