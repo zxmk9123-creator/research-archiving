@@ -758,10 +758,20 @@ let aiSearchHistory = [];
 // array the API call uses for context.
 let aiSearchTurnsHtml = [];
 
+// 대화 초기화 버튼: 대화 내역(aiSearchHistory)이 있을 때만 눌러서
+// 강제 초기화할 수 있다 — 입력창 가로 길이를 살짝 줄여 그 공간에 둔다
+// (입력창은 flex:1이라 같은 행에 버튼을 하나 더 두면 자동으로 줄어든다).
 function aiSearchHtml() {
+  const hasHistory = aiSearchHistory.length > 0;
   return `<section class="ai-search" id="ai-search">
     <form id="ai-search-form">
       <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off" required>
+      <button type="button" class="ai-search-reset-btn" id="ai-search-reset-btn" title="대화 내역 초기화" aria-label="대화 내역 초기화" ${hasHistory ? '' : 'disabled'}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 2.6-6.4"/>
+          <polyline points="3 4 3 10 9 10"/>
+        </svg>
+      </button>
       <button type="submit" class="btn">검색</button>
     </form>
     <div class="ai-search-result" id="ai-search-result"></div>
@@ -897,6 +907,8 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
     // successful turn gets persisted) — push now, and only now, so a
     // Home re-render replays exactly the turns that actually succeeded.
     aiSearchTurnsHtml.push(turnEl.outerHTML);
+    const resetBtn = document.getElementById('ai-search-reset-btn');
+    if (resetBtn) resetBtn.disabled = false;
   } catch (err) {
     bodyEl.innerHTML = aiSearchErrorHtml('AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
   } finally {
@@ -915,6 +927,15 @@ function bindAiSearchForm() {
   if (!form) return;
   const resultEl = document.getElementById('ai-search-result');
   const submitBtn = form.querySelector('button[type="submit"]');
+  const resetBtn = document.getElementById('ai-search-reset-btn');
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      aiSearchHistory = [];
+      aiSearchTurnsHtml = [];
+      resultEl.innerHTML = '';
+      resetBtn.disabled = true;
+    };
+  }
 
   // Delegated once on the result container — covers every turn's retry
   // button, including ones added after this bind (each new turn's button

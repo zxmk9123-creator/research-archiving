@@ -196,6 +196,13 @@ p { margin: 0; }
   border-radius: var(--radius-card); background: var(--surface); color: var(--text); font-size: 15px;
 }
 .ai-search input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
+.ai-search-reset-btn {
+  flex: 0 0 auto; width: var(--ctrl-md); height: var(--ctrl-md); display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text-secondary);
+  cursor: pointer; transition: color .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease);
+}
+.ai-search-reset-btn:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); border-color: var(--border-strong); }
+.ai-search-reset-btn:disabled { color: var(--text-tertiary); opacity: .4; cursor: not-allowed; }
 .ai-search-result { position: relative; }
 /* Separates the answer thread from the search input clearly enough that
    it doesn't read as sitting right under it — margin-top alone wasn't
