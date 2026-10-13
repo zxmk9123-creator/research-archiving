@@ -1344,8 +1344,18 @@ async function renderArchive(query = {}) {
   // just scroll to it. replaceState (not location.hash=) strips the
   // one-shot scrollTo param afterward without firing another hashchange/
   // re-render.
+  //
+  // Deferred with setTimeout: router() (the hashchange handler that called
+  // this function) does its own `window.scrollTo(0, 0)` immediately after
+  // renderArchive() returns, on every route change — called synchronously
+  // in the same tick, it would otherwise cancel this scrollIntoView before
+  // the smooth animation ever started, snapping back to the top instead of
+  // to the clicked month. Queuing this for the next tick lets that scrollTo
+  // run first.
   if (scrollToMonth) {
-    document.getElementById(`archive-month-${scrollToMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => {
+      document.getElementById(`archive-month-${scrollToMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
     history.replaceState(null, '', '#/archive?' + toQuery(query).slice(1));
   }
 
