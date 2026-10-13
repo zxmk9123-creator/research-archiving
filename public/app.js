@@ -1153,6 +1153,14 @@ async function renderHome() {
 }
 
 async function renderArchive(query = {}) {
+  // scrollTo is a transient hash param (set by the month sidebar below, see
+  // its own comment) meaning "scroll to this month after this render" — it
+  // must never leak into itemsQuery/month-counts API calls or into other
+  // derived hrefs (tab links, filter apply, etc.), so it's stripped from
+  // `query` immediately rather than threaded through every ...query spread.
+  const scrollToMonth = query.scrollTo;
+  if (scrollToMonth) { query = { ...query }; delete query.scrollTo; }
+
   // 최신 자료/전체 결과였던 두 화면을 하나의 "자료" 탭으로 통합했다 — 최신순
   // 정렬은 그대로 서버가 보장하고(items.js의 published_at DESC), 여기서는
   // 연/월 구분선만 추가한다. 뉴스(daily_report)/보고서(archive) 탭은 이
@@ -1241,22 +1249,32 @@ async function renderArchive(query = {}) {
   // Month-divider list for whichever page is currently loaded (purely a
   // display grouping of the already-fetched `visibleItems`).
   const monthGroups = groupByMonth(visibleItems);
-  // Year-month jump sidebar — built from the server's month-counts (every
-  // month matching the active filters, independent of this page's
-  // limit/offset), NOT from monthGroups above. A click re-queries with
-  // from/to set to that month's bounds (offset reset to 0) instead of
-  // scrolling within the current page, so a month before the current
-  // 100-item page is still reachable rather than looking like it's gone.
-  const pad2 = (n) => String(n).padStart(2, '0');
+  // Year-month jump sidebar — the ORIGINAL behavior was a smooth in-page
+  // scroll to that month's divider, never a filter; restoring that, but
+  // still built from the server's full month-counts (independent of this
+  // page's limit/offset) so a month outside the currently loaded page is
+  // still listed. For a month already on this page, the link just scrolls
+  // (via scrollTo + the effect below) at the current offset. For a month
+  // on a DIFFERENT page, clicking first jumps to the page that contains
+  // it (computed from the cumulative counts, same ORDER BY the list query
+  // itself uses) and then scrolls once that page has rendered.
+  let cumulativeBeforeThisMonth = 0;
   const monthNavHtml = monthCounts.length
-    ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthCounts.filter((r) => r.month_key).map((r) => {
-        const [y, m] = r.month_key.split('-').map(Number);
-        const from = `${y}-${pad2(m)}-01`;
-        const to = `${y}-${pad2(m)}-${pad2(new Date(y, m, 0).getDate())}`;
-        const active = query.from === from && query.to === to;
-        const href = '#/archive?' + toQuery({ ...query, from, to, offset: '' }).slice(1);
-        return `<a class="archive-month-nav-item ${active ? 'active' : ''}" href="${href}">
-          <span class="archive-month-nav-label">${y}년 ${m}월</span>
+    ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthCounts.map((r) => {
+        // Matches groupByMonth()'s own key scheme (0-based month, 'unknown'
+        // for a NULL published_at) below, so the divider id this links to
+        // and the id groupByMonth gives that divider are always the same
+        // string. NULLS LAST in the list query's own ORDER BY means the
+        // unknown bucket sorts last here too, so the same cumulative-offset
+        // math still lands on the right page for it.
+        const [y, m] = r.month_key ? r.month_key.split('-').map(Number) : [null, null];
+        const groupKey = r.month_key ? `${y}-${m - 1}` : 'unknown';
+        const label = r.month_key ? `${y}년 ${m}월` : '날짜 미확인';
+        const targetOffset = Math.floor(cumulativeBeforeThisMonth / 100) * 100;
+        cumulativeBeforeThisMonth += r.count;
+        const href = '#/archive?' + toQuery({ ...query, offset: targetOffset || '', scrollTo: groupKey }).slice(1);
+        return `<a class="archive-month-nav-item" href="${href}">
+          <span class="archive-month-nav-label">${label}</span>
           <span class="archive-month-nav-count">${r.count}</span>
         </a>`;
       }).join('')}</nav>`
@@ -1319,6 +1337,17 @@ async function renderArchive(query = {}) {
   const pageHash = (nextOffset) => '#/archive?' + toQuery({ ...query, offset: nextOffset }).slice(1);
   document.getElementById('archive-prev-page')?.addEventListener('click', () => { location.hash = pageHash(Math.max(0, offset - 100)); });
   document.getElementById('archive-next-page')?.addEventListener('click', () => { location.hash = pageHash(offset + 100); });
+
+  // The month sidebar's smooth-scroll landing: the link already navigated
+  // to whichever page/offset actually contains this month (see monthNavHtml
+  // above), so by the time this render runs the divider is on the page —
+  // just scroll to it. replaceState (not location.hash=) strips the
+  // one-shot scrollTo param afterward without firing another hashchange/
+  // re-render.
+  if (scrollToMonth) {
+    document.getElementById(`archive-month-${scrollToMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    history.replaceState(null, '', '#/archive?' + toQuery(query).slice(1));
+  }
 
   const treeEl = document.getElementById('sector-tree');
   const chipsEl = document.getElementById('sector-chips');

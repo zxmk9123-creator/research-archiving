@@ -823,9 +823,6 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .archive-month-nav-item:hover, .archive-month-nav-item:focus-visible {
   background: var(--action-soft); color: var(--action-hover); outline: none;
 }
-.archive-month-nav-item.active {
-  background: var(--action-soft); color: var(--action-hover); font-weight: 600;
-}
 .archive-month-nav-count { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); }
 .archive-month-nav-item:hover .archive-month-nav-count,
 .archive-month-nav-item:focus-visible .archive-month-nav-count { color: inherit; }
