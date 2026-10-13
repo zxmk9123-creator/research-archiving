@@ -81,10 +81,52 @@ function resolveRetrievalQuery(question, history) {
   return `${lastUserTurn.content} ${question}`;
 }
 
+// How many Published items a single keyword matches, searched against the
+// exact same fields retrieveCandidates() itself searches (so the weighting
+// below reflects this corpus, not a general-language assumption).
+async function keywordDocFrequency(kw) {
+  const pat = `%${kw}%`;
+  const { rows } = await pool.query(
+    `SELECT count(*)::int AS cnt FROM items i LEFT JOIN sources s ON s.id = i.source_id
+     WHERE i.status = 'Published' AND (
+       i.title ILIKE $1 OR i.summary ILIKE $1 OR i.insight ILIKE $1
+       OR i.ai_summary ILIKE $1 OR i.ai_insight ILIKE $1 OR s.name ILIKE $1
+       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $1)
+       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $1)
+     )`,
+    [pat]
+  );
+  // A real COUNT(*) always returns exactly one row, but defend anyway —
+  // an empty result defaults to "never seen" (docFreq 0), which gives
+  // that keyword the maximum possible weight rather than crashing
+  // retrieval entirely over one malformed count.
+  return rows[0]?.cnt ?? 0;
+}
+
 async function retrieveCandidates(question, history) {
   const retrievalQuery = resolveRetrievalQuery(question, history);
   const keywords = extractKeywords(retrievalQuery);
   if (!keywords.length) return [];
+
+  // Production incident: a question naming a specific entity (e.g. "PT
+  // Danantara Sumberdaya Indonesia(DSI)") plus a generic framing word
+  // ("피해보는" harmed) retrieved 8 OTHER Indonesia/palm-oil articles that
+  // merely matched the generic keywords "indonesia"/"pt" (Indonesian
+  // company-name prefix, appears constantly) and generic Korean connector
+  // words like "인해"/"기업이" (appear in countless unrelated summaries) —
+  // each counting as a FULL point, same as the one keyword ("dsi") that
+  // actually, specifically identified the right article. The single
+  // article that literally named DSI and described the exact margin
+  // pressure being asked about scored only 2 matches and never made the
+  // top MAX_CANDIDATES cut, even though it was the best answer available.
+  // Each keyword's weight is now 1 / log2(docFreq + 2) — a keyword only a
+  // handful of Published items contain (a specific entity name) counts far
+  // more than one most of the corpus contains (a country name, a common
+  // corporate prefix, an ordinary connector word), without needing a
+  // hand-maintained stopword list for either language.
+  const docFreqs = await Promise.all(keywords.map(keywordDocFrequency));
+  const weights = docFreqs.map((cnt) => 1 / Math.log2(cnt + 2));
+
   const params = [];
   const keywordClauses = keywords.map((kw) => {
     params.push(`%${kw}%`);
@@ -94,18 +136,10 @@ async function retrieveCandidates(question, history) {
       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $${idx})
       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $${idx}))`;
   });
-  // Production incident: a clearly on-topic item (a Shell/SAF long-term
-  // purchase deal, matching 4-5 of a 5-keyword question) never reached the
-  // chatbot because ORDER BY published_at DESC NULLS LAST alone ranked
-  // every single-keyword match (e.g. anything mentioning "SAF") above it —
-  // this item's published_at happened to be NULL, which NULLS LAST sorts
-  // dead last, and with ~26 other items sharing just the one keyword "SAF",
-  // LIMIT 8 cut it off entirely regardless of how relevant it actually was.
-  // relevance_score (how many distinct keywords actually matched) is now
-  // the primary sort key, with recency only breaking ties among equally
-  // relevant items — a precise multi-keyword question beats a generic
-  // single-keyword coincidence regardless of either item's publish date.
-  const relevanceExpr = keywordClauses.map((clause) => `(CASE WHEN ${clause} THEN 1 ELSE 0 END)`).join(' + ');
+  // relevance_score is now a weighted sum (keyword specificity), not a
+  // flat count — recency still only breaks ties among equally relevant
+  // items, same as before.
+  const relevanceExpr = keywordClauses.map((clause, i) => `(CASE WHEN ${clause} THEN ${weights[i]} ELSE 0 END)`).join(' + ');
   // status = 'Published' only — never Draft/Rejected/unpublished material.
   const { rows } = await pool.query(
     `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
@@ -134,6 +168,7 @@ Formatting:
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
 - If the supplied materials do not contain enough information to answer, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
+- A user's question often uses a general/colloquial word (e.g. "피해", "불리", "타격") where the materials describe the same thing in more specific terms (e.g. 공급 차질, 원가 상승, 마진 압박, 가격 상승, 시장 점유율 하락). Recognize this as the SAME claim, not a gap in the evidence — answer using the material's specific language rather than declaring insufficient evidence just because the user's exact word isn't in the text. This is still grounded, ordinary reading comprehension, not outside knowledge — never invent an effect the material doesn't actually describe.
 - Every factual claim must be grounded in the supplied materials and marked with its [N] citation — never stated as fact without one.
 - Clearly separate stated evidence from your own interpretation/inference; phrase inference as such (e.g. "~로 추정됩니다", "~일 가능성이 있습니다"), never as a reported fact. An inference sentence may still carry a [N] if it's based on a specific material.
 - Be concise and research-oriented — no greetings, no conversational filler, no restating the question.

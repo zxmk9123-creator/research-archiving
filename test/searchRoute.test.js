@@ -91,7 +91,7 @@ test('POST /: retrieval only queries Published items and is bounded', async () =
       assert.equal(body.insufficient, false);
       assert.match(body.answer, /인도네시아/);
 
-      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       assert.ok(selectCall);
       assert.match(selectCall.text, /i\.status = 'Published'/);
       assert.match(selectCall.text, /LIMIT 8/);
@@ -614,7 +614,7 @@ test('POST /: a low-signal follow-up still retrieves relevant materials by foldi
       const body = await res.json();
       assert.equal(body.insufficient, false);
       assert.equal(body.sources.length, 1);
-      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       // "팜유" from the prior turn must be among the ILIKE params used for retrieval.
       assert.ok(selectCall.params.some((p) => p.includes('팜유')));
     });
@@ -648,7 +648,7 @@ test('retrieveCandidates SQL: ranks by a computed per-keyword relevance score be
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ question: '쉘 SAF 장기 구매 계약' }),
       });
-      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       assert.ok(selectCall);
       // relevance_score (a CASE WHEN per keyword, summed) is the primary
       // sort key; published_at only breaks ties among equally-relevant rows.
@@ -674,7 +674,7 @@ test('retrieveCandidates SQL: the relevance expression reuses the same bound par
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ question: '팜유 수출 정책 변화' }),
       });
-      const selectCall = calls.find((c) => c.text.includes('FROM items i'));
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       assert.ok(selectCall);
       // 4 keywords (팜유/수출/정책/변화) -> 4 bound params, even though each
       // $N now appears twice in the query text (once for scoring, once in
