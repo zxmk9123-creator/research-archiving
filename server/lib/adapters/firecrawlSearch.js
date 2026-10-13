@@ -1,3 +1,4 @@
+const { readResponseText } = require('../boundedResponse');
 // Firecrawl Search adapter — second search tier for Web Research
 // Discovery, used only as a fallback when Brave Search (adapters/
 // webSearch.js, the primary tier) fails outright (all configured keys
@@ -40,12 +41,12 @@ async function searchWeb(query, options = {}) {
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) {
-        const bodyText = await res.text().catch(() => '');
+        const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
         console.error(`firecrawl search failed: status ${res.status} body=${bodyText.slice(0, 300)}`);
         lastError = new Error(`search failed: ${res.status}`);
         continue;
       }
-      const data = await res.json();
+      const data = JSON.parse(await readResponseText(res, 1024 * 1024, 'search API response'));
       const rawResults = (data && Array.isArray(data.data)) ? data.data : [];
       return rawResults
         .map((r) => ({ title: (r.title || '').trim(), link: (r.url || '').trim() }))
