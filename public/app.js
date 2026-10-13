@@ -100,14 +100,31 @@ window.toggleSaveFromCard = function toggleSaveFromCard(ev, id) {
 // team's pick on any item; the menu just lists the shared roster and
 // each team's current on/off state for this item.
 let teamPickMenuEl = null;
+// Tracks WHICH item's menu is open, so toggleTeamPickMenu can tell "same
+// button clicked again" (close, stay closed) apart from "a different
+// card's 팀 Pick button clicked" (close the old one, open the new one in
+// the same click) — see toggleTeamPickMenu's own comment for why this
+// can't just be inferred from teamPickMenuEl alone.
+let teamPickMenuItemId = null;
 function closeTeamPickMenu() {
   if (!teamPickMenuEl) return;
   teamPickMenuEl.remove();
   teamPickMenuEl = null;
+  teamPickMenuItemId = null;
   document.removeEventListener('click', onTeamPickMenuOutsideClick, true);
   document.removeEventListener('keydown', onTeamPickMenuEscape, true);
 }
 function onTeamPickMenuOutsideClick(ev) {
+  // Production bug: this capture-phase listener used to fire BEFORE a 팀
+  // Pick button's own onclick (capture always runs ahead of the bubble-
+  // phase handler at the target), closing the menu first — then the
+  // button's own toggleTeamPickMenu ran immediately after, saw
+  // teamPickMenuEl already null, and reopened it. A second click on the
+  // same button never actually stayed closed; it just flickered. Ignoring
+  // clicks on any 팀 Pick trigger here and letting toggleTeamPickMenu
+  // handle its own toggle (including switching to a different item's
+  // menu) fixes that race at the source.
+  if (ev.target.closest('[data-team-pick-btn]')) return;
   if (teamPickMenuEl && !teamPickMenuEl.contains(ev.target)) closeTeamPickMenu();
 }
 function onTeamPickMenuEscape(ev) {
@@ -188,12 +205,18 @@ async function renderTeamPickMenuContents(itemId) {
 window.toggleTeamPickMenu = function toggleTeamPickMenu(ev, itemId) {
   ev.stopPropagation();
   if (teamPickMenuEl) {
+    const wasSameItem = teamPickMenuItemId === itemId;
     closeTeamPickMenu();
-    return;
+    // Same button clicked again (second click) — just close, don't
+    // immediately reopen. A different card's 팀 Pick button clicked while
+    // this one was open — close it and fall through to open the new one,
+    // so switching cards still takes one click, not two.
+    if (wasSameItem) return;
   }
   const btn = ev.currentTarget;
   const rect = btn.getBoundingClientRect();
   teamPickMenuEl = document.createElement('div');
+  teamPickMenuItemId = itemId;
   teamPickMenuEl.className = 'team-pick-menu';
   teamPickMenuEl.style.top = `${rect.bottom + 4}px`;
   teamPickMenuEl.style.left = `${rect.left}px`;
@@ -1456,18 +1479,10 @@ async function renderArchive(query = {}) {
             <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
             <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds, teamPicksByItem)).join('')}</div>
           `).join('')}
-          <div class="pagination-controls">
-            ${offset > 0 ? `<button class="btn" id="archive-prev-page">이전 100개</button>` : ''}
-            ${itemsPage.hasMore ? `<button class="btn" id="archive-next-page">다음 100개</button>` : ''}
-          </div>
         </div>
       </div>
     </div>
   `;
-
-  const pageHash = (nextOffset) => '#/archive?' + toQuery({ ...query, offset: nextOffset }).slice(1);
-  document.getElementById('archive-prev-page')?.addEventListener('click', () => { location.hash = pageHash(Math.max(0, offset - 100)); });
-  document.getElementById('archive-next-page')?.addEventListener('click', () => { location.hash = pageHash(offset + 100); });
 
   // The month sidebar's smooth-scroll landing: the link already navigated
   // to whichever page/offset actually contains this month (see monthNavHtml
