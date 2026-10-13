@@ -5,6 +5,7 @@ const pool = require('../db/pool');
 // provider.callProviderWithFallback without a real network call, the same
 // way pool.query is swapped out below.
 const provider = require('../lib/ai/provider');
+const { createLimiter } = require('../lib/ai/concurrencyLimiter');
 
 const router = express.Router();
 
@@ -313,27 +314,38 @@ function withTimeout(promise, ms, onTimeout) {
 // Fails open (changes nothing) on any error, timeout, or unparseable
 // response: this is a quality layer on the base answer, never allowed to
 // block or break it.
-async function verifyCitations(text, candidates) {
+async function verifyCitations(text, candidates, signal) {
   const claims = splitClaimLines(text, candidates.length);
   if (!claims.length) return text;
   try {
     const timeoutMs = getVerificationTimeoutMs();
-    const result = await withTimeout(
-      provider.callProviderWithFallback({
-        system: VERIFICATION_SYSTEM_PROMPT,
-        user: buildVerificationPrompt(claims, candidates),
-      }),
-      timeoutMs,
-      () => { throw new Error(`citation verification timed out after ${timeoutMs}ms`); }
-    );
-    const unsupported = parseUnsupportedClaimNumbers(result.text, claims.length);
-    if (!unsupported.length) return text;
-    let corrected = text;
-    for (const n of unsupported) {
-      const { line } = claims[n - 1];
-      corrected = corrected.replace(line, line.replace(/\[\d{1,2}\]/g, '').trim());
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(signal.reason);
+    if (signal?.aborted) controller.abort(signal.reason);
+    signal?.addEventListener('abort', abortFromCaller, { once: true });
+    try {
+      const result = await withTimeout(
+        provider.callProviderWithFallback({
+          system: VERIFICATION_SYSTEM_PROMPT,
+          user: buildVerificationPrompt(claims, candidates),
+        }, { signal: controller.signal }),
+        timeoutMs,
+        () => {
+          controller.abort();
+          throw new Error(`citation verification timed out after ${timeoutMs}ms`);
+        }
+      );
+      const unsupported = parseUnsupportedClaimNumbers(result.text, claims.length);
+      if (!unsupported.length) return text;
+      let corrected = text;
+      for (const n of unsupported) {
+        const { line } = claims[n - 1];
+        corrected = corrected.replace(line, line.replace(/\[\d{1,2}\]/g, '').trim());
+      }
+      return corrected;
+    } finally {
+      signal?.removeEventListener('abort', abortFromCaller);
     }
-    return corrected;
   } catch (err) {
     console.error('ai-search citation verification failed:', err.message);
     return text;
@@ -346,8 +358,8 @@ async function verifyCitations(text, candidates) {
 // before ANY output reached the browser, doubling perceived latency on
 // every single request — now it only ever delays this final polish
 // step, never the first visible token (see the streaming path below).
-async function finalizeAnswer(rawText, candidates) {
-  const text = await verifyCitations(rawText, candidates);
+async function finalizeAnswer(rawText, candidates, signal) {
+  const text = await verifyCitations(rawText, candidates, signal);
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -375,7 +387,26 @@ function wantsStream(req) {
   return (req.get('accept') || '').includes('text/event-stream');
 }
 
-router.post('/', async (req, res) => {
+const searchLimiter = createLimiter(2, 0, 4);
+router.post('/', (req, res) => {
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!res.writableEnded) controller.abort(Object.assign(new Error('client disconnected'), { name: 'AbortError' }));
+  };
+  res.once('close', onClose);
+  searchLimiter((signal) => handleSearch(req, res, signal), controller.signal)
+    .catch((err) => {
+      if (controller.signal.aborted || res.destroyed || res.writableEnded) return;
+      if (err.code === 'LIMITER_QUEUE_FULL') {
+        return res.status(503).set('Retry-After', '2').json({ error: '검색 요청이 많습니다. 잠시 후 다시 시도해 주세요.' });
+      }
+      console.error('ai-search request failed:', err.message);
+      return res.status(500).json({ error: '검색 중 오류가 발생했습니다.' });
+    })
+    .finally(() => res.removeListener('close', onClose));
+});
+
+async function handleSearch(req, res, signal) {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
   const isFollowup = Array.isArray(req.body.history) && req.body.history.length > 0;
@@ -391,6 +422,7 @@ router.post('/', async (req, res) => {
   let candidates;
   try {
     candidates = await retrieveCandidates(question, req.body.history);
+    if (signal.aborted || res.destroyed) return;
   } catch (err) {
     console.error('ai-search retrieval failed:', err.message);
     const httpStatus = 500;
@@ -416,10 +448,11 @@ router.post('/', async (req, res) => {
     let text;
     let providerName;
     try {
-      const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user });
+      const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user }, { signal });
       text = result.text;
       providerName = result.provider;
     } catch (err) {
+      if (signal.aborted || res.destroyed) return;
       console.error('ai-search provider failed:', err.message);
       const httpStatus = 502;
       await recordSearchTelemetry({
@@ -428,7 +461,9 @@ router.post('/', async (req, res) => {
       });
       return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     }
-    const { answer, sources } = await finalizeAnswer(text, candidates);
+    if (signal.aborted || res.destroyed) return;
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal);
+    if (signal.aborted || res.destroyed) return;
     await recordSearchTelemetry({
       requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
       candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
@@ -451,7 +486,7 @@ router.post('/', async (req, res) => {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no', // disable any reverse-proxy response buffering, or token events arrive in one late burst
   });
-  const sendEvent = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const sendEvent = (event, data) => { if (!signal.aborted && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
   let rawText;
   let ttftMs = null;
@@ -459,12 +494,14 @@ router.post('/', async (req, res) => {
   try {
     const result = await provider.callProviderWithFallbackStreaming(
       { system: SYSTEM_PROMPT, user },
-      (delta) => sendEvent('token', { delta })
+      (delta) => sendEvent('token', { delta }),
+      { signal }
     );
     rawText = result.text;
     ttftMs = result.ttftMs;
     modelUsed = result.model;
   } catch (err) {
+    if (signal.aborted || res.destroyed) return;
     console.error('ai-search streaming provider failed:', err.message);
     sendEvent('error', { message: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     res.end();
@@ -476,7 +513,9 @@ router.post('/', async (req, res) => {
     return;
   }
 
-  const { answer, sources } = await finalizeAnswer(rawText, candidates);
+  if (signal.aborted || res.destroyed) return;
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal);
+  if (signal.aborted || res.destroyed) return;
   sendEvent('done', { answer, insufficient: false, sources });
   res.end();
   await recordSearchTelemetry({
