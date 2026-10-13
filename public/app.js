@@ -798,15 +798,26 @@ function renderInlineAnswerText(line, sources) {
   });
 }
 
+function normalizeAnswerMarkdown(rawAnswer) {
+  return String(rawAnswer || '')
+    // Some model responses escape Markdown markers even though this UI
+    // intentionally renders a small, safe Markdown subset.
+    .replace(/(^|\n)\\+(?=\s*#{1,6}\s)/g, '$1')
+    .replace(/(^|\n)\\+(?=\s*[*•-]\s)/g, '$1')
+    .replace(/(^|\n)\\+(?=\s*\d+[.)]\s)/g, '$1')
+    // The model sometimes uses a trailing backslash as a hard line break.
+    .replace(/\\(?=\s*(?:\n|$))/g, '');
+}
+
 function renderAnswerBlock(block, sources) {
   const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return '';
-  const headingMatch = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
+  const headingMatch = lines.length === 1 && lines[0].match(/^#{1,6}\s+(.*)$/);
   if (headingMatch) {
     return `<h3 class="ai-answer-heading">${renderInlineAnswerText(headingMatch[1], sources)}</h3>`;
   }
-  if (lines.every((l) => /^[-•]\s+/.test(l))) {
-    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
+  if (lines.every((l) => /^[-*•]\s+/.test(l))) {
+    return `<ul class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
   }
   if (lines.every((l) => /^\d+[.)]\s+/.test(l))) {
     return `<ol class="ai-answer-list">${lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^\d+[.)]\s+/, ''), sources)}</li>`).join('')}</ol>`;
@@ -815,9 +826,46 @@ function renderAnswerBlock(block, sources) {
 }
 
 function renderAnswerHtml(rawAnswer, sources) {
-  const stripped = String(rawAnswer || '').trim();
-  const blocks = stripped.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
-  return `<div class="ai-answer">${blocks.map((b) => renderAnswerBlock(b, sources)).join('')}</div>`;
+  const normalized = normalizeAnswerMarkdown(rawAnswer).trim();
+  const lines = normalized.split('\n');
+  const blocks = [];
+  let current = [];
+  let currentType = null;
+
+  const flush = () => {
+    if (current.length) blocks.push(current.join('\n'));
+    current = [];
+    currentType = null;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flush();
+      continue;
+    }
+    const type = /^#{1,6}\s+/.test(line)
+      ? 'heading'
+      : /^[-*•]\s+/.test(line)
+        ? 'unordered'
+        : /^\d+[.)]\s+/.test(line)
+          ? 'ordered'
+          : 'paragraph';
+
+    if (type === 'paragraph') {
+      if (currentType && currentType !== 'paragraph') flush();
+      currentType = 'paragraph';
+      current.push(line);
+      continue;
+    }
+
+    if (type !== currentType) flush();
+    currentType = type;
+    current.push(line);
+  }
+  flush();
+
+  return `<div class="ai-answer">${blocks.map((block) => renderAnswerBlock(block, sources)).join('')}</div>`;
 }
 
 // Compact citation chips — title/link indicator only, no dates/URLs/
