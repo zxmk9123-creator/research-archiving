@@ -1,3 +1,4 @@
+const { readResponseText } = require('../boundedResponse');
 // Web Research Discovery adapter — a bounded, scope-anchored search-API
 // lookup for exactly ONE fixed, hand-written query string. This is
 // deliberately NOT a crawler: it never follows a result's links, never
@@ -78,12 +79,12 @@ async function searchWeb(query, options = {}) {
       continue;
     }
     if (!res.ok) {
-      const bodyText = await res.text().catch(() => '');
+      const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
       console.error(`brave search failed: status ${res.status} keyPrefix=${apiKey.slice(0, 10)} body=${bodyText.slice(0, 300)}`);
       throw new Error(`search failed: ${res.status}`);
     }
     lastGoodKeyIndex = keys.indexOf(apiKey);
-    const data = await res.json();
+    const data = JSON.parse(await readResponseText(res, 1024 * 1024, 'search API response'));
 
     const rawResults = (data && data.web && Array.isArray(data.web.results)) ? data.web.results : [];
     return rawResults
