@@ -253,7 +253,10 @@ p { margin: 0; }
 .ai-answer-list { margin: 0 0 var(--sp-3); padding-left: 1.3em; }
 .ai-answer-list li { margin-bottom: 6px; }
 .ai-answer-sublist { margin: 4px 0 0; }
-.ai-answer-p:last-child, .ai-answer-list:last-child { margin-bottom: 0; }
+.ai-answer-table { width: 100%; margin: 0 0 var(--sp-3); border-collapse: collapse; font-size: 14px; }
+.ai-answer-table th, .ai-answer-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.ai-answer-table th { background: var(--surface-sunken); font-weight: 600; }
+.ai-answer-p:last-child, .ai-answer-list:last-child, .ai-answer-table:last-child { margin-bottom: 0; }
 
 /* Streamed answer, rendered through the same renderAnswerHtml() the final
    polished version uses (so it already carries .ai-answer's own

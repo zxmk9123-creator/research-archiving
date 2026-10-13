@@ -821,6 +821,28 @@ function renderAnswerBlock(block, sources) {
   if (block.type === 'unordered') {
     return `<ul class="ai-answer-list">${block.lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
   }
+  // Markdown table: "| 대상 | 적용일 |" style rows the model sometimes
+  // produces for comparison data (e.g. a company-size vs. deadline table),
+  // even though it's outside the small Markdown subset SYSTEM_PROMPT
+  // actually asks for. It used to fall through to the plain-paragraph
+  // case below, which just <br>-joined the raw "| ... | ... |" lines
+  // verbatim — showing the literal pipe syntax instead of a table. Real
+  // Markdown table syntax (a header row + a "|---|---|"-style separator
+  // row) now renders as an actual <table>; anything that merely looks
+  // like it has pipes but isn't a real table (no valid separator row)
+  // still falls back to the plain-paragraph rendering, never broken HTML.
+  if (block.type === 'table') {
+    const rows = block.lines.map((l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()));
+    const isSeparatorRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-{1,}:?$/.test(c));
+    if (rows.length >= 2 && isSeparatorRow(rows[1])) {
+      const header = rows[0];
+      const body = rows.slice(2);
+      return `<table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderInlineAnswerText(c, sources)}</th>`).join('')}</tr></thead><tbody>${
+        body.map((r) => `<tr>${r.map((c) => `<td>${renderInlineAnswerText(c, sources)}</td>`).join('')}</tr>`).join('')
+      }</tbody></table>`;
+    }
+    return `<p class="ai-answer-p">${block.lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
+  }
   // Production bug: "1. A" / "* detail" / "1. PVOIL" / "* detail" (the model
   // restarting numbering at 1 for every item once its own detail bullet
   // breaks up the list) used to split into four separate single-item
@@ -866,7 +888,9 @@ function renderAnswerHtml(rawAnswer, sources) {
         ? 'unordered'
         : /^\d+[.)]\s+/.test(line)
           ? 'ordered'
-          : 'paragraph';
+          : /^\|.*\|$/.test(line)
+            ? 'table'
+            : 'paragraph';
 
     if (type === 'paragraph') {
       if (currentType && currentType !== 'paragraph') flush();
