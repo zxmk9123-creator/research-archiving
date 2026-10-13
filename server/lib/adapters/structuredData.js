@@ -12,6 +12,7 @@
 // file — exactly the untrusted-input path those advisories are about.
 const ExcelJS = require('exceljs');
 const { safeFetch } = require('../safeUrl');
+const { readResponseBuffer } = require('../boundedResponse');
 
 const SHEET_NAME = 'Monthly Prices';
 // 1-indexed row numbers (exceljs convention) — row 5 holds commodity
@@ -111,7 +112,7 @@ async function fetchAndParse(url) {
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = await readResponseBuffer(res, 25 * 1024 * 1024, 'structured data workbook');
   return parseWorkbook(buffer);
 }
 
