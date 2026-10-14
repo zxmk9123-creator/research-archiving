@@ -1305,15 +1305,26 @@ async function renderDailyStatusBar() {
   try {
     const status = await api('/sources/daily-discovery-status');
     const dotClass = status.completedToday ? 'ok' : 'pending';
-    const text = status.completedToday
-      ? `오늘 기사 수집 완료 · 발견 ${status.totals?.discovered ?? 0}건 / 신규 ${status.totals?.archived ?? 0}건${status.failedSources?.length ? ` (실패 소스 ${status.failedSources.length}건)` : ''}`
-      : '오늘 기사 수집 미완료 (08:00 KST 예정)';
+    const text = status.completedToday ? '오늘 기사 수집 완료' : '오늘 기사 수집 미완료';
     bar.innerHTML = `<span class="daily-status-dot ${dotClass}"></span><span>${text}</span>`;
     bar.hidden = false;
+    alignDailyStatusBarWithGuideLink();
   } catch (err) {
     bar.hidden = true;
   }
 }
+
+// Left edge of the status line lines up with the left edge of "사용
+// 가이드" above it, rather than right-justifying the whole row — the
+// guide link's own width varies, so this is computed from its actual
+// rendered position rather than a fixed CSS offset.
+function alignDailyStatusBarWithGuideLink() {
+  const bar = document.getElementById('daily-status-bar');
+  const guideBtn = document.getElementById('nav-guide-btn');
+  if (!bar || !guideBtn || bar.hidden) return;
+  bar.style.paddingLeft = `${guideBtn.getBoundingClientRect().left}px`;
+}
+window.addEventListener('resize', alignDailyStatusBarWithGuideLink);
 
 async function renderArchive(query = {}) {
   // scrollTo is a transient hash param (set by the month sidebar below, see

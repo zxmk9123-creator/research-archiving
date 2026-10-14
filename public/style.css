@@ -112,17 +112,16 @@ body {
 .topbar-guide-link:hover { text-decoration: underline; }
 .topbar-guide-link svg { flex-shrink: 0; }
 
-/* Home-only status line: a green/red dot + a one-line log of today's
-   (KST) Daily Discovery collection. Lives below the topbar (not inside
-   it, which would grow the sticky header's own height) but right-aligned
-   to echo "사용 가이드" above it, and with no background/border of its
-   own — just a slim line in the page's own top padding. */
+/* Home-only status line: a green/red dot + a one-line completed/not-yet
+   log for today's (KST) Daily Discovery run. Lives below the topbar (not
+   inside it, which would grow the sticky header's own height), with no
+   background/border of its own — just a slim line in the page's own top
+   padding. Its left edge is set from JS (alignDailyStatusBarWithGuideLink)
+   to match "사용 가이드"'s own left edge, since that link's width varies
+   with its text/icon and can't be matched with a fixed CSS offset. */
 .daily-status-bar {
-  display: flex; justify-content: flex-end; align-items: center; gap: 6px;
-  padding: 6px 28px 0; font-size: 12px; color: var(--text-tertiary);
-}
-@media (max-width: 480px) {
-  .daily-status-bar { padding: 6px 12px 0; }
+  display: flex; align-items: center; gap: 6px;
+  padding-top: 6px; font-size: 12px; color: var(--text-tertiary);
 }
 .daily-status-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
