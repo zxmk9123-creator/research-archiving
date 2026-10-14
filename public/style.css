@@ -116,11 +116,12 @@ body {
    log for today's (KST) Daily Discovery run. Lives below the topbar (not
    inside it, which would grow the sticky header's own height), with no
    background/border of its own — just a slim line in the page's own top
-   padding. Its left edge is set from JS (alignDailyStatusBarWithGuideLink)
-   to match "사용 가이드"'s own left edge, since that link's width varies
-   with its text/icon and can't be matched with a fixed CSS offset. */
+   padding. Its right edge is set from JS (alignDailyStatusBarWithGuideLink)
+   to match "사용 가이드"'s own right edge (the end of "드"), since that
+   link's width varies with viewport size and can't be matched with a
+   fixed CSS offset. */
 .daily-status-bar {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; justify-content: flex-end; align-items: center; gap: 6px;
   padding-top: 6px; font-size: 12px; color: var(--text-tertiary);
 }
 .daily-status-dot {

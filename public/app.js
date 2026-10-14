@@ -1314,15 +1314,15 @@ async function renderDailyStatusBar() {
   }
 }
 
-// Left edge of the status line lines up with the left edge of "사용
-// 가이드" above it, rather than right-justifying the whole row — the
-// guide link's own width varies, so this is computed from its actual
-// rendered position rather than a fixed CSS offset.
+// Right edge of the status line lines up with the right edge of "사용
+// 가이드" (the end of "드") above it — the guide link's own width varies
+// with viewport size, so this is computed from its actual rendered
+// position rather than a fixed CSS offset.
 function alignDailyStatusBarWithGuideLink() {
   const bar = document.getElementById('daily-status-bar');
   const guideBtn = document.getElementById('nav-guide-btn');
   if (!bar || !guideBtn || bar.hidden) return;
-  bar.style.paddingLeft = `${guideBtn.getBoundingClientRect().left}px`;
+  bar.style.paddingRight = `${window.innerWidth - guideBtn.getBoundingClientRect().right}px`;
 }
 window.addEventListener('resize', alignDailyStatusBarWithGuideLink);
 
