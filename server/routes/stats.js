@@ -55,10 +55,24 @@
 // shape below.
 const express = require('express');
 const pool = require('../db/pool');
+const { kstPartsOf } = require('../lib/dailyDiscovery');
 
 const router = express.Router();
 
 const COLLECTION_WINDOW_DAYS = 7;
+
+// "금일 수집량": a KST calendar-day window (00:00–24:00 KST), not the
+// rolling 7×24h UTC window perSource above uses — the Home status bar and
+// Daily Discovery both already reason about "today" in KST (see
+// dailyDiscovery.js's own isDailyDiscoveryHourKst), so the Ops dashboard's
+// "today" should mean the same calendar day an operator actually means by
+// it, not whatever day UTC happens to be at request time.
+function todayKstBoundsUtc(now = new Date()) {
+  const { date } = kstPartsOf(now);
+  const start = new Date(`${date}T00:00:00+09:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
 
 async function settleSection(promise) {
   try {
@@ -72,8 +86,9 @@ async function settleSection(promise) {
 router.get('/overview', async (req, res) => {
   const generatedAt = new Date();
   const windowStart = new Date(generatedAt.getTime() - COLLECTION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const { start: todayStart, end: todayEnd } = todayKstBoundsUtc(generatedAt);
 
-  const [backlogSection, aiFailureSection, sourceErrorSection, perSourceSection] = await Promise.all([
+  const [backlogSection, aiFailureSection, sourceErrorSection, perSourceSection, todaySection] = await Promise.all([
     settleSection(pool.query(`
       SELECT ai_status, count(*)::int AS cnt
       FROM items
@@ -107,6 +122,13 @@ router.get('/overview', async (req, res) => {
       GROUP BY s.id, s.name, s.method
       ORDER BY collected DESC, s.name ASC
     `, [windowStart.toISOString(), generatedAt.toISOString()])),
+    settleSection(pool.query(`
+      SELECT count(*)::int AS cnt
+      FROM items i
+      JOIN sources s ON s.id = i.source_id
+      WHERE s.method IN ('rss', 'crawl', 'institution', 'structured')
+        AND i.collected_at >= $1 AND i.collected_at < $2
+    `, [todayStart.toISOString(), todayEnd.toISOString()])),
   ]);
 
   const backlogByAiStatus = Object.fromEntries(backlogSection.rows.map((r) => [r.ai_status || 'null', r.cnt]));
@@ -127,6 +149,8 @@ router.get('/overview', async (req, res) => {
     cnt: r.cnt,
   }));
 
+  const todayCollected = todaySection.rows[0]?.cnt ?? 0;
+
   res.json({
     basis: {
       collectionWindow: {
@@ -135,6 +159,12 @@ router.get('/overview', async (req, res) => {
         start: windowStart.toISOString(),
         end: generatedAt.toISOString(),
       },
+      todayWindow: {
+        kind: 'kst_calendar_day', // 00:00–24:00 KST, not UTC — matches Daily Discovery's own "today"
+        start: todayStart.toISOString(),
+        end: todayEnd.toISOString(),
+      },
+      todayCollectedDefinition: 'items actually inserted (post relevance-filter, post dedup) with collected_at inside today\'s KST calendar day — same scope as perSourceCollectedDefinition, different window',
       backlogDefinition: "status = 'Draft'",
       backlogPartitionedBy: 'ai_status (mutually exclusive, sums to backlog.total)',
       aiFailureReasonsScope: "status = 'Draft' AND ai_status = 'failed' (sums to backlog.byAiStatus.failed; a NULL ai_failure_type — an application-level failure, never a transport/provider one — is reported as 'unclassified', not dropped)",
@@ -151,6 +181,7 @@ router.get('/overview', async (req, res) => {
     aiFailureReasons: { rows: aiFailureReasons, ok: aiFailureSection.ok, error: aiFailureSection.ok ? null : aiFailureSection.error },
     sourceErrors: { rows: sourceErrorSection.rows, ok: sourceErrorSection.ok, error: sourceErrorSection.ok ? null : sourceErrorSection.error },
     perSource: { rows: perSourceSection.rows, ok: perSourceSection.ok, error: perSourceSection.ok ? null : perSourceSection.error },
+    today: { collected: todayCollected, ok: todaySection.ok, error: todaySection.ok ? null : todaySection.error },
   });
 });
 

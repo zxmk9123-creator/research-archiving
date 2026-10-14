@@ -149,6 +149,40 @@ test('GET /overview: returns per-source collected/published/ai_failed counts for
   }
 }));
 
+test('GET /overview: today\'s collection count is scoped to a KST calendar day, not UTC', () => withServer(async (base) => {
+  const restore = mockPool([
+    ['FROM items i\n      JOIN sources s', () => ({ rows: [{ cnt: 23 }] })],
+  ]);
+  try {
+    const res = await fetch(`${base}/overview`);
+    const body = await res.json();
+    assert.equal(body.today.collected, 23);
+    assert.equal(body.today.ok, true);
+    assert.equal(body.basis.todayWindow.kind, 'kst_calendar_day');
+    // exactly 24h span, and the start must land on a KST midnight (15:00 UTC the prior day, or 00:00 UTC — KST is UTC+9).
+    const spanMs = new Date(body.basis.todayWindow.end) - new Date(body.basis.todayWindow.start);
+    assert.equal(spanMs, 24 * 60 * 60 * 1000);
+  } finally {
+    restore();
+  }
+}));
+
+test('GET /overview: a failing today-count section degrades only that section', () => withServer(async (base) => {
+  const restore = mockPool([
+    ['FROM items i\n      JOIN sources s', () => { throw new Error('db timeout'); }],
+  ]);
+  try {
+    const res = await fetch(`${base}/overview`);
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(body.today.ok, false);
+    assert.match(body.today.error, /db timeout/);
+    assert.equal(body.today.collected, 0);
+  } finally {
+    restore();
+  }
+}));
+
 test('GET /overview: one failing section degrades only that section, not the whole response', () => withServer(async (base) => {
   const restore = mockPool([
     [`WHERE status = 'Draft'\n      GROUP BY ai_status`, () => ({ rows: [{ ai_status: 'completed', cnt: 5 }] })],

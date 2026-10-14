@@ -2196,7 +2196,7 @@ function opsSectionErrorRow(colspan, error) {
 }
 
 function renderOpsHtml(stats) {
-  const { basis, backlog, aiFailureReasons, sourceErrors, perSource } = stats;
+  const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
   const backlogRows = backlog.ok
     ? Object.entries(backlog.byAiStatus).map(([k, v]) => `<tr><td>${k === 'null' ? '요청 안 함' : k}</td><td>${v}</td></tr>`).join('')
@@ -2237,6 +2237,7 @@ function renderOpsHtml(stats) {
         미검수 적체량은 <code>${basis.backlogDefinition}</code> 전체를 ai_status별로 나눈 것(상호 배타적, 합계=적체량 총수)이고,
         AI 실패 원인은 그중 <code>${basis.aiFailureReasonsScope}</code>만 셉니다.<br>
         소스별 수집량·품질은 ${basis.collectionWindow.start} ~ ${basis.collectionWindow.end} (UTC 기준 ${basis.collectionWindow.days}×24시간, 현지 날짜·시간대 아님) 동안 실제로 저장된(중복 제거 후) 건수입니다.<br>
+        금일 수집량은 ${basis.todayWindow.start} ~ ${basis.todayWindow.end} (KST 00:00~24:00 달력일 기준 — UTC 날짜 아님, Daily Discovery의 "오늘"과 동일 기준) 동안 실제로 저장된(중복 제거 후) 건수입니다.<br>
         소스 오류는 각 소스의 가장 최근 실행 결과만 반영하며, 다음 성공 시 자동으로 지워집니다.
       </p>
     </details>
@@ -2245,6 +2246,7 @@ function renderOpsHtml(stats) {
       <div class="ops-stat"><span class="ops-stat-value">${backlog.ok ? backlog.total : '-'}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>
       <div class="ops-stat"><span class="ops-stat-value">${sourceErrorCount}</span><span class="ops-stat-label">현재 오류 상태 소스</span></div>
       <div class="ops-stat"><span class="ops-stat-value">${windowCollected}</span><span class="ops-stat-label">최근 ${basis.collectionWindow.days}일 수집량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${today.ok ? today.collected : '-'}</span><span class="ops-stat-label">금일 수집량 (KST)</span></div>
     </div>
 
     <div class="section">
