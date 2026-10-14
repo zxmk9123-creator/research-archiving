@@ -124,6 +124,11 @@ body {
   display: flex; justify-content: flex-end; align-items: center; gap: 6px;
   padding-top: 6px; font-size: 12px; color: var(--text-tertiary);
 }
+/* The class rule above's `display: flex` otherwise beats the browser's
+   own [hidden]{display:none} default (same specificity, declared later),
+   so the status bar stayed visible on every route, not just Home, despite
+   router() setting the hidden attribute correctly. */
+.daily-status-bar[hidden] { display: none; }
 .daily-status-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
 }
