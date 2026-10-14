@@ -4,6 +4,7 @@ const express = require('express');
 const pool = require('../server/db/pool');
 const sourcesRouter = require('../server/routes/sources');
 const { SESSION_COOKIE, issueSessionToken } = require('../server/lib/auth');
+const dailyDiscoveryModule = require('../server/lib/dailyDiscovery');
 
 // Same live-server harness convention as itemsRoute.test.js, including the
 // auto-authenticating global fetch wrapper (requireAuth now guards every
@@ -215,6 +216,69 @@ test('PATCH /:id: a source whose method is an ingestion method can still be edit
       const updateCall = calls.find((c) => c.text.includes('UPDATE sources SET'));
       assert.ok(!updateCall.text.includes('is_reference'));
       assert.ok(!updateCall.text.includes('sector_links'));
+    });
+  } finally {
+    restore();
+  }
+});
+
+// Production gap: the Railway-native cron and the in-process setInterval
+// scheduler could both reach a daily_discovery run around 08:00 KST on the
+// same day — this route must go through maybeRunDailyDiscovery()'s
+// once-per-day claim (not the unconditional collectDailyDiscoveryNow()
+// /trigger-daily-discovery-now uses), so only one of them actually runs
+// the collection.
+function mockDailyDiscoveryModule(fnName, handler) {
+  const original = dailyDiscoveryModule[fnName];
+  dailyDiscoveryModule[fnName] = handler;
+  return () => { dailyDiscoveryModule[fnName] = original; };
+}
+
+test('POST /run-scheduled-daily-discovery: delegates to maybeRunDailyDiscovery (the claim-gated path), not the unconditional collectDailyDiscoveryNow', async () => {
+  let called = 0;
+  const restore = mockDailyDiscoveryModule('maybeRunDailyDiscovery', async () => {
+    called++;
+    return { ran: true, totals: { discovered: 1, archived: 0, filtered: 0, failed: 0, failedSources: 0 } };
+  });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/run-scheduled-daily-discovery`, { method: 'POST' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ran, true);
+      assert.equal(called, 1);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('POST /run-scheduled-daily-discovery: a same-day second caller (e.g. the cron firing right after the in-process scheduler already claimed today) gets ran:false, not a second collection run', async () => {
+  const restore = mockDailyDiscoveryModule('maybeRunDailyDiscovery', async () => ({ ran: false, reason: 'already_ran_today' }));
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/run-scheduled-daily-discovery`, { method: 'POST' });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ran, false);
+      assert.equal(body.reason, 'already_ran_today');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('POST /trigger-daily-discovery-now: still bypasses the once-per-day claim (ad-hoc/manual path, unchanged)', async () => {
+  let called = 0;
+  const restore = mockDailyDiscoveryModule('collectDailyDiscoveryNow', async () => {
+    called++;
+    return { totals: { discovered: 0, archived: 0, filtered: 0, failed: 0, failedSources: 0 }, results: [] };
+  });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/trigger-daily-discovery-now`, { method: 'POST' });
+      assert.equal(res.status, 200);
+      assert.equal(called, 1);
     });
   } finally {
     restore();

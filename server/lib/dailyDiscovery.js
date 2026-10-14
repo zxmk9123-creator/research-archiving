@@ -109,14 +109,33 @@ async function collectDailyDiscoveryNow() {
   return { totals, results };
 }
 
-// The scheduler entry point: checked on the existing hourly interval,
-// no-ops outside the 08:00 KST hour or if today's run was already claimed.
+// The scheduler entry point: checked on the existing hourly interval (and
+// now also by the Railway-native cron hitting POST /sources/run-scheduled-
+// daily-discovery, see sources.js) — no-ops outside the 08:00 KST hour or
+// if today's run was already claimed. claimDailyDiscoveryRunForToday()'s
+// atomic UPDATE...WHERE is what actually prevents a double run when BOTH
+// callers reach this function around the same time: only one of them gets
+// `claimed === true`; the other sees already_ran_today and returns
+// immediately without starting a second collection. A caller that wants
+// to force a run regardless of this once-per-day gate (the "크롤링 지금
+// 해줘" ad-hoc case) uses collectDailyDiscoveryNow() directly instead —
+// that path intentionally bypasses this claim and is never wired to the
+// scheduled cron.
 async function maybeRunDailyDiscovery(now = new Date()) {
   if (!isDailyDiscoveryHourKst(now)) return { ran: false, reason: 'not_due_hour' };
   const claimed = await claimDailyDiscoveryRunForToday(now);
   if (!claimed) return { ran: false, reason: 'already_ran_today' };
+  // run_started logged as its own line, separate from run_completed, so a
+  // run that crashes/times out partway still leaves a trace distinguishing
+  // "never started" from "started but never finished" — previously only
+  // run_completed was logged, so an incomplete run was invisible.
+  console.log('daily_discovery run_started');
   const result = await collectDailyDiscoveryNow();
   console.log(`daily_discovery run_completed ${JSON.stringify(result.totals)}`);
+  const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  if (failedSources.length) {
+    console.log(`daily_discovery failed_sources ${JSON.stringify(failedSources)}`);
+  }
   return { ran: true, ...result };
 }
 

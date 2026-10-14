@@ -2,7 +2,12 @@ const express = require('express');
 const pool = require('../db/pool');
 const { collectBySource, runDueCollections, collectAllSourcesNow } = require('../lib/collector');
 const { collectWebDiscoverySource } = require('../lib/webDiscoveryIngest');
-const { collectDailyDiscoveryNow } = require('../lib/dailyDiscovery');
+// Accessed via the module object (not destructured) so tests can mock
+// dailyDiscoveryModule.maybeRunDailyDiscovery without a real DB/collection
+// run — same convention collector.js's own extractMetadataModule usage
+// already relies on (a destructured reference is captured at require()
+// time and can't be monkey-patched afterward).
+const dailyDiscoveryModule = require('../lib/dailyDiscovery');
 const { requireAuth } = require('../lib/auth');
 const { extractMetadata } = require('../lib/extractMetadata');
 const { suggestSourceMetadata } = require('../lib/sourceMetadataSuggest');
@@ -46,8 +51,33 @@ router.post('/extract-metadata', requireAuth, async (req, res) => {
 // dailyDiscoverySearchOptions() per source, so is_archive_discovery
 // sources correctly get itemType='보고서' and no freshness bias.
 router.post('/trigger-daily-discovery-now', requireAuth, async (req, res) => {
-  const result = await collectDailyDiscoveryNow();
+  console.log('daily_discovery manual_run_started');
+  const result = await dailyDiscoveryModule.collectDailyDiscoveryNow();
   console.log(`daily_discovery manual_run_completed ${JSON.stringify(result.totals)}`);
+  const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  if (failedSources.length) {
+    console.log(`daily_discovery manual_run_failed_sources ${JSON.stringify(failedSources)}`);
+  }
+  res.json(result);
+});
+
+// Production gap: an external scheduler (Railway's native cron, which this
+// is actually wired to — see the daily-discovery-cron Railway service)
+// hitting the unconditional route above on the same day the in-process
+// setInterval scheduler also fires would run collectDailyDiscoveryNow()
+// TWICE — doubling API usage and item processing for no benefit, and a
+// retried/duplicated cron request could do the same thing again within
+// the same run. This route goes through maybeRunDailyDiscovery() instead
+// — the exact same once-per-KST-day atomic claim
+// (claimDailyDiscoveryRunForToday) the in-process scheduler itself uses —
+// so whichever of the two callers (this route or the setInterval tick)
+// reaches the claim first does the real run; the other gets back
+// { ran: false, reason: 'already_ran_today' } immediately. The
+// unconditional /trigger-daily-discovery-now route above stays as-is for
+// genuine on-demand/ad-hoc runs (e.g. "오늘자 크롤링 다시 해줘" outside
+// the 08:00 hour) — only the scheduled cron should ever call this one.
+router.post('/run-scheduled-daily-discovery', requireAuth, async (req, res) => {
+  const result = await dailyDiscoveryModule.maybeRunDailyDiscovery();
   res.json(result);
 });
 
