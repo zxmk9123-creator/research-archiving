@@ -121,6 +121,25 @@ async function collectDailyDiscoveryNow() {
 // 해줘" ad-hoc case) uses collectDailyDiscoveryNow() directly instead —
 // that path intentionally bypasses this claim and is never wired to the
 // scheduled cron.
+// Shared by the scheduled path and the ad-hoc manual-trigger route (see
+// sources.js) — whichever path actually ran collectDailyDiscoveryNow(),
+// the Home status bar should reflect it the same way. Writing to
+// scheduler_jobs here (job_name's row already exists — it's upserted by
+// claimDailyDiscoveryRunForToday on the scheduled path, and seeded by the
+// schema's own INSERT/UPDATE guard otherwise) is an UPSERT, not a bare
+// UPDATE, so a manual run on a day the scheduled claim hasn't touched yet
+// still records completion instead of silently no-oping.
+async function recordDailyDiscoveryCompletion(result) {
+  const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  await pool.query(
+    `INSERT INTO scheduler_jobs (job_name, last_completed_at, last_totals, last_failed_sources)
+     VALUES ($1, now(), $2, $3)
+     ON CONFLICT (job_name) DO UPDATE SET last_completed_at = now(), last_totals = $2, last_failed_sources = $3`,
+    [JOB_NAME, JSON.stringify(result.totals), JSON.stringify(failedSources)]
+  );
+  return failedSources;
+}
+
 async function maybeRunDailyDiscovery(now = new Date()) {
   if (!isDailyDiscoveryHourKst(now)) return { ran: false, reason: 'not_due_hour' };
   const claimed = await claimDailyDiscoveryRunForToday(now);
@@ -132,14 +151,10 @@ async function maybeRunDailyDiscovery(now = new Date()) {
   console.log('daily_discovery run_started');
   const result = await collectDailyDiscoveryNow();
   console.log(`daily_discovery run_completed ${JSON.stringify(result.totals)}`);
-  const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  const failedSources = await recordDailyDiscoveryCompletion(result);
   if (failedSources.length) {
     console.log(`daily_discovery failed_sources ${JSON.stringify(failedSources)}`);
   }
-  await pool.query(
-    `UPDATE scheduler_jobs SET last_completed_at = now(), last_totals = $1, last_failed_sources = $2 WHERE job_name = $3`,
-    [JSON.stringify(result.totals), JSON.stringify(failedSources), JOB_NAME]
-  );
   return { ran: true, ...result };
 }
 
@@ -168,6 +183,7 @@ module.exports = {
   isDailyDiscoveryHourKst,
   claimDailyDiscoveryRunForToday,
   collectDailyDiscoveryNow,
+  recordDailyDiscoveryCompletion,
   maybeRunDailyDiscovery,
   getDailyDiscoveryStatus,
   isAcademicLiteratureQuery,

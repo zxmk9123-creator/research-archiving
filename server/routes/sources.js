@@ -54,7 +54,9 @@ router.post('/trigger-daily-discovery-now', requireAuth, async (req, res) => {
   console.log('daily_discovery manual_run_started');
   const result = await dailyDiscoveryModule.collectDailyDiscoveryNow();
   console.log(`daily_discovery manual_run_completed ${JSON.stringify(result.totals)}`);
-  const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  // Recorded the same way the scheduled path does (recordDailyDiscoveryCompletion)
+  // so the Home status bar reflects an ad-hoc run too, not just the 08:00 one.
+  const failedSources = await dailyDiscoveryModule.recordDailyDiscoveryCompletion(result);
   if (failedSources.length) {
     console.log(`daily_discovery manual_run_failed_sources ${JSON.stringify(failedSources)}`);
   }

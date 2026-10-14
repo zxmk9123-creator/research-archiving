@@ -270,17 +270,26 @@ test('POST /run-scheduled-daily-discovery: a same-day second caller (e.g. the cr
 
 test('POST /trigger-daily-discovery-now: still bypasses the once-per-day claim (ad-hoc/manual path, unchanged)', async () => {
   let called = 0;
-  const restore = mockDailyDiscoveryModule('collectDailyDiscoveryNow', async () => {
+  let recorded = 0;
+  const restoreCollect = mockDailyDiscoveryModule('collectDailyDiscoveryNow', async () => {
     called++;
     return { totals: { discovered: 0, archived: 0, filtered: 0, failed: 0, failedSources: 0 }, results: [] };
+  });
+  const restoreRecord = mockDailyDiscoveryModule('recordDailyDiscoveryCompletion', async () => {
+    recorded++;
+    return [];
   });
   try {
     await withServer(async (base) => {
       const res = await fetch(`${base}/trigger-daily-discovery-now`, { method: 'POST' });
       assert.equal(res.status, 200);
       assert.equal(called, 1);
+      // The Home status bar's green light must reflect an ad-hoc run too,
+      // not just the scheduled one — this is what fixed it.
+      assert.equal(recorded, 1);
     });
   } finally {
-    restore();
+    restoreCollect();
+    restoreRecord();
   }
 });
