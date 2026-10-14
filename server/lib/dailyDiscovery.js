@@ -136,7 +136,31 @@ async function maybeRunDailyDiscovery(now = new Date()) {
   if (failedSources.length) {
     console.log(`daily_discovery failed_sources ${JSON.stringify(failedSources)}`);
   }
+  await pool.query(
+    `UPDATE scheduler_jobs SET last_completed_at = now(), last_totals = $1, last_failed_sources = $2 WHERE job_name = $3`,
+    [JSON.stringify(result.totals), JSON.stringify(failedSources), JOB_NAME]
+  );
   return { ran: true, ...result };
+}
+
+// Home status-bar read model: today's (KST) completion state for the
+// green/red light, without exposing claimDailyDiscoveryRunForToday()'s
+// internal claim mechanics to the route layer.
+async function getDailyDiscoveryStatus(now = new Date()) {
+  const today = kstPartsOf(now).date;
+  const { rows } = await pool.query(
+    `SELECT last_run_date, last_completed_at, last_totals, last_failed_sources FROM scheduler_jobs WHERE job_name = $1`,
+    [JOB_NAME]
+  );
+  const row = rows[0];
+  if (!row) return { completedToday: false, totals: null, failedSources: [], completedAt: null };
+  const completedToday = Boolean(row.last_completed_at) && kstPartsOf(row.last_completed_at).date === today;
+  return {
+    completedToday: Boolean(completedToday),
+    totals: completedToday ? row.last_totals : null,
+    failedSources: completedToday ? (row.last_failed_sources || []) : [],
+    completedAt: completedToday ? row.last_completed_at : null,
+  };
 }
 
 module.exports = {
@@ -145,6 +169,7 @@ module.exports = {
   claimDailyDiscoveryRunForToday,
   collectDailyDiscoveryNow,
   maybeRunDailyDiscovery,
+  getDailyDiscoveryStatus,
   isAcademicLiteratureQuery,
   dailyDiscoverySearchOptions,
 };

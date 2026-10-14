@@ -338,6 +338,16 @@ CREATE TABLE IF NOT EXISTS scheduler_jobs (
   last_run_date DATE
 );
 
+-- Completion record for the Home status bar (green/red light + today's
+-- collection log). last_run_date above only marks that a run was claimed,
+-- not that it finished — these columns are written once collectDailyDiscoveryNow()
+-- actually returns, so a run that crashes partway leaves last_run_date set
+-- but last_completed_at still behind, which the status route reports as
+-- "미완료" rather than falsely green.
+ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_completed_at TIMESTAMPTZ;
+ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_totals JSONB;
+ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_failed_sources JSONB;
+
 -- Seed the Discovery Query Registry's initial 12 queries (4 pre-existing +
 -- 8 new) covering commodity/market news, logistics/shipping, regulation/
 -- policy, major-company/IR, and reports/research papers. Idempotent by

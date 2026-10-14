@@ -1291,6 +1291,28 @@ async function renderHome() {
   if (aiSearchTurnsHtml.length) {
     document.getElementById('ai-search-result').innerHTML = aiSearchTurnsHtml.join('');
   }
+  renderDailyStatusBar();
+}
+
+// Green/red light + today's (KST) Daily Discovery log, just under the
+// topbar — Home only (hidden on every other route by router()). A failed
+// status fetch leaves the bar hidden rather than showing a false red
+// light, since "couldn't check" and "collection didn't run" are different
+// things.
+async function renderDailyStatusBar() {
+  const bar = document.getElementById('daily-status-bar');
+  if (!bar) return;
+  try {
+    const status = await api('/sources/daily-discovery-status');
+    const dotClass = status.completedToday ? 'ok' : 'pending';
+    const text = status.completedToday
+      ? `오늘 기사 수집 완료 · 발견 ${status.totals?.discovered ?? 0}건 / 신규 ${status.totals?.archived ?? 0}건${status.failedSources?.length ? ` (실패 소스 ${status.failedSources.length}건)` : ''}`
+      : '오늘 기사 수집 미완료 (08:00 KST 예정)';
+    bar.innerHTML = `<span class="daily-status-dot ${dotClass}"></span><span>${text}</span>`;
+    bar.hidden = false;
+  } catch (err) {
+    bar.hidden = true;
+  }
 }
 
 async function renderArchive(query = {}) {
@@ -3083,6 +3105,8 @@ async function router() {
   // timers before the next page's render replaces app.innerHTML — otherwise
   // they keep firing against detached DOM.
   clearHomeCarouselIntervals();
+  const statusBar = document.getElementById('daily-status-bar');
+  if (statusBar && path !== 'home' && path !== '') statusBar.hidden = true;
   try {
     if (path === 'home' || path === '') await renderHome();
     else if (path === 'archive') await renderArchive(query);

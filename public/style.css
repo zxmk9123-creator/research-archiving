@@ -112,6 +112,24 @@ body {
 .topbar-guide-link:hover { text-decoration: underline; }
 .topbar-guide-link svg { flex-shrink: 0; }
 
+/* Home-only status bar just under the topbar's bottom border: a
+   green/red dot + a one-line log of today's (KST) Daily Discovery
+   collection. Roomier than a typical meta row (per spec, "조금
+   널널하게") since it's the first thing a visitor sees under the nav. */
+.daily-status-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 28px; background: var(--surface-sunken); border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--text-secondary);
+}
+.daily-status-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+}
+.daily-status-dot.ok { background: var(--success); }
+.daily-status-dot.pending { background: var(--danger); }
+@media (max-width: 480px) {
+  .daily-status-bar { padding: 10px 12px; }
+}
+
 /* Nav split into two role groups — reader-facing (Home/자료) vs
    operator-facing (Sources/Review) — separated by a visible divider so
    a first-time visitor isn't handed curator screens on equal footing

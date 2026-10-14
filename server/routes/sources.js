@@ -81,6 +81,14 @@ router.post('/run-scheduled-daily-discovery', requireAuth, async (req, res) => {
   res.json(result);
 });
 
+// Home status-bar read model: today's (KST) Daily Discovery completion
+// state, for the green/red light. Public like GET / above — it's just a
+// status display, not an admin action.
+router.get('/daily-discovery-status', async (req, res) => {
+  const status = await dailyDiscoveryModule.getDailyDiscoveryStatus();
+  res.json(status);
+});
+
 // Manual trigger: run all due RSS sources now.
 router.post('/collect', requireAuth, async (req, res) => {
   const results = await runDueCollections();
