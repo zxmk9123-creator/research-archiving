@@ -113,16 +113,20 @@ body {
 .topbar-guide-link svg { flex-shrink: 0; }
 
 /* Home-only status line: a green/red dot + a one-line completed/not-yet
-   log for today's (KST) Daily Discovery run. Lives below the topbar (not
-   inside it, which would grow the sticky header's own height), with no
-   background/border of its own — just a slim line in the page's own top
-   padding. Its right edge is set from JS (alignDailyStatusBarWithGuideLink)
-   to match "사용 가이드"'s own right edge (the end of "드"), since that
-   link's width varies with viewport size and can't be matched with a
-   fixed CSS offset. */
+   log for today's (KST) Daily Discovery run. Absolutely positioned
+   against .topbar (position: sticky still establishes a containing
+   block) instead of sitting in normal document flow below it — an
+   in-flow element here claimed its own row and pushed every page's
+   content down by its height. right: 28px mirrors .topbar's own
+   padding so it lines up with "사용 가이드"'s right edge without needing
+   to measure it in JS. */
 .daily-status-bar {
-  display: flex; justify-content: flex-end; align-items: center; gap: 6px;
+  position: absolute; top: 100%; right: 28px;
+  display: flex; align-items: center; gap: 6px;
   padding-top: 6px; font-size: 12px; color: var(--text-tertiary);
+}
+@media (max-width: 480px) {
+  .daily-status-bar { right: 12px; }
 }
 /* The class rule above's `display: flex` otherwise beats the browser's
    own [hidden]{display:none} default (same specificity, declared later),

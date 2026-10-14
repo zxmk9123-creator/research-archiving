@@ -1308,29 +1308,10 @@ async function renderDailyStatusBar() {
     const text = status.completedToday ? '오늘 기사 수집 완료' : '오늘 기사 수집 미완료';
     bar.innerHTML = `<span class="daily-status-dot ${dotClass}"></span><span>${text}</span>`;
     bar.hidden = false;
-    alignDailyStatusBarWithGuideLink();
   } catch (err) {
     bar.hidden = true;
   }
 }
-
-// Right edge of the status line lines up with the right edge of "사용
-// 가이드" (the end of "드") above it — the guide link's own width varies
-// with viewport size, so this is computed from its actual rendered
-// position rather than a fixed CSS offset. Measured against the bar's
-// own rendered right edge (not window.innerWidth, which includes the
-// scrollbar's width and overshoots by that amount whenever one is
-// present — exactly the few-px gap seen in production).
-function alignDailyStatusBarWithGuideLink() {
-  const bar = document.getElementById('daily-status-bar');
-  const guideBtn = document.getElementById('nav-guide-btn');
-  if (!bar || !guideBtn || bar.hidden) return;
-  bar.style.paddingRight = '0px';
-  const barRight = bar.getBoundingClientRect().right;
-  const guideRight = guideBtn.getBoundingClientRect().right;
-  bar.style.paddingRight = `${barRight - guideRight}px`;
-}
-window.addEventListener('resize', alignDailyStatusBarWithGuideLink);
 
 async function renderArchive(query = {}) {
   // scrollTo is a transient hash param (set by the month sidebar below, see
