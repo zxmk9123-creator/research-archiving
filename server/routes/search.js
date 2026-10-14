@@ -46,18 +46,53 @@ const MAX_CANDIDATES = 8;
 // (the client holds them in memory only, see renderHome()'s aiSearchHistory).
 const MAX_HISTORY_TURNS = 3;
 
+// Production incident: "국내 e-SAF 생산에 참여하는 기관 및 기업들" found nothing,
+// while a differently-worded question whose own text happened to contain
+// "e-SAF 생산" verbatim did. Root cause: extractKeywords kept each token's
+// exact inflected form ("참여하는", "기업들"), so a candidate whose text says
+// "참여" or "참여했다" or "기업" (no 들) never matched a plain ILIKE %참여하는%
+// — not a relevance problem, a literal-substring-vs-conjugation mismatch.
+// Below, each token also contributes its stem (common particle/verb-ending
+// stripped) as an extra keyword — e.g. "참여하는" -> "참여", "기업들" -> "기업"
+// — so inflected question wording still matches a candidate's own (possibly
+// differently-conjugated) wording. This is pure string processing against
+// the already-tokenized question, so it adds no network/LLM call and no
+// serial latency: retrieveCandidates' per-keyword docFreq lookups already
+// run in parallel (Promise.all), so a few more keywords only add more
+// concurrent fast index-backed queries, not more wall-clock time.
+const KOREAN_STRIPPABLE_SUFFIXES = [
+  '습니다', '했습니다', '됩니다', '입니다', '하였다', '되었다', '이었다',
+  '하는', '했던', '한다', '했다', '하고', '하며', '되는', '되어', '했고',
+  '에서', '으로', '에게', '한테', '부터', '까지', '에는', '이나', '라는',
+  '은', '는', '이', '가', '을', '를', '의', '와', '과', '도', '만', '들', '로', '나', '란',
+].sort((a, b) => b.length - a.length); // longest suffix checked first
+
+function stemKorean(word) {
+  for (const suffix of KOREAN_STRIPPABLE_SUFFIXES) {
+    if (word.length - suffix.length >= 2 && word.endsWith(suffix)) {
+      return word.slice(0, -suffix.length);
+    }
+  }
+  return word;
+}
+
 // Simple, reliable retrieval: lowercase word tokens (Unicode-aware, so
 // Korean terms work) ILIKE-matched against the same fields the Detail page
 // already shows (title/summary/insight + the AI-drafted equivalents) plus
 // source/sector/usage names. No new search index, no embeddings.
 function extractKeywords(q) {
-  return Array.from(new Set(
-    String(q || '')
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length >= 2)
-  )).slice(0, 12);
+  const tokens = String(q || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+  const withStems = new Set();
+  for (const token of tokens) {
+    withStems.add(token);
+    const stem = stemKorean(token);
+    if (stem !== token) withStems.add(stem);
+  }
+  return Array.from(withStems).slice(0, 16);
 }
 
 // A context-dependent follow-up ("그 요인을 더 자세히 설명해줘", "그럼 수출량은?")

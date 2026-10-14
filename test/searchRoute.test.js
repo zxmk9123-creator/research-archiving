@@ -663,6 +663,35 @@ test('retrieveCandidates SQL: ranks by a computed per-keyword relevance score be
   }
 });
 
+test('retrieveCandidates SQL: an inflected question keyword also matches a candidate\'s differently-conjugated wording via its stem', async () => {
+  // The reported bug: "국내 e-SAF 생산에 참여하는 기관 및 기업들" found nothing,
+  // while a question whose own text happened to contain "e-SAF 생산"
+  // verbatim did — because "참여하는"/"기업들" never literally appear in a
+  // candidate that instead says "참여"/"기업". extractKeywords must add
+  // each token's stem ("참여하는" -> "참여", "기업들" -> "기업") as its own
+  // keyword, not just the exact inflected token.
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '국내 e-SAF 생산에 참여하는 기관 및 기업들' }),
+      });
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
+      assert.ok(selectCall);
+      assert.ok(selectCall.params.includes('%참여하는%'));
+      assert.ok(selectCall.params.includes('%참여%')); // the stem, as its own keyword
+      assert.ok(selectCall.params.includes('%기업들%'));
+      assert.ok(selectCall.params.includes('%기업%'));
+    });
+  } finally {
+    restore();
+  }
+});
+
 test('retrieveCandidates SQL: the relevance expression reuses the same bound params as the WHERE clause (no duplicate params)', async () => {
   const { calls, restore } = mockPool([
     ['FROM items i', () => ({ rows: [] })],
