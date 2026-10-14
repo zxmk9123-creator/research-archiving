@@ -113,13 +113,16 @@ body {
 .topbar-guide-link svg { flex-shrink: 0; }
 
 /* Home-only status line: a green/red dot + a one-line log of today's
-   (KST) Daily Discovery collection, tucked under "사용 가이드" at the
-   topbar's own right edge (same grid column 3) rather than its own
-   full-width banner row, so it doesn't claim extra page space. */
+   (KST) Daily Discovery collection. Lives below the topbar (not inside
+   it, which would grow the sticky header's own height) but right-aligned
+   to echo "사용 가이드" above it, and with no background/border of its
+   own — just a slim line in the page's own top padding. */
 .daily-status-bar {
-  grid-column: 3; justify-self: end;
-  display: flex; align-items: center; gap: 6px;
-  margin-top: 4px; font-size: 12px; color: var(--text-tertiary);
+  display: flex; justify-content: flex-end; align-items: center; gap: 6px;
+  padding: 6px 28px 0; font-size: 12px; color: var(--text-tertiary);
+}
+@media (max-width: 480px) {
+  .daily-status-bar { padding: 6px 12px 0; }
 }
 .daily-status-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
