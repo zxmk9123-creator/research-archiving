@@ -137,6 +137,13 @@ async function recordDailyDiscoveryCompletion(result) {
      ON CONFLICT (job_name) DO UPDATE SET last_completed_at = now(), last_totals = $2, last_failed_sources = $3`,
     [JOB_NAME, JSON.stringify(result.totals), JSON.stringify(failedSources)]
   );
+  // The daily headline is a separate, durable read model. Start it only
+  // after the collection completion record has been written; never let an
+  // LLM outage turn a successful collection into a failed scheduler run.
+  const dailyBriefModule = require('./dailyBrief');
+  dailyBriefModule.queueDailyBriefGeneration().catch((err) => {
+    console.error(`daily_brief enqueue failed: ${err.message}`);
+  });
   return failedSources;
 }
 

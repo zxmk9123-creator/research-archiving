@@ -348,6 +348,26 @@ ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_completed_at TIMESTAMPT
 ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_totals JSONB;
 ALTER TABLE scheduler_jobs ADD COLUMN IF NOT EXISTS last_failed_sources JSONB;
 
+-- Durable Daily Headlines snapshot. One row per KST reporting day keeps
+-- generation state, exact evidence set, and the rendered brief together.
+-- The dashboard can therefore read a stable snapshot without invoking an
+-- LLM on page load. Failed/stale generations can be retried explicitly.
+CREATE TABLE IF NOT EXISTS daily_briefs (
+  brief_date DATE PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('generating','ready','failed','empty')),
+  window_start TIMESTAMPTZ NOT NULL,
+  window_end TIMESTAMPTZ NOT NULL,
+  item_count INTEGER NOT NULL DEFAULT 0,
+  source_item_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  brief JSONB,
+  error TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS daily_briefs_updated_at_idx ON daily_briefs(updated_at DESC);
+
 -- Seed the Discovery Query Registry's initial 12 queries (4 pre-existing +
 -- 8 new) covering commodity/market news, logistics/shipping, regulation/
 -- policy, major-company/IR, and reports/research papers. Idempotent by

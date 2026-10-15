@@ -2387,6 +2387,58 @@ async function renderOps() {
 }
 
 
+function renderHeadlineBrief(data) {
+  const date = escapeHtml(String(data.brief_date || '').slice(0, 10));
+  const brief = data.brief || {};
+  const evidenceIds = new Set((Array.isArray(data.source_item_ids) ? data.source_item_ids : []).map(Number));
+  const developments = (Array.isArray(brief.developments) ? brief.developments : []).filter((entry) => evidenceIds.has(Number(entry.item_id)));
+  const stories = developments.map((entry, index) => `<article class="headline-story">
+    <span class="headline-story-index">${index + 1}</span><div>
+      <p>${escapeHtml(entry.summary || '')}</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
+      <a class="headline-source-link" href="#/detail/${encodeURIComponent(String(entry.item_id))}">근거 자료 보기 →</a>
+    </div>
+  </article>`).join('');
+  const watchpoints = (Array.isArray(brief.watchpoints) ? brief.watchpoints : []).map((point) => `<li>${escapeHtml(point)}</li>`).join('');
+  return `<div class="headlines-page">
+    <header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">최근 하루 동안 발행된 자료에서 시장 판단에 필요한 변화만 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
+    <p class="headlines-basis">집계 구간 ${formatDateOnly(data.window_start)} – ${formatDateOnly(data.window_end)} · 발행 자료 ${Number(data.item_count) || 0}건 · KST 보고일</p>
+    <section class="headline-lead"><p class="headlines-section-kicker">TODAY IN ONE MINUTE</p><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
+    <div class="headlines-columns">
+      <section class="headline-panel"><div class="headline-panel-heading"><div><p class="headlines-section-kicker">WHAT MOVED</p><h2>주목할 자료</h2></div><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
+      <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 최근 발행 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
+    </div>
+  </div>`;
+}
+
+async function renderHeadlines() {
+  app.innerHTML = '<div class="headlines-page"><p class="headlines-loading">헤드라인을 불러오는 중입니다…</p></div>';
+  try {
+    const data = await api('/headlines/latest');
+    if (!data) {
+      app.innerHTML = '<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section></div>';
+      return;
+    }
+    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); return; }
+    const states = {
+      generating: ['브리프를 만들고 있습니다', '수집 자료를 정리 중입니다. 잠시 후 자동으로 다시 확인합니다.'],
+      empty: ['이 기간에 발행된 자료가 없습니다', '새로 발행된 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],
+      failed: ['브리프 생성에 실패했습니다', '수집 자료는 보존되어 있습니다. 관리자 인증 후 생성 재시도를 할 수 있습니다.'],
+    };
+    const [title, description] = states[data.status] || ['브리프 상태 확인 중', '잠시 후 다시 확인해 주세요.'];
+    app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section></div>`;
+    const retry = document.getElementById('headline-retry');
+    if (retry) retry.onclick = async () => {
+      retry.disabled = true;
+      retry.textContent = '요청 중…';
+      try { await api('/headlines/generate', { method: 'POST' }); await renderHeadlines(); }
+      catch (err) { alert(`재시도 요청 실패: ${err.message}`); retry.disabled = false; retry.textContent = '브리프 다시 생성'; }
+    };
+    if (data.status === 'generating') setTimeout(() => { if (parseHash().path === 'headlines') renderHeadlines(); }, 15000);
+  } catch (err) {
+    app.innerHTML = `<div class="headlines-page"><h1>헤드라인</h1><p class="headlines-error">브리프를 불러오지 못했습니다: ${escapeHtml(err.message)}</p><button class="btn" type="button" onclick="renderHeadlines()">다시 불러오기</button></div>`;
+  }
+}
+
 // 리뷰어가 아직 적합/비적합을 확정하지 않은 항목 — "판단 미완료" 그룹을
 // 상단에 띄우는 기준. reviewer_eligible은 "적합으로 확정"/"비적합으로
 // 확정" 버튼을 눌러야만 true/false가 되고, 그 전까지는 null.
@@ -3014,6 +3066,7 @@ function updateActiveNavTab(path) {
   // 'detail' has no top-level tab of its own — it's always reached from
   // 자료 (Archive), so it falls back to that tab rather than Home.
   const activeRoute = path === 'archive' || path === 'detail' ? 'archive'
+    : path === 'headlines' ? 'headlines'
     : path === 'reference' ? 'reference'
     : path === 'sources' ? 'sources' : path === 'review' ? 'review'
     : path === 'ops' ? 'ops' : 'home';
@@ -3121,6 +3174,7 @@ function runSpotlightTour(steps, seenKey, onDone) {
 const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
 const ONBOARDING_STEPS = [
   { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
+  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '최근 하루의 발행 자료를 짧은 브리프로 읽고 근거 자료로 이동할 수 있습니다.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
@@ -3211,6 +3265,7 @@ async function router() {
   if (statusBar && path !== 'home' && path !== '') statusBar.hidden = true;
   try {
     if (path === 'home' || path === '') await renderHome();
+    else if (path === 'headlines') await renderHeadlines();
     else if (path === 'archive') await renderArchive(query);
     else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
