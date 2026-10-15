@@ -4,7 +4,7 @@ const { callProvider } = require('./ai/provider');
 const JOB_NAME = 'daily_headlines_brief';
 const MAX_EVIDENCE_ITEMS = 24;
 const GENERATION_STALE_AFTER_MINUTES = 25;
-const MAX_DAILY_GENERATION_ATTEMPTS = 3;
+const MAX_DAILY_GENERATION_ATTEMPTS = 4;
 
 function kstDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
