@@ -2678,6 +2678,10 @@ async function renderReview() {
         </div>
         <div class="review-pane">
           <div class="review-section">
+            <div class="review-section-title">발행일</div>
+            <input id="d-published-at" type="date">
+          </div>
+          <div class="review-section">
             <div class="review-section-title">핵심 요약</div>
             <textarea id="d-summary" rows="4">${item.summary || ''}</textarea>
           </div>
@@ -2700,6 +2704,7 @@ async function renderReview() {
         </div>
       </div>
     `;
+    document.getElementById('d-published-at').value = item.published_at ? String(item.published_at).slice(0, 10) : '';
     bindChips(document.getElementById('d-sectors'), (item.sectors || []).map((s) => s.id));
     bindChips(document.getElementById('d-usages'), (item.usages || []).map((u) => u.id));
 
@@ -2799,6 +2804,7 @@ async function renderReview() {
         await api(`/items/${id}`, {
           method: 'PATCH',
           body: JSON.stringify({
+            published_at: document.getElementById('d-published-at').value || null,
             summary: document.getElementById('d-summary').value,
             insight: document.getElementById('d-insight').value,
             sector_ids: getActive(document.getElementById('d-sectors'), 'sector'),
