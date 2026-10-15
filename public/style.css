@@ -747,7 +747,7 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
 #d-published-at-section .review-section-title {
