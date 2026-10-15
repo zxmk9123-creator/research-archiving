@@ -5,6 +5,9 @@ const JOB_NAME = 'daily_headlines_brief';
 const MAX_EVIDENCE_ITEMS = 24;
 const GENERATION_STALE_AFTER_MINUTES = 25;
 const MAX_AUTOMATIC_RETRIES = 5;
+// Hard ceiling on total generation attempts per KST day for the forced
+// (manual) path, so repeated commands can't burn unbounded LLM calls.
+const MAX_DAILY_ATTEMPTS = 10;
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 
@@ -266,12 +269,13 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
                 AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval))
        ) OR (
           $5::boolean
+          AND daily_briefs.attempt_count < $6
           AND (daily_briefs.status IN ('failed','empty','ready')
             OR (daily_briefs.status = 'generating'
                 AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval))
        )
      RETURNING brief_date, window_start, window_end`,
-    [briefDate, windowStart, windowEnd, GENERATION_STALE_AFTER_MINUTES, Boolean(force)]
+    [briefDate, windowStart, windowEnd, GENERATION_STALE_AFTER_MINUTES, Boolean(force), MAX_DAILY_ATTEMPTS]
   );
   const claimed = rows[0];
   if (!claimed) {
@@ -280,6 +284,9 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
          FROM daily_briefs WHERE brief_date = $1`, [briefDate]
     );
     const current = existing[0] || null;
+    if (force && current && current.attempt_count >= MAX_DAILY_ATTEMPTS) {
+      return { started: false, reason: 'daily_attempt_limit_reached', current };
+    }
     return { started: false, reason: 'already_running_or_not_retryable', current };
   }
 

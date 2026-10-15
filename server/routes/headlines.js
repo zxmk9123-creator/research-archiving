@@ -1,5 +1,6 @@
 const express = require('express');
 const dailyBriefModule = require('../lib/dailyBrief');
+const { requireAuth } = require('../lib/auth');
 
 const router = express.Router();
 
@@ -14,7 +15,10 @@ router.get('/latest', async (req, res) => {
 
 // Direct command endpoint: regenerate from the existing archive only.
 // The scheduled routine keeps using queueDailyBriefGeneration() independently.
-router.post('/generate', async (req, res) => {
+// Admin-only: this forces a regeneration even over a 'ready' brief and costs
+// an LLM call, so an anonymous caller must never be able to trigger it (an
+// unauthenticated probe once replaced the live brief with an empty one).
+router.post('/generate', requireAuth, async (req, res) => {
   try {
     const result = await dailyBriefModule.requestDailyBriefRegeneration();
     const status = result.started ? 202
