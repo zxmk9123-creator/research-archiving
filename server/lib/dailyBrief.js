@@ -46,19 +46,26 @@ function validateBrief(raw, evidenceIds) {
 }
 
 async function buildDailyBrief(briefDate, windowStart, windowEnd) {
+  // Include material collected during today's KST collection window plus
+  // items published on one of the seven KST calendar dates ending today.
+  // Use noon UTC for calendar arithmetic so converting back to YYYY-MM-DD
+  // does not shift the KST date to the previous UTC day.
+  const recentPublishedSince = new Date(`${briefDate}T12:00:00Z`);
+  recentPublishedSince.setUTCDate(recentPublishedSince.getUTCDate() - 6);
   const { rows: items } = await pool.query(
-    `SELECT i.id, i.title, i.source_url, i.published_at,
+    `SELECT i.id, i.title, i.source_url, i.published_at, i.collected_at,
             COALESCE(i.summary, i.ai_summary, '') AS summary,
             COALESCE(i.insight, i.ai_insight, '') AS insight,
             s.name AS source_name
        FROM items i
        LEFT JOIN sources s ON s.id = i.source_id
       WHERE i.status = 'Published'
-        AND i.collected_at >= $1
-        AND i.collected_at < $2
-      ORDER BY i.collected_at DESC, i.id DESC
-      LIMIT $3`,
-    [windowStart, windowEnd, MAX_EVIDENCE_ITEMS]
+        AND ((i.collected_at >= $1 AND i.collected_at < $2)
+          OR (i.published_at >= $3::date AND i.published_at <= $4::date))
+      ORDER BY CASE WHEN i.collected_at >= $1 AND i.collected_at < $2 THEN 0 ELSE 1 END,
+               i.collected_at DESC, i.id DESC
+      LIMIT $5`,
+    [windowStart, windowEnd, recentPublishedSince.toISOString().slice(0, 10), briefDate, MAX_EVIDENCE_ITEMS]
   );
   const itemIds = items.map((item) => Number(item.id));
   if (!items.length) {
@@ -84,6 +91,10 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
     title: String(item.title || '').slice(0, 300),
     source: String(item.source_name || '출처 미상').slice(0, 120),
     published_at: item.published_at ? new Date(item.published_at).toISOString() : null,
+    collected_at: item.collected_at ? new Date(item.collected_at).toISOString() : null,
+    selection_basis: item.collected_at >= windowStart && item.collected_at < windowEnd
+      ? '오늘 수집'
+      : '최근 7일 내 발행',
     summary: String(item.summary || '').slice(0, 700),
     insight: String(item.insight || '').slice(0, 500),
   }));
@@ -97,7 +108,7 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
     'developments는 최대 5개, watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용한다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
-  const user = `보고일(KST): ${briefDate}\n대상 기간(UTC): ${windowStart.toISOString()} ~ ${windowEnd.toISOString()}\n\n자료:\n${JSON.stringify(evidence)}`;
+  const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집된 자료 또는 최근 7개 KST 날짜 내 발행된 자료\n자료:\n${JSON.stringify(evidence)}`;
 
   const raw = parseJsonObject(await callProvider({ system, user }));
   const brief = validateBrief(raw, itemIds);

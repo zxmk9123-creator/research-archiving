@@ -2389,50 +2389,29 @@ async function renderOps() {
 
 function renderHeadlineBrief(data) {
   const date = escapeHtml(String(data.brief_date || '').slice(0, 10));
-  const formatKstDateTime = (value) => {
-    const parsed = new Date(value);
-    return Number.isFinite(parsed.getTime())
-      ? parsed.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : '확인 불가';
-  };
   const brief = data.brief || {};
   const evidenceIds = new Set((Array.isArray(data.source_item_ids) ? data.source_item_ids : []).map(Number));
   const developments = (Array.isArray(brief.developments) ? brief.developments : []).filter((entry) => evidenceIds.has(Number(entry.item_id)));
   const sourceById = new Map((Array.isArray(data.sources) ? data.sources : []).map((source) => [Number(source.item_id), source]));
-  const safeSourceUrl = (source) => {
-    try { const url = new URL(String(source?.source_url || '')); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; }
-    catch { return ''; }
-  };
-  const citedSources = [...new Set(developments.map((entry) => Number(entry.item_id)))]
-    .map((id) => sourceById.get(id))
-    .filter((source) => source && safeSourceUrl(source));
-  const citationNumber = new Map(citedSources.map((source, index) => [Number(source.item_id), index + 1]));
   const stories = developments.map((entry, index) => {
     const source = sourceById.get(Number(entry.item_id));
-    const sourceUrl = safeSourceUrl(source);
-    const citation = sourceUrl ? `<a class="headline-citation" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" aria-label="원문 각주 ${citationNumber.get(Number(entry.item_id))}">[${citationNumber.get(Number(entry.item_id))}]</a>` : '';
+    const detailLink = `#/detail/${encodeURIComponent(String(entry.item_id))}`;
     return `<article class="headline-story">
     <span class="headline-story-index">${index + 1}</span><div>
-      <p>${escapeHtml(entry.summary || '')}</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
-      <div class="headline-story-links">${citation}<a class="headline-source-link" href="#/detail/${encodeURIComponent(String(entry.item_id))}">아카이브 자료 보기 →</a></div>
+      <p><a class="headline-story-title" href="${detailLink}">${escapeHtml(source?.title || '자료 상세 보기 →')}</a></p>
+      <p class="headline-story-summary">${escapeHtml(entry.summary || '')}</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
     </div>
   </article>`;
   }).join('');
-  const footnotes = citedSources.map((source) => {
-    const id = Number(source.item_id);
-    const sourceUrl = safeSourceUrl(source);
-    return sourceUrl ? `<li><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">[${citationNumber.get(id)}] ${escapeHtml(source.title || '원문 기사')}</a></li>` : '';
-  }).filter(Boolean).join('');
   const watchpoints = (Array.isArray(brief.watchpoints) ? brief.watchpoints : []).map((point) => `<li>${escapeHtml(point)}</li>`).join('');
   return `<div class="headlines-page">
     <header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 기사와 보고서에서 시장 판단에 필요한 변화를 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
-    <p class="headlines-basis">집계 구간 ${escapeHtml(formatKstDateTime(data.window_start))} – ${escapeHtml(formatKstDateTime(data.window_end))} KST · 오늘 아카이브된 자료 ${Number(data.item_count) || 0}건</p>
-    <section class="headline-lead"><p class="headlines-section-kicker">TODAY IN ONE MINUTE</p><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
+    <p class="page-lede headlines-basis">오늘 수집된 기사와 최근 7일 이내 발행된 신규 소식 중 주목할 변화를 요약합니다. · ${Number(data.item_count) || 0}건</p>
+    <section class="headline-lead"><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
     <div class="headlines-columns">
-      <section class="headline-panel"><div class="headline-panel-heading"><div><p class="headlines-section-kicker">WHAT MOVED</p><h2>주목할 자료</h2></div><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
-      <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 당일 아카이브 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
+      <section class="section headline-panel"><div class="section-header headline-panel-heading"><h2>주목할 자료</h2><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
+      <aside class="section headline-panel headline-watchpoints"><div class="section-header headline-panel-heading"><h2>후속 확인</h2></div>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 선별 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
     </div>
-    ${footnotes ? `<section class="headline-footnotes" aria-label="브리프 원문 각주"><h2>원문 각주</h2><ol>${footnotes}</ol></section>` : ''}
     ${renderHeadlineMarketLinks()}
   </div>`;
 }
@@ -2454,7 +2433,7 @@ async function renderHeadlines() {
   try {
     const data = await api('/headlines/latest');
     if (!data) {
-      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 자료를 핵심 변화와 근거 중심으로 요약합니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>현재 DB에 쌓인 금일자 자료를 사용해 브리프를 만들 수 있습니다.</p><button class="btn primary" id="headline-retry" type="button">금일 자료로 브리프 생성</button></section>${renderHeadlineMarketLinks()}</div>`;
+      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">오늘 수집된 자료와 최근 7일 내 발행된 신규 소식을 요약합니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>현재 DB에 쌓인 금일자 자료를 사용해 브리프를 만들 수 있습니다.</p><button class="btn primary" id="headline-retry" type="button">금일 자료로 브리프 생성</button></section>${renderHeadlineMarketLinks()}</div>`;
       bindHeadlineRetry('금일 자료로 브리프 생성');
       return;
     }
@@ -3219,7 +3198,7 @@ function runSpotlightTour(steps, seenKey, onDone) {
 const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
 const ONBOARDING_STEPS = [
   { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
-  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 아카이브된 자료를 짧은 브리프로 읽고 원문 각주로 이동할 수 있습니다.' },
+  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 수집된 자료와 최근 7일 내 발행된 신규 소식을 짧은 브리프로 읽을 수 있습니다.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
