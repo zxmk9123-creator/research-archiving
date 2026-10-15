@@ -686,6 +686,12 @@ test('retrieveCandidates SQL: an inflected question keyword also matches a candi
       assert.ok(selectCall.params.includes('%참여%')); // the stem, as its own keyword
       assert.ok(selectCall.params.includes('%기업들%'));
       assert.ok(selectCall.params.includes('%기업%'));
+      // Production incident #2 on this exact question: the single-char
+      // particle "에" ("생산에") was missing from the suffix list, so
+      // "생산" (100+ matching Published items) was invisible to this
+      // query — only "생산에" (12 items) was ever searched.
+      assert.ok(selectCall.params.includes('%생산에%'));
+      assert.ok(selectCall.params.includes('%생산%'));
     });
   } finally {
     restore();
