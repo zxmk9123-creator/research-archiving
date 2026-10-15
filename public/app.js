@@ -2389,24 +2389,50 @@ async function renderOps() {
 
 function renderHeadlineBrief(data) {
   const date = escapeHtml(String(data.brief_date || '').slice(0, 10));
+  const formatKstDateTime = (value) => {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime())
+      ? parsed.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '확인 불가';
+  };
   const brief = data.brief || {};
   const evidenceIds = new Set((Array.isArray(data.source_item_ids) ? data.source_item_ids : []).map(Number));
   const developments = (Array.isArray(brief.developments) ? brief.developments : []).filter((entry) => evidenceIds.has(Number(entry.item_id)));
-  const stories = developments.map((entry, index) => `<article class="headline-story">
+  const sourceById = new Map((Array.isArray(data.sources) ? data.sources : []).map((source) => [Number(source.item_id), source]));
+  const safeSourceUrl = (source) => {
+    try { const url = new URL(String(source?.source_url || '')); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; }
+    catch { return ''; }
+  };
+  const citedSources = [...new Set(developments.map((entry) => Number(entry.item_id)))]
+    .map((id) => sourceById.get(id))
+    .filter((source) => source && safeSourceUrl(source));
+  const citationNumber = new Map(citedSources.map((source, index) => [Number(source.item_id), index + 1]));
+  const stories = developments.map((entry, index) => {
+    const source = sourceById.get(Number(entry.item_id));
+    const sourceUrl = safeSourceUrl(source);
+    const citation = sourceUrl ? `<a class="headline-citation" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" aria-label="원문 각주 ${citationNumber.get(Number(entry.item_id))}">[${citationNumber.get(Number(entry.item_id))}]</a>` : '';
+    return `<article class="headline-story">
     <span class="headline-story-index">${index + 1}</span><div>
       <p>${escapeHtml(entry.summary || '')}</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
-      <a class="headline-source-link" href="#/detail/${encodeURIComponent(String(entry.item_id))}">근거 자료 보기 →</a>
+      <div class="headline-story-links">${citation}<a class="headline-source-link" href="#/detail/${encodeURIComponent(String(entry.item_id))}">아카이브 자료 보기 →</a></div>
     </div>
-  </article>`).join('');
+  </article>`;
+  }).join('');
+  const footnotes = citedSources.map((source) => {
+    const id = Number(source.item_id);
+    const sourceUrl = safeSourceUrl(source);
+    return sourceUrl ? `<li><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">[${citationNumber.get(id)}] ${escapeHtml(source.title || '원문 기사')}</a></li>` : '';
+  }).filter(Boolean).join('');
   const watchpoints = (Array.isArray(brief.watchpoints) ? brief.watchpoints : []).map((point) => `<li>${escapeHtml(point)}</li>`).join('');
   return `<div class="headlines-page">
-    <header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">최근 하루 동안 발행된 자료에서 시장 판단에 필요한 변화만 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
-    <p class="headlines-basis">집계 구간 ${formatDateOnly(data.window_start)} – ${formatDateOnly(data.window_end)} · 발행 자료 ${Number(data.item_count) || 0}건 · KST 보고일</p>
+    <header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 기사와 보고서에서 시장 판단에 필요한 변화를 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
+    <p class="headlines-basis">집계 구간 ${escapeHtml(formatKstDateTime(data.window_start))} – ${escapeHtml(formatKstDateTime(data.window_end))} KST · 오늘 아카이브된 자료 ${Number(data.item_count) || 0}건</p>
     <section class="headline-lead"><p class="headlines-section-kicker">TODAY IN ONE MINUTE</p><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
     <div class="headlines-columns">
       <section class="headline-panel"><div class="headline-panel-heading"><div><p class="headlines-section-kicker">WHAT MOVED</p><h2>주목할 자료</h2></div><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
-      <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 최근 발행 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
+      <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 당일 아카이브 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
     </div>
+    ${footnotes ? `<section class="headline-footnotes" aria-label="브리프 원문 각주"><h2>원문 각주</h2><ol>${footnotes}</ol></section>` : ''}
     ${renderMarketWatch()}
   </div>`;
 }
@@ -2425,11 +2451,15 @@ function renderMarketWatch() {
     ? `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`
     : `<a class="market-watch-tab market-watch-external" href="${instrument.url}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(instrument.label)} ↗</span><small>${escapeHtml(instrument.group)} · TradingView에서 보기</small></a>`).join('');
   return `<section class="market-watch" aria-labelledby="market-watch-title">
-    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>원유 참고 차트와 식용유지 선물 시세·원천을 한곳에서 확인합니다.</p></div><span class="market-watch-provider">원유 차트: TradingView · 유지 시세: Barchart API</span></div>
+    <div class="market-watch-heading"><div><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>식용유지 선물 시세와 원유 참고 차트를 확인합니다.</p></div><span class="market-watch-provider">식용유지: Barchart API · 원유 참고: TradingView</span></div>
     <section class="market-data-snapshot" aria-label="유지 선물 시세 스냅샷"><div class="market-data-status"><span id="market-data-status-text" aria-live="polite">공급원 연동 상태를 확인하는 중입니다…</span><button type="button" class="market-data-refresh" id="market-data-refresh">새로고침</button></div><div id="market-data-cards" class="market-data-cards"></div></section>
-    <div class="market-watch-tabs" role="group" aria-label="차트 종목 선택">${buttons}</div>
+    <div class="market-data-chart-controls"><label class="market-data-select-label">차트 종목<select id="market-data-instrument" aria-controls="market-data-chart"><option value="palm-oil">팜유 선물</option><option value="soybean-oil">대두유 선물</option></select></label><label class="market-data-height-label"><span>차트 높이 <output id="market-data-height-value">${marketChartHeight}px</output></span><input id="market-data-height" type="range" min="280" max="600" step="20" value="${marketChartHeight}" aria-label="차트 높이 조절"></label></div>
+    <div id="market-data-chart" class="market-data-chart" aria-live="polite"><p class="market-data-chart-empty">공급원 연동 상태를 확인하는 중입니다…</p></div>
+    <p id="market-data-chart-caption" class="market-data-chart-caption">커서를 차트 위로 이동하면 해당 시점의 날짜·시간과 가격을 확인할 수 있습니다.</p>
+    <div class="market-watch-reference-heading"><h3>원유 참고 차트</h3><span>식용유지 선물 가격과는 다른 지표입니다.</span></div>
+    <div class="market-watch-tabs" role="group" aria-label="원유 참고 차트 종목 선택">${buttons}</div>
     <div class="market-watch-chart-frame"><div id="market-chart-widget" class="market-watch-chart tradingview-widget-container" aria-label="선택한 시장 종목 차트"></div></div>
-    <p class="market-watch-disclaimer">WTI·브렌트는 원유 CFD 지표이며 식용유 선물 가격을 대체하지 않습니다. 팜유·대두유 시세 스냅샷은 Barchart API 계약·표시 권한 설정 후에만 표시되며, 실시간/지연 여부·거래 시각·단위를 함께 확인하세요. 상세 차트와 기타 유지 원료는 각 원천 화면을 이용합니다. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
+    <p class="market-watch-disclaimer">팜유·대두유 시세는 Barchart API 계약·표시 권한 설정 후 표시됩니다. 실시간/지연 여부와 거래 시각은 시세 카드에서 확인하세요. 상세 차트와 기타 유지 원료는 각 원천 화면을 이용합니다. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
   </section>`;
 }
 
@@ -2437,16 +2467,116 @@ function marketDataModeLabel(mode) {
   return ({ R: '실시간', I: '지연 시세', D: '종가' })[mode] || '시세 유형 확인 필요';
 }
 
-function marketDataSparkline(bars) {
-  const values = (Array.isArray(bars) ? bars : []).map((bar) => Number(bar.close)).filter(Number.isFinite);
-  if (values.length < 2) return '<div class="market-data-chart-empty">가격 이력 없음</div>';
-  const width = 240;
-  const height = 42;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = values.map((value, index) => `${(index / (values.length - 1)) * width},${height - ((value - min) / range) * (height - 4) - 2}`).join(' ');
-  return `<svg class="market-data-sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 90일 종가 추이"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" /></svg>`;
+let marketDataSnapshot = null;
+let marketChartSelected = 'palm-oil';
+let marketChartHeight = 360;
+const MARKET_DATA_TV_SYMBOLS = { 'palm-oil': 'MYX:FCPO1!', 'soybean-oil': 'CBOT:ZL1!' };
+
+function renderMarketDataFallback(target, instrument) {
+  const caption = document.getElementById('market-data-chart-caption');
+  if (caption) caption.textContent = 'Barchart 시간봉이 제공되지 않아 TradingView 차트를 표시합니다. 차트 위 커서로 날짜·시간과 가격을 확인할 수 있습니다.';
+  const symbol = MARKET_DATA_TV_SYMBOLS[instrument?.id] || MARKET_DATA_TV_SYMBOLS['palm-oil'];
+  target.innerHTML = `<div class="market-data-fallback-title">${escapeHtml(instrument?.label || '시장')} · TradingView 원천 차트</div><div id="market-data-tv-fallback" class="market-data-tv-fallback tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>`;
+  const container = target.querySelector('#market-data-tv-fallback');
+  const widget = container.querySelector('.tradingview-widget-container__widget');
+  widget.style.width = '100%';
+  widget.style.height = '100%';
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  script.textContent = JSON.stringify({
+    autosize: true,
+    symbol,
+    interval: '60',
+    timezone: 'Asia/Seoul',
+    theme: 'light',
+    style: '1',
+    locale: 'kr',
+    allow_symbol_change: false,
+    calendar: false,
+    details: false,
+    hide_side_toolbar: true,
+    hide_top_toolbar: false,
+    hide_legend: false,
+    hide_volume: false,
+    hotlist: false,
+    save_image: false,
+    withdateranges: true,
+    backgroundColor: 'rgba(255, 255, 255, 0)',
+    gridColor: 'rgba(120, 130, 140, 0.12)',
+    studies: [],
+  });
+  container.appendChild(script);
+}
+
+function renderMarketDataChart() {
+  const target = document.getElementById('market-data-chart');
+  if (!target) return;
+  target.style.height = `${marketChartHeight}px`;
+  const instrument = marketDataSnapshot?.instruments?.find((item) => item.id === marketChartSelected);
+  const bars = (Array.isArray(instrument?.bars) ? instrument.bars : []).map((bar) => ({
+    timestamp: String(bar.timestamp || ''), close: Number(bar.close),
+  })).filter((bar) => Number.isFinite(Date.parse(bar.timestamp)) && Number.isFinite(bar.close));
+  if (!marketDataSnapshot?.configured || bars.length < 2) {
+    renderMarketDataFallback(target, instrument);
+    return;
+  }
+  const caption = document.getElementById('market-data-chart-caption');
+  if (caption) caption.textContent = 'Barchart 1시간 봉 · 커서를 차트 위로 이동하면 해당 봉의 날짜·시간(KST)과 종가를 확인할 수 있습니다.';
+  const width = 1000;
+  const height = marketChartHeight;
+  const left = 72;
+  const right = 24;
+  const top = 22;
+  const bottom = 34;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const values = bars.map((bar) => bar.close);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const padding = (high - low) * 0.12 || Math.max(Math.abs(high) * 0.002, 0.01);
+  const min = low - padding;
+  const max = high + padding;
+  const xAt = (index) => left + (index / (bars.length - 1)) * plotWidth;
+  const yAt = (value) => top + ((max - value) / (max - min)) * plotHeight;
+  const points = bars.map((bar, index) => `${xAt(index).toFixed(1)},${yAt(bar.close).toFixed(1)}`);
+  const path = points.map((point, index) => `${index ? 'L' : 'M'}${point}`).join(' ');
+  const grid = Array.from({ length: 5 }, (_, index) => {
+    const y = top + (index / 4) * plotHeight;
+    const value = max - (index / 4) * (max - min);
+    return `<line class="market-chart-gridline" x1="${left}" x2="${width - right}" y1="${y}" y2="${y}"/><text class="market-chart-axis-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 3 }).format(value))}</text>`;
+  }).join('');
+  const xLabels = [0, Math.floor((bars.length - 1) / 2), bars.length - 1].map((index) => {
+    const date = new Date(bars[index].timestamp);
+    return `<text class="market-chart-axis-label" x="${xAt(index)}" y="${height - 8}" text-anchor="${index === 0 ? 'start' : index === bars.length - 1 ? 'end' : 'middle'}">${escapeHtml(date.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }))}</text>`;
+  }).join('');
+  const latest = bars[bars.length - 1];
+  target.innerHTML = `<div class="market-data-chart-title"><strong>${escapeHtml(instrument.label || '')}</strong><span>${escapeHtml(instrument.unit || '')} · ${bars.length}개 시간봉 · 마지막 봉 ${escapeHtml(new Date(latest.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }))} KST</span></div><div class="market-data-chart-plot"><svg class="market-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(instrument.label || '시장')} 1시간 봉 가격 차트"><g>${grid}${xLabels}</g><path class="market-chart-line" d="${path}"/><line class="market-chart-crosshair" x1="${left}" x2="${left}" y1="${top}" y2="${height - bottom}"/><circle class="market-chart-dot" cx="${left}" cy="${top}" r="5"/><rect class="market-chart-hit-area" x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight}" fill="transparent"/></svg><div class="market-chart-tooltip" hidden></div></div>`;
+  const svg = target.querySelector('.market-chart-svg');
+  const hitArea = target.querySelector('.market-chart-hit-area');
+  const crosshair = target.querySelector('.market-chart-crosshair');
+  const dot = target.querySelector('.market-chart-dot');
+  const tooltip = target.querySelector('.market-chart-tooltip');
+  hitArea.addEventListener('pointermove', (event) => {
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(svg.getScreenCTM().inverse());
+    const fraction = Math.max(0, Math.min(1, (local.x - left) / plotWidth));
+    const index = Math.round(fraction * (bars.length - 1));
+    const bar = bars[index];
+    const x = xAt(index);
+    const y = yAt(bar.close);
+    crosshair.setAttribute('x1', String(x));
+    crosshair.setAttribute('x2', String(x));
+    dot.setAttribute('cx', String(x));
+    dot.setAttribute('cy', String(y));
+    const time = new Date(bar.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    tooltip.innerHTML = `<strong>${escapeHtml(time)} KST</strong><span>${escapeHtml(new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 }).format(bar.close))} ${escapeHtml(instrument.unit || '')}</span>`;
+    tooltip.hidden = false;
+    tooltip.style.left = `${Math.max(12, Math.min(88, (x / width) * 100))}%`;
+  });
+  hitArea.addEventListener('pointerleave', () => { tooltip.hidden = true; });
 }
 
 function renderMarketDataCards(data) {
@@ -2456,8 +2586,11 @@ function renderMarketDataCards(data) {
   if (!data?.configured) {
     status.textContent = '시세 공급원 연결 대기 · 계약/API 및 표시 권한 설정 후 팜유·대두유 시세를 표시합니다.';
     cards.replaceChildren();
+    marketDataSnapshot = data || null;
+    renderMarketDataChart();
     return;
   }
+  marketDataSnapshot = data;
   const instruments = Array.isArray(data.instruments) ? data.instruments : [];
   status.textContent = data.errors?.length
     ? data.stale
@@ -2469,12 +2602,13 @@ function renderMarketDataCards(data) {
     const change = item.change !== null && item.change !== undefined && Number.isFinite(Number(item.change)) ? Number(item.change) : null;
     const changePercent = item.changePercent !== null && item.changePercent !== undefined && Number.isFinite(Number(item.changePercent)) ? Number(item.changePercent) : null;
     const direction = change === null ? '' : change > 0 ? 'is-up' : change < 0 ? 'is-down' : '';
-    const quoteTime = item.timestamp ? new Date(item.timestamp).toLocaleString('ko-KR') : '거래 시각 없음';
+    const quoteTime = item.timestamp ? new Date(item.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '거래 시각 없음';
     const detail = item.available && price !== '시세 없음'
-      ? `<div class="market-data-price-row"><strong>${escapeHtml(price)}</strong><span class="${direction}">${change === null ? '등락 확인 불가' : `${change > 0 ? '+' : ''}${change} (${changePercent === null ? '-' : `${changePercent > 0 ? '+' : ''}${changePercent}%`})`}</span></div><div class="market-data-meta"><span>${escapeHtml(item.unit || '')}</span><span>${marketDataModeLabel(item.mode)}</span></div><div class="market-data-meta"><span>${escapeHtml(quoteTime)}</span><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">원천 ↗</a></div>${marketDataSparkline(item.bars)}`
+      ? `<div class="market-data-price-row"><strong>${escapeHtml(price)}</strong><span class="${direction}">${change === null ? '등락 확인 불가' : `${change > 0 ? '+' : ''}${change} (${changePercent === null ? '-' : `${changePercent > 0 ? '+' : ''}${changePercent}%`})`}</span></div><div class="market-data-meta"><span>${escapeHtml(item.unit || '')}</span><span>${marketDataModeLabel(item.mode)}</span></div><div class="market-data-meta"><span>${escapeHtml(quoteTime)}</span><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">원천 ↗</a></div>`
       : `<div class="market-data-unavailable">현재 시세를 받지 못했습니다.<br><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Barchart 원천 확인 ↗</a></div>`;
     return `<article class="market-data-card"><div class="market-data-card-heading"><h3>${escapeHtml(item.label || '')}</h3><span>${escapeHtml(item.symbol || '')}</span></div>${detail}</article>`;
   }).join('');
+  renderMarketDataChart();
 }
 
 async function loadMarketData() {
@@ -2490,6 +2624,7 @@ async function loadMarketData() {
 function mountMarketWatch(initialSymbol = MARKET_WATCH_INSTRUMENTS[0].symbol) {
   const chart = document.getElementById('market-chart-widget');
   if (!chart) return;
+  chart.style.height = `${marketChartHeight}px`;
   const instrument = MARKET_WATCH_INSTRUMENTS.find((entry) => entry.symbol === initialSymbol && entry.embeddable) || MARKET_WATCH_INSTRUMENTS.find((entry) => entry.embeddable);
   const source = document.getElementById('market-chart-source');
   if (source) source.href = instrument.url;
@@ -2535,6 +2670,24 @@ function bindMarketWatch() {
   if (!first) return;
   mountMarketWatch(first.dataset.marketSymbol);
   loadMarketData();
+  const select = document.getElementById('market-data-instrument');
+  if (select) {
+    select.value = marketChartSelected;
+    select.addEventListener('change', () => { marketChartSelected = select.value; renderMarketDataChart(); });
+  }
+  const height = document.getElementById('market-data-height');
+  if (height) height.addEventListener('input', () => {
+    marketChartHeight = Number(height.value) || 360;
+    const output = document.getElementById('market-data-height-value');
+    if (output) output.value = `${marketChartHeight}px`;
+    const dataChart = document.getElementById('market-data-chart');
+    if (dataChart) dataChart.style.height = `${marketChartHeight}px`;
+    const tradingView = document.getElementById('market-chart-widget');
+    if (tradingView) tradingView.style.height = `${marketChartHeight}px`;
+  });
+  if (height) height.addEventListener('change', () => {
+    if (!document.getElementById('market-data-tv-fallback')) renderMarketDataChart();
+  });
   const refresh = document.getElementById('market-data-refresh');
   if (refresh) refresh.addEventListener('click', async () => {
     refresh.disabled = true;
@@ -2551,18 +2704,18 @@ async function renderHeadlines() {
   try {
     const data = await api('/headlines/latest');
     if (!data) {
-      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section>${renderMarketWatch()}</div>`;
+      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section>${renderMarketWatch()}</div>`;
       bindMarketWatch();
       return;
     }
     if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); bindMarketWatch(); return; }
     const states = {
       generating: ['브리프를 만들고 있습니다', '수집 자료를 정리 중입니다. 잠시 후 자동으로 다시 확인합니다.'],
-      empty: ['이 기간에 발행된 자료가 없습니다', '새로 발행된 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],
+      empty: ['오늘 아카이브된 자료가 없습니다', '오늘 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],
       failed: ['브리프 생성에 실패했습니다', '수집 자료는 보존되어 있습니다. 관리자 인증 후 생성 재시도를 할 수 있습니다.'],
     };
     const [title, description] = states[data.status] || ['브리프 상태 확인 중', '잠시 후 다시 확인해 주세요.'];
-    app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section></div>`;
+    app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section></div>`;
     const retry = document.getElementById('headline-retry');
     if (retry) retry.onclick = async () => {
       retry.disabled = true;
@@ -3311,7 +3464,7 @@ function runSpotlightTour(steps, seenKey, onDone) {
 const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
 const ONBOARDING_STEPS = [
   { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
-  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '최근 하루의 발행 자료를 짧은 브리프로 읽고 근거 자료로 이동할 수 있습니다.' },
+  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 아카이브된 자료를 짧은 브리프로 읽고 원문 각주로 이동할 수 있습니다.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
