@@ -735,6 +735,33 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
 }
 #d-published-at::-webkit-calendar-picker-indicator { cursor: pointer; }
 
+/* Review tab publication-date control: match the compact size used by
+   the manual new-item form without changing other date inputs. */
+#d-published-at {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+#d-published-at-section .review-section-title {
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+#d-published-at:hover { border-color: var(--text-tertiary); }
+#d-published-at:focus-visible {
+  outline: none;
+  border-color: var(--action);
+  box-shadow: 0 0 0 3px var(--action-soft);
+}
+#d-published-at::-webkit-calendar-picker-indicator { cursor: pointer; }
+
 /* AI 판단 vs 내 판단: two distinct labeled blocks, not one merged card. */
 .review-subhead { font-size: 12px; font-weight: 500; letter-spacing: .02em; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: var(--sp-2); }
 .verdict-badge {
