@@ -76,6 +76,15 @@ function validateBrief(raw, evidence) {
   const lead = String(raw.lead || '').trim().replace(/[.。]+$/u, '');
   const marketSummary = String(raw.market_summary || '').trim();
   if (!lead || !marketSummary) throw new Error('incomplete_brief');
+  if (lead.length > 150) throw new Error('headline_lead_too_long');
+  const briefText = [
+    lead, marketSummary,
+    ...normalizedDevelopments.flatMap((item) => [item.summary, item.significance]),
+    ...watchpoints,
+  ].join(' ');
+  if (/[\\u0E00-\\u0E7F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF]/u.test(briefText)) {
+    throw new Error('unexpected_non_korean_script');
+  }
   return {
     lead: lead.slice(0, 500).replace(/[.。]+$/u, ''),
     market_summary: marketSummary.slice(0, 800),
@@ -144,10 +153,10 @@ function validateBrief(raw, evidence) {
     '반드시 입력 자료만 근거로 삼고, 기사에 없는 수치·인과·전망을 만들지 않는다.',
     '서로 다른 기사의 내용을 합쳐 하나의 사실처럼 쓰지 않는다. 날짜가 오래되거나 불명확하면 단정하지 않는다.',
     '입력 자료는 모두 오늘 수집되었고 최근 7일(오늘 포함) 내 발행된 자료다. 발행일이 가장 최근인 자료부터 우선 검토하고, 결과도 발행일 최신순으로 정렬한다.',
-    'lead는 확인된 사건, 수치, 계약, 정책 변화만 간결하게 적는다. “~한 하루” 같은 날짜를 꾸미는 표현, 과장·비유·관용구는 쓰지 않는다. lead 끝에 온점을 붙이지 않는다.',
+    'lead는 150자 이내의 짧은 헤드라인 한 문장으로 쓴다. 가장 중요한 확인 사실 하나를 중심으로 쓰고, 직접 관련이 없는 자료를 쉼표로 나열하지 않는다. 사건·수치·정책·계약 등 관찰된 변화만 쓰며 “~한 하루”, 과장·비유·관용구, 평가성 결론은 금지한다. 중국어·일본어·태국어 문자를 섞지 말고, lead 끝에 온점을 붙이지 않는다.',
     '가격·수급·생산·투자·정책·규제·확정 계약 등 실질적 변화를 보인 자료만 주목 후보로 삼는다. 일반 동향, 단순 행사 공지, 반복 보도, 광고성 시장규모 페이지, 영향이 불명확한 자료는 제외한다.',
     '각 후보의 중요도를 1~5 정수로 평가한다. 중요도 4 이상만 developments에 넣고 최대 5개까지만 고른다. 기준을 통과하는 자료가 적으면 5개를 채우지 말고 적은 수만 출력한다. 하나도 없으면 빈 배열을 출력한다.',
-    '중요도 기준을 통과하는 자료만 developments에 넣는다. 날짜 범위별 최소 개수 조건은 없다. 자료가 적거나 기준을 통과하지 못하면 5개 미만 또는 빈 배열을 출력한다. summary와 significance는 사실 및 시사점만 작성하고 끝에 온점을 붙이지 않는다.',
+    '중요도 기준을 통과하는 자료만 developments에 넣는다. 날짜 범위별 최소 개수 조건은 없다. 자료가 적거나 기준을 통과하지 못하면 5개 미만 또는 빈 배열을 출력한다. summary와 significance는 한국어로 사실 및 시사점만 작성하고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
     'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"오늘 자료 묶음의 관찰 요약","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
     'developments는 중요도 4 이상, 최대 5개, watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
