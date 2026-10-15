@@ -56,10 +56,33 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { kstPartsOf } = require('../lib/dailyDiscovery');
+const { requireAuth } = require('../lib/auth');
 
 const router = express.Router();
 
 const COLLECTION_WINDOW_DAYS = 7;
+const OPS_TRIAGE_STATES = new Set(['open', 'investigating', 'retry_planned', 'resolved', 'dismissed']);
+let opsTriageSchemaPromise;
+
+// This isolated additive table is created on the first Ops triage request,
+// so deployment needs no production-wide schema run. Concurrent first
+// requests share one DDL call; a failure can be retried.
+function ensureOpsTriageSchema() {
+  if (!opsTriageSchemaPromise) {
+    opsTriageSchemaPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS ops_draft_triage (
+        item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('open','investigating','retry_planned','resolved','dismissed')) DEFAULT 'open',
+        note TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `).catch((err) => {
+      opsTriageSchemaPromise = null;
+      throw err;
+    });
+  }
+  return opsTriageSchemaPromise;
+}
 
 // "금일 수집량": a KST calendar-day window (00:00–24:00 KST), not the
 // rolling 7×24h UTC window perSource above uses — the Home status bar and
@@ -183,6 +206,80 @@ router.get('/overview', async (req, res) => {
     perSource: { rows: perSourceSection.rows, ok: perSourceSection.ok, error: perSourceSection.ok ? null : perSourceSection.error },
     today: { collected: todayCollected, ok: todaySection.ok, error: todaySection.ok ? null : todaySection.error },
   });
+});
+
+
+// Draft failure/backlog triage is confined to the Ops workflow:
+// failed, gate-held, stale pending, and Drafts waiting longer than 24h.
+router.get('/draft-triage', async (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+  const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
+  const includeClosed = req.query.includeClosed === 'true';
+  try {
+    await ensureOpsTriageSchema();
+    const { rows } = await pool.query(`
+      WITH queue AS (
+        SELECT i.id, i.title, i.source_url, i.ai_status, i.ai_failure_type, i.ai_error,
+          i.gate_hold_reason, i.gate_hold_rule_version, i.collected_at, i.ai_generated_at,
+          s.name AS source_name,
+          CASE
+            WHEN i.ai_status = 'failed' THEN 'ai_failed'
+            WHEN i.gate_hold_reason IS NOT NULL THEN 'gate_held'
+            WHEN i.ai_status = 'pending' AND COALESCE(i.ai_generated_at, i.collected_at) < now() - interval '15 minutes' THEN 'stale_pending'
+            WHEN i.collected_at < now() - interval '24 hours' THEN 'aged_draft'
+            ELSE 'other'
+          END AS triage_reason,
+          COALESCE(t.status, 'open') AS triage_status,
+          t.note AS triage_note,
+          t.updated_at AS triage_updated_at
+        FROM items i
+        LEFT JOIN sources s ON s.id = i.source_id
+        LEFT JOIN ops_draft_triage t ON t.item_id = i.id
+        WHERE i.status = 'Draft' AND ($3::boolean OR COALESCE(t.status, 'open') NOT IN ('resolved','dismissed')) AND (
+          i.ai_status = 'failed'
+          OR i.gate_hold_reason IS NOT NULL
+          OR (i.ai_status = 'pending' AND COALESCE(i.ai_generated_at, i.collected_at) < now() - interval '15 minutes')
+          OR i.collected_at < now() - interval '24 hours'
+        )
+      )
+      SELECT *, count(*) OVER()::int AS total_count
+      FROM queue
+      ORDER BY CASE triage_reason WHEN 'ai_failed' THEN 0 WHEN 'gate_held' THEN 1 WHEN 'stale_pending' THEN 2 ELSE 3 END,
+        collected_at ASC NULLS FIRST, id ASC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset, includeClosed]);
+    res.json({ rows, total: rows[0]?.total_count ?? 0, limit, offset, hasMore: offset + rows.length < (rows[0]?.total_count ?? 0), includeClosed });
+  } catch (err) {
+    console.error('GET /api/stats/draft-triage failed:', err.message);
+    res.status(500).json({ error: 'Draft 트리아지 목록을 불러오는 중 오류가 발생했습니다.' });
+  }
+});
+
+router.patch('/draft-triage/:id', requireAuth, async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  const { status, note } = req.body || {};
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: '올바르지 않은 자료 ID입니다.' });
+  if (!OPS_TRIAGE_STATES.has(status)) return res.status(400).json({ error: '올바르지 않은 트리아지 상태입니다.' });
+  if (note != null && typeof note !== 'string') return res.status(400).json({ error: '메모는 문자열이어야 합니다.' });
+  const cleanNote = (note || '').trim();
+  if (cleanNote.length > 2000) return res.status(400).json({ error: '메모는 2,000자 이내로 작성해주세요.' });
+
+  try {
+    await ensureOpsTriageSchema();
+    const { rows } = await pool.query(`
+      INSERT INTO ops_draft_triage (item_id, status, note, updated_at)
+      SELECT i.id, $2, $3, now() FROM items i WHERE i.id = $1 AND i.status = 'Draft'
+      ON CONFLICT (item_id) DO UPDATE
+        SET status = EXCLUDED.status, note = EXCLUDED.note, updated_at = now()
+        WHERE EXISTS (SELECT 1 FROM items i WHERE i.id = EXCLUDED.item_id AND i.status = 'Draft')
+      RETURNING item_id, status, note, updated_at
+    `, [id, status, cleanNote || null]);
+    if (!rows.length) return res.status(404).json({ error: '현재 Draft 상태인 자료를 찾을 수 없습니다.' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(`PATCH /api/stats/draft-triage/${id} failed:`, err.message);
+    res.status(500).json({ error: '트리아지 기록 저장 중 오류가 발생했습니다.' });
+  }
 });
 
 module.exports = router;
