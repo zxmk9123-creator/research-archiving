@@ -2470,43 +2470,15 @@ function marketDataModeLabel(mode) {
 let marketDataSnapshot = null;
 let marketChartSelected = 'palm-oil';
 let marketChartHeight = 360;
-const MARKET_DATA_TV_SYMBOLS = { 'palm-oil': 'MYX:FCPO1!', 'soybean-oil': 'CBOT:ZL1!' };
 
 function renderMarketDataFallback(target, instrument) {
   const caption = document.getElementById('market-data-chart-caption');
-  if (caption) caption.textContent = 'Barchart 시간봉이 제공되지 않아 TradingView 차트를 표시합니다. 차트 위 커서로 날짜·시간과 가격을 확인할 수 있습니다.';
-  const symbol = MARKET_DATA_TV_SYMBOLS[instrument?.id] || MARKET_DATA_TV_SYMBOLS['palm-oil'];
-  target.innerHTML = `<div class="market-data-fallback-title">${escapeHtml(instrument?.label || '시장')} · TradingView 원천 차트</div><div id="market-data-tv-fallback" class="market-data-tv-fallback tradingview-widget-container"><div class="tradingview-widget-container__widget"></div></div>`;
-  const container = target.querySelector('#market-data-tv-fallback');
-  const widget = container.querySelector('.tradingview-widget-container__widget');
-  widget.style.width = '100%';
-  widget.style.height = '100%';
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.textContent = JSON.stringify({
-    autosize: true,
-    symbol,
-    interval: '60',
-    timezone: 'Asia/Seoul',
-    theme: 'light',
-    style: '1',
-    locale: 'kr',
-    allow_symbol_change: false,
-    calendar: false,
-    details: false,
-    hide_side_toolbar: true,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    hide_volume: false,
-    hotlist: false,
-    save_image: false,
-    withdateranges: true,
-    backgroundColor: 'rgba(255, 255, 255, 0)',
-    gridColor: 'rgba(120, 130, 140, 0.12)',
-    studies: [],
-  });
-  container.appendChild(script);
+  if (caption) caption.textContent = 'Barchart 시간봉을 사용할 수 없을 때는 아래 원천 사이트에서 종목별 차트를 확인해 주세요.';
+  const tvUrl = instrument?.id === 'soybean-oil'
+    ? 'https://www.tradingview.com/symbols/CBOT-ZL1%21/'
+    : 'https://www.tradingview.com/symbols/MYX-FCPO1%21/';
+  const barchartUrl = instrument?.sourceUrl || 'https://www.barchart.com/futures';
+  target.innerHTML = `<div class="market-data-fallback"><strong>${escapeHtml(instrument?.label || '시장')} 차트</strong><p>Barchart API 키와 데이터 표시 권한이 설정되면 이 영역에 1시간 봉 차트가 표시됩니다. 현재는 TradingView 임베드가 이 종목을 지원하지 않아 원천 사이트에서 열어야 합니다.</p><div class="market-data-fallback-links"><a href="${escapeHtml(barchartUrl)}" target="_blank" rel="noopener noreferrer">Barchart 원천 ↗</a><a href="${escapeHtml(tvUrl)}" target="_blank" rel="noopener noreferrer">TradingView 차트 ↗</a></div></div>`;
 }
 
 function renderMarketDataChart() {
