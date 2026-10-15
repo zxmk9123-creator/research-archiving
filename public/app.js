@@ -2187,6 +2187,16 @@ function opsFailureLabel(failureType) {
 }
 
 const OPS_LAST_SNAPSHOT_KEY = 'ra_ops_last_snapshot';
+let opsTriageOffset = 0;
+let opsTriageShowClosed = false;
+const OPS_TRIAGE_STATUS_LABELS = {
+  open: '확인 필요', investigating: '분석 중', retry_planned: '재시도 예정',
+  resolved: '해결', dismissed: '제외',
+};
+const OPS_TRIAGE_REASON_LABELS = {
+  ai_failed: 'AI 생성 실패', gate_held: '자동 발행 보류',
+  stale_pending: 'AI 처리 장기 대기', aged_draft: '24시간 이상 미검수',
+};
 
 // A section-level fetch failure (reported by the server as {ok:false,
 // error}) renders this row instead of silently showing an empty table —
@@ -2195,7 +2205,65 @@ function opsSectionErrorRow(colspan, error) {
   return `<tr><td colspan="${colspan}" class="stale">집계 실패: ${error}</td></tr>`;
 }
 
-function renderOpsHtml(stats) {
+function renderOpsTriageHtml(triage) {
+  if (!triage?.ok) {
+    return `<div class="section ops-triage"><div class="section-header"><h2>Draft 실패·적체 트리아지</h2></div><p class="stale">목록을 불러오지 못했습니다: ${escapeHtml(triage?.error || '응답이 없습니다.')}</p></div>`;
+  }
+  const rows = triage.rows.map((item) => {
+    const reason = OPS_TRIAGE_REASON_LABELS[item.triage_reason] || item.triage_reason;
+    const detail = item.gate_hold_reason
+      ? (GATE_HOLD_LABELS[item.gate_hold_reason] || item.gate_hold_reason)
+      : item.ai_error || opsFailureLabel(item.ai_failure_type);
+    const sourceUrl = /^https?:\/\//i.test(item.source_url || '')
+      ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">원문</a>` : '';
+    return `<tr data-ops-triage-id="${item.id}">
+      <td><span class="ops-triage-reason">${escapeHtml(reason)}</span><div class="meta">${escapeHtml(detail || '추가 사유 없음')}</div></td>
+      <td><strong>${escapeHtml(item.title || '(제목 없음)')}</strong><div class="meta">${escapeHtml(item.source_name || '출처 미상')} · ${formatDateOnly(item.collected_at)} · ${sourceUrl}</div></td>
+      <td><select class="ops-triage-status" aria-label="트리아지 상태">${Object.entries(OPS_TRIAGE_STATUS_LABELS).map(([value, label]) => `<option value="${value}" ${item.triage_status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></td>
+      <td><textarea class="ops-triage-note" rows="2" maxlength="2000" placeholder="확인 내용 또는 후속 조치 메모">${escapeHtml(item.triage_note || '')}</textarea></td>
+      <td><button class="btn ops-triage-save" type="button" onclick="saveOpsDraftTriage(${item.id}, this)">저장</button><span class="ops-triage-saved" aria-live="polite"></span></td>
+    </tr>`;
+  }).join('');
+  const first = triage.total ? triage.offset + 1 : 0;
+  const last = triage.offset + triage.rows.length;
+  return `<div class="section ops-triage">
+    <div class="section-header"><h2>Draft 실패·적체 트리아지</h2><div class="ops-triage-tools"><span class="meta">${first}–${last} / ${triage.total}건</span><button class="btn" type="button" onclick="toggleOpsTriageClosed()">${triage.includeClosed ? '미해결만 보기' : '해결·제외 포함'}</button></div></div>
+    <p class="ops-triage-note-help">실패·자동 발행 보류·15분 이상 처리 대기·24시간 이상 미검수 Draft를 우선 표시합니다. 상태와 메모만 기록하며, AI 재시도·자료 발행 상태에는 영향을 주지 않습니다.</p>
+    ${triage.rows.length ? `<div class="ops-triage-table-wrap"><table class="ops-triage-table"><thead><tr><th>분류 / 사유</th><th>자료</th><th>조치 상태</th><th>운영 메모</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="ops-triage-empty">현재 트리아지 대상 Draft가 없습니다.</p>'}
+    <div class="ops-triage-pagination">${triage.offset > 0 ? `<button class="btn" type="button" onclick="changeOpsTriagePage(-1)">이전</button>` : ''}${triage.hasMore ? `<button class="btn" type="button" onclick="changeOpsTriagePage(1)">다음 100건</button>` : ''}</div>
+  </div>`;
+}
+
+window.changeOpsTriagePage = function changeOpsTriagePage(direction) {
+  opsTriageOffset = Math.max(0, opsTriageOffset + direction * 100);
+  renderOps();
+};
+
+window.toggleOpsTriageClosed = function toggleOpsTriageClosed() {
+  opsTriageShowClosed = !opsTriageShowClosed;
+  opsTriageOffset = 0;
+  renderOps();
+};
+
+window.saveOpsDraftTriage = async function saveOpsDraftTriage(id, button) {
+  const row = button.closest('[data-ops-triage-id]');
+  if (!row) return;
+  const status = row.querySelector('.ops-triage-status').value;
+  const note = row.querySelector('.ops-triage-note').value;
+  const saved = row.querySelector('.ops-triage-saved');
+  button.disabled = true;
+  saved.textContent = '저장 중…';
+  try {
+    await api(`/stats/draft-triage/${id}`, { method: 'PATCH', body: JSON.stringify({ status, note }) });
+    saved.textContent = '저장됨';
+  } catch (err) {
+    saved.textContent = `저장 실패: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+function renderOpsHtml(stats, triage) {
   const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
   const backlogRows = backlog.ok
@@ -2259,6 +2327,8 @@ function renderOpsHtml(stats) {
       <table><tr><th>원인</th><th>건수</th></tr>${failureRows}</table>
     </div>
 
+    ${renderOpsTriageHtml(triage)}
+
     <div class="section">
       <div class="section-header"><h2>수집 오류 중인 소스 (최근 실행 기준)</h2></div>
       <table><tr><th>소스</th><th>오류</th><th>발생 시각</th></tr>${sourceErrorRows}</table>
@@ -2278,18 +2348,26 @@ function renderOpsHtml(stats) {
 // rather than showing nothing or a crash message.
 async function renderOps() {
   let stats;
+  let banner = '';
   try {
     stats = await api('/stats/overview');
   } catch (err) {
     let cached = null;
     try { cached = JSON.parse(localStorage.getItem(OPS_LAST_SNAPSHOT_KEY) || 'null'); } catch { /* ignore corrupt cache */ }
-    const banner = `<p class="stale">갱신 실패: ${err.message}${cached ? ` — 아래는 마지막 갱신 시각(${formatDateOnly(cached.basis.generatedAt)})의 자료입니다.` : ' — 표시할 이전 자료가 없습니다.'}</p>`;
-    app.innerHTML = cached ? banner + renderOpsHtml(cached) : `<h1>운영 현황</h1>${banner}`;
-    return;
+    stats = cached;
+    banner = `<p class="stale">갱신 실패: ${escapeHtml(err.message)}${cached ? ` — 아래는 마지막 갱신 시각(${formatDateOnly(cached.basis.generatedAt)})의 자료입니다.` : ' — 표시할 이전 자료가 없습니다.'}</p>`;
   }
-  try { localStorage.setItem(OPS_LAST_SNAPSHOT_KEY, JSON.stringify(stats)); } catch { /* storage full/blocked — not fatal */ }
-  app.innerHTML = renderOpsHtml(stats);
+  if (stats && !banner) try { localStorage.setItem(OPS_LAST_SNAPSHOT_KEY, JSON.stringify(stats)); } catch { /* storage full/blocked — not fatal */ }
+  let triage;
+  try {
+    triage = { ...(await api(`/stats/draft-triage?limit=100&offset=${opsTriageOffset}&includeClosed=${opsTriageShowClosed}`)), ok: true };
+  } catch (err) {
+    triage = { ok: false, error: err.message, rows: [], total: 0, offset: opsTriageOffset };
+  }
+  const body = stats ? renderOpsHtml(stats, triage) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
+  app.innerHTML = banner + body;
 }
+
 
 // 리뷰어가 아직 적합/비적합을 확정하지 않은 항목 — "판단 미완료" 그룹을
 // 상단에 띄우는 기준. reviewer_eligible은 "적합으로 확정"/"비적합으로
