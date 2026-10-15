@@ -19,7 +19,7 @@ router.get('/', async (req, res) => {
            FROM scope_proposals WHERE status = $1 ORDER BY created_at DESC, id DESC LIMIT 100`,
         [status]
       ),
-      pool.query('SELECT term, mode FROM scope_terms ORDER BY created_at DESC LIMIT 200'),
+      pool.query('SELECT id, term, mode FROM scope_terms ORDER BY created_at DESC LIMIT 200'),
     ]);
     res.json({ proposals, activeTerms: terms, analysisRunning, minExclusions: scopeAnalysis.MIN_EXCLUSIONS });
   } catch (err) {
@@ -55,6 +55,7 @@ function decide(action) {
   };
 }
 router.post('/:id/approve', requireAuth, decide('applyProposal'));
+router.delete('/terms/:id', requireAuth, decide('revokeScopeTerm'));
 router.post('/:id/reject', requireAuth, decide('rejectProposal'));
 
 module.exports = router;

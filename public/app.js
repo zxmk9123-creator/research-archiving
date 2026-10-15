@@ -2298,7 +2298,7 @@ function renderScopeProposalsHtml(data, isAdmin) {
       <p class="ops-scope-rationale">${escapeHtml(p.rationale || '')}</p>${evidence ? `<p class="meta">근거: ${evidence}</p>` : ''}${buttons}</div>`;
   }).join('');
   const active = data.activeTerms.length
-    ? `<p class="meta">적용 중인 조정: ${data.activeTerms.map((t) => `${t.mode === 'include' ? '＋' : '－'}${escapeHtml(t.term)}`).join(', ')}</p>` : '';
+    ? `<div class="ops-scope-active"><span class="meta">적용 중인 조정</span>${data.activeTerms.map((t) => `<span class="ops-scope-term">${t.mode === 'include' ? '＋' : '－'}${escapeHtml(t.term)}${isAdmin ? `<button type="button" class="ops-scope-revoke" title="이 조정 해제" aria-label="${escapeHtml(t.term)} 해제" onclick="revokeScopeTerm(${t.id}, this)">×</button>` : ''}</span>`).join('')}</div>` : '';
   const runButton = isAdmin
     ? `<button class="btn" type="button" onclick="runScopeAnalysisNow(this)" ${data.analysisRunning ? 'disabled' : ''}>${data.analysisRunning ? '분석 중…' : '지금 분석 실행'}</button>` : '';
   return `<div class="section ops-scope">
@@ -2316,6 +2316,18 @@ window.decideScopeProposal = async function decideScopeProposal(id, action, butt
   } catch (err) {
     button.disabled = false;
     alert(`처리 실패: ${err.message}`);
+  }
+};
+
+window.revokeScopeTerm = async function revokeScopeTerm(id, button) {
+  if (!confirm('이 범위 조정을 해제할까요? 즉시 수집 필터에서 빠집니다.')) return;
+  button.disabled = true;
+  try {
+    await api(`/scope-proposals/terms/${id}`, { method: 'DELETE' });
+    renderOps();
+  } catch (err) {
+    button.disabled = false;
+    alert(`해제 실패: ${err.message}`);
   }
 };
 

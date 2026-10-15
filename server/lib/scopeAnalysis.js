@@ -206,6 +206,17 @@ async function applyProposal(id) {
   return { ok: true };
 }
 
+// Undo for an approved term: removes it and refreshes the filter cache so
+// the change takes effect immediately. The originating proposal stays
+// 'applied' as history (and, via the 60-day no-re-proposal window, the same
+// term isn't immediately suggested again).
+async function revokeScopeTerm(id) {
+  const { rowCount } = await pool.query('DELETE FROM scope_terms WHERE id = $1', [id]);
+  if (!rowCount) return { ok: false, status: 404, error: 'not found' };
+  await refreshScopeTerms();
+  return { ok: true };
+}
+
 async function rejectProposal(id) {
   const { rowCount } = await pool.query(
     `UPDATE scope_proposals SET status = 'rejected', decided_at = now() WHERE id = $1 AND status = 'pending'`,
@@ -216,5 +227,5 @@ async function rejectProposal(id) {
 
 module.exports = {
   refreshScopeTerms, runScopeAnalysis, maybeRunWeeklyScopeAnalysis, validateAnalysis,
-  applyProposal, rejectProposal, MIN_EXCLUSIONS,
+  applyProposal, rejectProposal, revokeScopeTerm, MIN_EXCLUSIONS,
 };

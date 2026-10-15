@@ -1156,3 +1156,7 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .ops-scope-kind { display: inline-block; padding: 1px 8px; margin-right: 6px; border-radius: 999px; background: var(--action-soft); color: var(--action); font-size: 12px; font-weight: 700; }
 .ops-scope-rationale { margin: 4px 0; color: var(--text-secondary); font-size: 13px; }
 .ops-scope-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.ops-scope-active { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
+.ops-scope-term { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+.ops-scope-revoke { border: 0; background: none; color: var(--text-tertiary); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; }
+.ops-scope-revoke:hover { color: var(--danger); }

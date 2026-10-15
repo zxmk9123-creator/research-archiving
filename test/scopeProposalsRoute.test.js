@@ -21,9 +21,17 @@ function swap(name, fn) { const o = scopeAnalysis[name]; scopeAnalysis[name] = f
 
 test('every state-changing endpoint rejects an unauthenticated caller', () => withServer(async (base) => {
   const calls = [];
-  const restores = ['runScopeAnalysis', 'applyProposal', 'rejectProposal'].map((n) => swap(n, async () => { calls.push(n); return { ok: true }; }));
+  const restores = ['runScopeAnalysis', 'applyProposal', 'rejectProposal', 'revokeScopeTerm'].map((n) => swap(n, async () => { calls.push(n); return { ok: true }; }));
   try {
     for (const path of ['/run', '/1/approve', '/1/reject']) {
+      const res = await fetch(base + path, { method: 'POST' });
+      assert.equal(res.status, 401, path);
+    }
+    {
+      const res = await fetch(`${base}/terms/1`, { method: 'DELETE' });
+      assert.equal(res.status, 401, 'DELETE /terms/:id');
+    }
+    for (const path of []) {
       const res = await fetch(base + path, { method: 'POST' });
       assert.equal(res.status, 401, path);
     }

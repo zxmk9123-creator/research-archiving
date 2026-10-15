@@ -237,3 +237,33 @@ test('runScopeAnalysis: with enough data it calls the (mockable) LLM, validates,
     restore();
   }
 });
+
+test('revokeScopeTerm: deletes the term and refreshes the filter cache immediately', async () => {
+  relevance.setDynamicScopeTerms({ include: ['quantum battery'] });
+  assert.equal(relevance.isRelevantToOilFatsScope('Quantum battery news', ''), true);
+  const { calls, restore } = mockPool((text) => {
+    if (text.includes('DELETE FROM scope_terms')) return { rowCount: 1 };
+    if (text.includes('FROM scope_terms')) return { rows: [] }; // nothing left after revoke
+    return { rows: [] };
+  });
+  try {
+    assert.deepEqual(await scope.revokeScopeTerm(4), { ok: true });
+    assert.deepEqual(calls[0].params, [4]);
+    assert.equal(relevance.isRelevantToOilFatsScope('Quantum battery news', ''), false);
+  } finally {
+    restore();
+    relevance.setDynamicScopeTerms({});
+  }
+});
+
+test('revokeScopeTerm: unknown id -> 404 and the cache is left alone', async () => {
+  const { calls, restore } = mockPool(() => ({ rowCount: 0 }));
+  try {
+    const r = await scope.revokeScopeTerm(99);
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 404);
+    assert.equal(calls.length, 1);
+  } finally {
+    restore();
+  }
+});
