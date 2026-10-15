@@ -25,9 +25,9 @@ function titleFromUrlPath(url) {
     } catch {
       continue;
     }
-    segment = segment.replace(/\\.(html?|article|aspx?)$/i, '');
-    if (!/[a-z]/i.test(segment) || /^\\d+$/.test(segment)) continue;
-    const words = segment.replace(/[-_]+/g, ' ').trim().split(/\\s+/);
+    segment = segment.replace(/\.(html?|article|aspx?)$/i, '');
+    if (!/[a-z]/i.test(segment) || /^\d+$/.test(segment)) continue;
+    const words = segment.replace(/[-_]+/g, ' ').trim().split(/\s+/);
     return words.map((word) => {
       const lower = word.toLowerCase();
       if (['uk', 'saf', 'eu', 'us'].includes(lower)) return lower.toUpperCase();
