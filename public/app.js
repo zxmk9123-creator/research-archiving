@@ -2677,7 +2677,7 @@ async function renderReview() {
           ${renderAiBox()}
         </div>
         <div class="review-pane">
-          <div class="review-section">
+          <div class="review-section" id="d-published-at-section">
             <div class="review-section-title">발행일</div>
             <input id="d-published-at" type="date">
           </div>
