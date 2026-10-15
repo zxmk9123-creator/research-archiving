@@ -608,7 +608,7 @@ p { margin: 0; }
 .headlines-date { flex: 0 0 auto; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .headlines-basis { margin: 0 0 var(--sp-5); line-height: 23px; }
 .headline-lead { padding: 0 0 var(--sp-5); border-bottom: 1px solid var(--border); background: transparent; }
-.headline-lead h2 { max-width: none; margin: 0; padding-bottom: var(--sp-4); border-bottom: 1px solid var(--border); font-size: 18px; line-height: 1.5; letter-spacing: -.01em; }
+.headline-lead h2 { color: #3182f6; max-width: none; margin: 0; padding-bottom: var(--sp-4); border-bottom: 1px solid var(--border); font-size: 18px; line-height: 1.5; letter-spacing: -.01em; }
 .headline-lead > p:last-child { max-width: none; margin: var(--sp-4) 0 0; color: var(--text-secondary); font-size: 15px; line-height: 23px; }
 .headlines-columns { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(250px, .8fr); gap: var(--sp-4); margin-top: var(--sp-4); align-items: start; }
 .headline-panel { min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
