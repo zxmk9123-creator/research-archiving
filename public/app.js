@@ -3109,6 +3109,13 @@ function updateActiveNavTab(path) {
 // next tour onto this one unconditionally (see startHomeTour below)
 // without caring which of those three happened.
 let activeSpotlightTourCancel = null;
+function cancelActiveSpotlightTour() {
+  if (!activeSpotlightTourCancel) return;
+  const cancel = activeSpotlightTourCancel;
+  activeSpotlightTourCancel = null;
+  cancel();
+}
+
 function runSpotlightTour(steps, seenKey, onDone) {
   if (activeSpotlightTourCancel) {
     activeSpotlightTourCancel();
@@ -3144,6 +3151,7 @@ function runSpotlightTour(steps, seenKey, onDone) {
     if (finished) return;
     finished = true;
     cleanup();
+    if (activeSpotlightTourCancel === cancel) activeSpotlightTourCancel = null;
   }
 
   function finish() {
@@ -3211,7 +3219,7 @@ function runSpotlightTour(steps, seenKey, onDone) {
 const ONBOARDING_SEEN_KEY = 'ra_onboarding_seen';
 const ONBOARDING_STEPS = [
   { selector: '[data-route="home"]', title: 'Home', desc: '주요 섹터별 최신 이슈를 한눈에 보는 대시보드입니다. 여기서 AI 검색도 할 수 있어요.' },
-  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 수집된 자료와 최근 7일 내 발행된 신규 소식을 짧은 브리프로 읽을 수 있습니다.' },
+  { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 수집·최근 7일 내 발행된 자료 중 주목할 변화를 헤드메시지부터 자료별 인사이트까지 순서대로 확인합니다.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
@@ -3219,6 +3227,21 @@ const ONBOARDING_STEPS = [
   { selector: '[data-route="ops"]', title: '운영 현황', desc: '파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 보는 운영자용 대시보드입니다.' },
 ];
 function startOnboardingTour(onDone) { runSpotlightTour(ONBOARDING_STEPS, ONBOARDING_SEEN_KEY, onDone); }
+
+const HEADLINES_TOUR_SEEN_KEY = 'ra_headlines_tour_seen';
+const HEADLINES_TOUR_STEPS = [
+  { selector: '.headline-lead h2', title: '헤드메시지', desc: '오늘 자료에서 가장 중요한 시장 변화를 한 문장으로 먼저 파악합니다.' },
+  { selector: '.headline-lead > p', title: '상세내용 압축', desc: '여러 자료에서 확인된 변화와 시장 맥락을 짧게 이어서 읽습니다.' },
+  { selector: '.headline-story-title', title: '자료 원문 제목', desc: '주목 자료의 원문 제목입니다. 제목을 누르면 아카이브 상세 화면에서 원문 링크와 자료 정보를 확인할 수 있습니다.' },
+  { selector: '.headline-story-summary', title: '본문 발췌', desc: '자료에서 확인된 핵심 사실을 인용문으로 보여줍니다.' },
+  { selector: '.headline-significance', title: '인사이트', desc: '해당 사실이 시장이나 공급망 판단에 주는 의미를 확인합니다.' },
+];
+function startHeadlinesTour(replay = false) {
+  if (replay) localStorage.removeItem(HEADLINES_TOUR_SEEN_KEY);
+  if (!document.querySelector('.headline-lead h2') || !document.querySelector('.headline-story-title')) return false;
+  runSpotlightTour(HEADLINES_TOUR_STEPS, HEADLINES_TOUR_SEEN_KEY);
+  return true;
+}
 
 // Review-page tour — spotlights that page's own controls in the order a
 // reviewer actually works through them (판단 미완료 draft 고르기 → AI 판단
@@ -3290,9 +3313,11 @@ function startHomeTour() { runSpotlightTour(HOME_TOUR_STEPS, HOME_TOUR_SEEN_KEY)
 // wherever the user already is, instead of being preceded by an instant
 // snap to the top that the smooth scroll then has to climb back down from.
 let skipNextScrollReset = false;
+let initialRouteToursReady = false;
 
 async function router() {
   const { path, param, query } = parseHash();
+  cancelActiveSpotlightTour();
   updateActiveNavTab(path);
   // Leaving Home (or re-rendering it) must stop its carousels' setInterval
   // timers before the next page's render replaces app.innerHTML — otherwise
@@ -3302,7 +3327,10 @@ async function router() {
   if (statusBar && path !== 'home' && path !== '') statusBar.hidden = true;
   try {
     if (path === 'home' || path === '') await renderHome();
-    else if (path === 'headlines') await renderHeadlines();
+    else if (path === 'headlines') {
+      await renderHeadlines();
+      if (initialRouteToursReady && !localStorage.getItem(HEADLINES_TOUR_SEEN_KEY)) startHeadlinesTour();
+    }
     else if (path === 'archive') await renderArchive(query);
     else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
@@ -3394,6 +3422,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // chaining startHomeTour as the nav tour's onDone keeps the two from
   // ever appearing at the same time.
   await router();
+  initialRouteToursReady = true;
   // Guards against a deep link landing on a non-Home route on first
   // visit: none of HOME_TOUR_STEPS' selectors would exist there, which
   // would otherwise mark HOME_TOUR_SEEN_KEY as seen without ever showing
@@ -3401,7 +3430,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   // actually lands on Home, rather than burning it on a page it can't
   // run on.
   startOnboardingTour(() => {
-    if (parseHash().path === 'home' || parseHash().path === '') startHomeTour();
+    const path = parseHash().path || 'home';
+    if (path === 'home') startHomeTour();
+    else if (path === 'headlines') startHeadlinesTour();
   });
 
   // "사용 가이드" link (top-right of the topbar): replays whichever tour
@@ -3421,6 +3452,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (path === 'home') {
       localStorage.removeItem(HOME_TOUR_SEEN_KEY);
       startHomeTour();
+    } else if (path === 'headlines') {
+      if (!startHeadlinesTour(true)) {
+        const step = ONBOARDING_STEPS.find((item) => item.selector === '[data-route="headlines"]');
+        runSpotlightTour([step], 'ra_tab_info_seen_headlines');
+      }
     } else if (path === 'review') {
       localStorage.removeItem(REVIEW_TOUR_SEEN_KEY);
       startReviewTour();

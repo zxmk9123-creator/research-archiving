@@ -45,6 +45,38 @@ function parseJsonObject(text) {
   throw new Error('invalid_brief_json');
 }
 
+
+const CERTAINTY_CLAIMS = [
+  {
+    name: 'contract_execution',
+    claim: /(?:(?:오프테이크|공급|구매|판매|장기|연료)?\s*(?:계약|합의서|합의|오프테이크)\s*(?:을|를)?\s*(?:체결|서명|맺)(?:했|하였|하고|한|됨|됐다|되었습니다)?(?!\s*(?:가능성|여부|추진|협상|예정|계획|검토|논의))|(?:MOU|MoU|양해각서)\s*(?:를)?\s*(?:체결|서명|맺)(?:했|하였|하고|한|됨|됐다|되었습니다)?(?!\s*(?:가능성|여부|추진|협상|예정|계획|검토|논의))|(?:signed|executed|concluded|entered into)\s+(?:a\s+)?(?:binding\s+)?(?:supply\s+|offtake\s+)?(?:agreement|contract|MOU)|(?:agreement|contract|MOU)\s+(?:was\s+)?(?:signed|executed|concluded)|(?:합의에 도달|합의가 타결)|reached\s+(?:a\s+)?(?:binding\s+)?agreement)/iu,
+    evidence: /(?:(?:계약|합의서|합의|오프테이크|agreement|contract|offtake).{0,60}(?:체결|서명|맺|signed|executed|concluded|entered into)|(?:체결|서명|맺|signed|executed|concluded|entered into).{0,60}(?:계약|합의서|합의|오프테이크|agreement|contract|offtake)|(?:MOU|MoU|양해각서).{0,40}(?:체결|서명|signed|executed|concluded)|(?:체결|서명|signed|executed|concluded).{0,40}(?:MOU|MoU|양해각서)|합의.{0,20}(?:도달|타결)|reached.{0,30}agreement)/iu,
+  },
+  {
+    name: 'supply_commitment',
+    claim: /(?:공급|오프테이크|장기 공급).{0,24}(?:확정|확보|합의|보장)|(?:supply|offtake).{0,32}(?:confirmed|secured|guaranteed|finali[sz]ed)/iu,
+    evidence: /(?:공급|오프테이크|supply|offtake).{0,60}(?:확정|확보|체결|서명|secured|signed|confirmed|guaranteed|executed)|(?:확정|확보|체결|서명|secured|signed|confirmed|guaranteed|executed).{0,60}(?:공급|오프테이크|supply|offtake)/iu,
+  },
+  {
+    name: 'plan_finalization',
+    claim: /(?:계획|일정|목표|생산능력|공급량|프로젝트).{0,24}(?:확정|최종 승인|최종 결정)(?:했|하였|됨|됐다|되었|되었습니다)?|(?:plan|schedule|target|capacity|project).{0,24}(?:confirmed|finali[sz]ed|approved)/iu,
+    evidence: /(?:계획|일정|목표|생산능력|공급량|프로젝트).{0,60}(?:확정|최종 승인|최종 결정|confirmed|finali[sz]ed|approved)|(?:confirmed|finali[sz]ed|approved).{0,60}(?:plan|schedule|target|capacity|project)/iu,
+  },
+  {
+    name: 'operation_completion',
+    claim: /(?:생산을 시작|생산 개시|상업운전(?:을)? 시작|가동을 시작|가동에 들어|착공(?:을)? 시작|착공(?:했|했다|하였)|공사를 완료|완공(?:했|됐다|되었)|준공(?:했|됐다|되었)|started production|began production|commenced operations|began operations|construction began|construction completed|commissioned)/iu,
+    evidence: /(?:생산을 시작|생산 개시|상업운전(?:을)? 시작|가동을 시작|가동에 들어|착공(?:을)? 시작|공사를 완료|완공|준공|began production|started production|began operations|commenced operations|construction began|construction completed|commissioned)/iu,
+  },
+];
+
+function assertSupportedCertainty(claimText, sourceText, itemId) {
+  for (const rule of CERTAINTY_CLAIMS) {
+    if (rule.claim.test(claimText) && !rule.evidence.test(sourceText)) {
+      throw new Error(`unsupported_certainty_${rule.name}${itemId ? `_item_${itemId}` : ''}`);
+    }
+  }
+}
+
 function validateBrief(raw, evidence) {
   const evidenceById = new Map(evidence.map((item) => [Number(item.item_id), item]));
   const developments = Array.isArray(raw.developments) ? raw.developments : [];
@@ -57,6 +89,9 @@ function validateBrief(raw, evidence) {
     const summary = String(entry.summary || '').trim();
     const significance = String(entry.significance || '').trim();
     if (!summary || !significance) return null;
+    const source = evidenceById.get(itemId);
+    const sourceText = [source.title, source.summary, source.insight].filter(Boolean).join(' ');
+    assertSupportedCertainty(`${summary} ${significance}`, sourceText, itemId);
     seenIds.add(itemId);
     return { item_id: itemId, summary: summary.slice(0, 500).replace(/[.。]+$/u, ''), significance: significance.slice(0, 400).replace(/[.。]+$/u, ''), importance };
   }).filter(Boolean)
@@ -76,6 +111,8 @@ function validateBrief(raw, evidence) {
   const lead = String(raw.lead || '').trim().replace(/[.。]+$/u, '');
   const marketSummary = String(raw.market_summary || '').trim();
   if (!lead || !marketSummary) throw new Error('incomplete_brief');
+  const allEvidenceText = evidence.map((item) => [item.title, item.summary, item.insight].filter(Boolean).join(' ')).join(' ');
+  assertSupportedCertainty(`${lead} ${marketSummary}`, allEvidenceText);
   if (lead.length > 150) throw new Error('headline_lead_too_long');
   const briefText = [
     lead, marketSummary,
@@ -151,6 +188,7 @@ function validateBrief(raw, evidence) {
   const system = [
     '당신은 식용유지·유지종자·바이오연료·물류·규제 분야의 한국어 데일리 브리프 편집자다.',
     '반드시 입력 자료만 근거로 삼고, 기사에 없는 수치·인과·전망을 만들지 않는다.',
+    '사실의 확정 수준은 원문과 동일하게 유지한다. selected/선정은 계약 체결이 아니고, proposed/제안은 확정이 아니며, negotiating/in talks/협상 중은 체결이 아니다. planned/targeting/예정은 착공·생산·가동이 시작됐다는 뜻이 아니다. 원문에 서명·체결·최종 승인·실제 착공/가동이 명시되지 않으면 그런 완료형 표현을 쓰지 말고 선정·협상 중·제안·계획·목표 등 원문의 상태를 그대로 표시한다.',
     '서로 다른 기사의 내용을 합쳐 하나의 사실처럼 쓰지 않는다. 날짜가 오래되거나 불명확하면 단정하지 않는다.',
     '입력 자료는 모두 오늘 수집되었고 최근 7일(오늘 포함) 내 발행된 자료다. 발행일이 가장 최근인 자료부터 우선 검토하고, 결과도 발행일 최신순으로 정렬한다.',
     'lead는 150자 이내의 짧은 헤드라인 한 문장으로 쓴다. 가장 중요한 확인 사실 하나를 중심으로 쓰고, 직접 관련이 없는 자료를 쉼표로 나열하지 않는다. 사건·수치·정책·계약 등 관찰된 변화만 쓰며 “~한 하루”, 과장·비유·관용구, 평가성 결론은 금지한다. 중국어·일본어·태국어 문자를 섞지 말고, lead 끝에 온점을 붙이지 않는다.',
