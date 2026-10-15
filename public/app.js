@@ -2433,242 +2433,20 @@ function renderHeadlineBrief(data) {
       <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 당일 아카이브 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
     </div>
     ${footnotes ? `<section class="headline-footnotes" aria-label="브리프 원문 각주"><h2>원문 각주</h2><ol>${footnotes}</ol></section>` : ''}
-    ${renderMarketWatch()}
+    ${renderHeadlineMarketLinks()}
   </div>`;
 }
 
-const MARKET_WATCH_INSTRUMENTS = [
-  { symbol: 'TVC:USOIL', label: 'WTI 원유 CFD', group: '에너지 참고', embeddable: true, url: 'https://www.tradingview.com/symbols/USOIL/?exchange=TVC' },
-  { symbol: 'TVC:UKOIL', label: '브렌트 원유 CFD', group: '에너지 참고', embeddable: true, url: 'https://www.tradingview.com/symbols/UKOIL/?exchange=TVC' },
-  { symbol: 'MYX:FCPO1!', label: '팜유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/MYX-FCPO1%21/' },
-  { symbol: 'CBOT:ZL1!', label: '대두유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/CBOT-ZL1%21/' },
-  { symbol: 'MYX:FPKO1!', label: '팜핵유 선물', group: '유지 원료', url: 'https://www.tradingview.com/symbols/MYX-FPKO1%21/' },
-  { symbol: 'ICEUS:RS1!', label: '카놀라 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/ICEUS-RS1%21/' },
-];
-
-function renderMarketWatch() {
-  const buttons = MARKET_WATCH_INSTRUMENTS.map((instrument, index) => instrument.embeddable
-    ? `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`
-    : `<a class="market-watch-tab market-watch-external" href="${instrument.url}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(instrument.label)} ↗</span><small>${escapeHtml(instrument.group)} · TradingView에서 보기</small></a>`).join('');
-  return `<section class="market-watch" aria-labelledby="market-watch-title">
-    <div class="market-watch-heading"><div><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>식용유지 선물 시세와 원유 참고 차트를 확인합니다.</p></div><span class="market-watch-provider">식용유지: Barchart API · 원유 참고: TradingView</span></div>
-    <section class="market-data-snapshot" aria-label="유지 선물 시세 스냅샷"><div class="market-data-status"><span id="market-data-status-text" aria-live="polite">공급원 연동 상태를 확인하는 중입니다…</span><button type="button" class="market-data-refresh" id="market-data-refresh">새로고침</button></div><div id="market-data-cards" class="market-data-cards"></div></section>
-    <div class="market-data-chart-controls"><label class="market-data-select-label">차트 종목<select id="market-data-instrument" aria-controls="market-data-chart"><option value="palm-oil">팜유 선물</option><option value="soybean-oil">대두유 선물</option></select></label><label class="market-data-height-label"><span>차트 높이 <output id="market-data-height-value">${marketChartHeight}px</output></span><input id="market-data-height" type="range" min="280" max="600" step="20" value="${marketChartHeight}" aria-label="차트 높이 조절"></label></div>
-    <div id="market-data-chart" class="market-data-chart" aria-live="polite"><p class="market-data-chart-empty">공급원 연동 상태를 확인하는 중입니다…</p></div>
-    <p id="market-data-chart-caption" class="market-data-chart-caption">커서를 차트 위로 이동하면 해당 시점의 날짜·시간과 가격을 확인할 수 있습니다.</p>
-    <div class="market-watch-reference-heading"><h3>원유 참고 차트</h3><span>식용유지 선물 가격과는 다른 지표입니다.</span></div>
-    <div class="market-watch-tabs" role="group" aria-label="원유 참고 차트 종목 선택">${buttons}</div>
-    <div class="market-watch-chart-frame"><div id="market-chart-widget" class="market-watch-chart tradingview-widget-container" aria-label="선택한 시장 종목 차트"></div></div>
-    <p class="market-watch-disclaimer">팜유·대두유 시세는 Barchart API 계약·표시 권한 설정 후 표시됩니다. 실시간/지연 여부와 거래 시각은 시세 카드에서 확인하세요. 상세 차트와 기타 유지 원료는 각 원천 화면을 이용합니다. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
+function renderHeadlineMarketLinks() {
+  const references = [
+    { label: '팜유 선물', role: '말레이시아', url: 'https://www.tradingview.com/symbols/MYX-FCPO1%21/' },
+    { label: '대두유 선물', role: '미국', url: 'https://www.tradingview.com/symbols/CBOT-ZL1%21/' },
+    { label: '브렌트유', role: '에너지 참고', url: 'https://www.tradingview.com/symbols/UKOIL/?exchange=TVC' },
+  ];
+  return `<section class="headline-market" aria-labelledby="headline-market-title">
+    <div><h2 id="headline-market-title">시장 지표 확인</h2><p>가격 데이터는 원천 화면에서 확인합니다. 종목을 눌러 해당 선물·지표로 이동하세요.</p></div>
+    <nav class="headline-market-links" aria-label="시장 지표 원천 링크">${references.map((item) => `<a href="${item.url}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(item.label)}</span><small>${escapeHtml(item.role)} · TradingView ↗</small></a>`).join('')}</nav>
   </section>`;
-}
-
-function marketDataModeLabel(mode) {
-  return ({ R: '실시간', I: '지연 시세', D: '종가' })[mode] || '시세 유형 확인 필요';
-}
-
-let marketDataSnapshot = null;
-let marketChartSelected = 'palm-oil';
-let marketChartHeight = 360;
-
-function renderMarketDataFallback(target, instrument) {
-  const caption = document.getElementById('market-data-chart-caption');
-  if (caption) caption.textContent = 'Barchart 시간봉을 사용할 수 없을 때는 아래 원천 사이트에서 종목별 차트를 확인해 주세요.';
-  const tvUrl = instrument?.id === 'soybean-oil'
-    ? 'https://www.tradingview.com/symbols/CBOT-ZL1%21/'
-    : 'https://www.tradingview.com/symbols/MYX-FCPO1%21/';
-  const barchartUrl = instrument?.sourceUrl || 'https://www.barchart.com/futures';
-  target.innerHTML = `<div class="market-data-fallback"><strong>${escapeHtml(instrument?.label || '시장')} 차트</strong><p>Barchart API 키와 데이터 표시 권한이 설정되면 이 영역에 1시간 봉 차트가 표시됩니다. 현재는 TradingView 임베드가 이 종목을 지원하지 않아 원천 사이트에서 열어야 합니다.</p><div class="market-data-fallback-links"><a href="${escapeHtml(barchartUrl)}" target="_blank" rel="noopener noreferrer">Barchart 원천 ↗</a><a href="${escapeHtml(tvUrl)}" target="_blank" rel="noopener noreferrer">TradingView 차트 ↗</a></div></div>`;
-}
-
-function renderMarketDataChart() {
-  const target = document.getElementById('market-data-chart');
-  if (!target) return;
-  target.style.height = `${marketChartHeight}px`;
-  const instrument = marketDataSnapshot?.instruments?.find((item) => item.id === marketChartSelected);
-  const bars = (Array.isArray(instrument?.bars) ? instrument.bars : []).map((bar) => ({
-    timestamp: String(bar.timestamp || ''), close: Number(bar.close),
-  })).filter((bar) => Number.isFinite(Date.parse(bar.timestamp)) && Number.isFinite(bar.close));
-  if (!marketDataSnapshot?.configured || bars.length < 2) {
-    renderMarketDataFallback(target, instrument);
-    return;
-  }
-  const caption = document.getElementById('market-data-chart-caption');
-  if (caption) caption.textContent = 'Barchart 1시간 봉 · 커서를 차트 위로 이동하면 해당 봉의 날짜·시간(KST)과 종가를 확인할 수 있습니다.';
-  const width = 1000;
-  const height = marketChartHeight;
-  const left = 72;
-  const right = 24;
-  const top = 22;
-  const bottom = 34;
-  const plotWidth = width - left - right;
-  const plotHeight = height - top - bottom;
-  const values = bars.map((bar) => bar.close);
-  const low = Math.min(...values);
-  const high = Math.max(...values);
-  const padding = (high - low) * 0.12 || Math.max(Math.abs(high) * 0.002, 0.01);
-  const min = low - padding;
-  const max = high + padding;
-  const xAt = (index) => left + (index / (bars.length - 1)) * plotWidth;
-  const yAt = (value) => top + ((max - value) / (max - min)) * plotHeight;
-  const points = bars.map((bar, index) => `${xAt(index).toFixed(1)},${yAt(bar.close).toFixed(1)}`);
-  const path = points.map((point, index) => `${index ? 'L' : 'M'}${point}`).join(' ');
-  const grid = Array.from({ length: 5 }, (_, index) => {
-    const y = top + (index / 4) * plotHeight;
-    const value = max - (index / 4) * (max - min);
-    return `<line class="market-chart-gridline" x1="${left}" x2="${width - right}" y1="${y}" y2="${y}"/><text class="market-chart-axis-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 3 }).format(value))}</text>`;
-  }).join('');
-  const xLabels = [0, Math.floor((bars.length - 1) / 2), bars.length - 1].map((index) => {
-    const date = new Date(bars[index].timestamp);
-    return `<text class="market-chart-axis-label" x="${xAt(index)}" y="${height - 8}" text-anchor="${index === 0 ? 'start' : index === bars.length - 1 ? 'end' : 'middle'}">${escapeHtml(date.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }))}</text>`;
-  }).join('');
-  const latest = bars[bars.length - 1];
-  target.innerHTML = `<div class="market-data-chart-title"><strong>${escapeHtml(instrument.label || '')}</strong><span>${escapeHtml(instrument.unit || '')} · ${bars.length}개 시간봉 · 마지막 봉 ${escapeHtml(new Date(latest.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }))} KST</span></div><div class="market-data-chart-plot"><svg class="market-chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(instrument.label || '시장')} 1시간 봉 가격 차트"><g>${grid}${xLabels}</g><path class="market-chart-line" d="${path}"/><line class="market-chart-crosshair" x1="${left}" x2="${left}" y1="${top}" y2="${height - bottom}"/><circle class="market-chart-dot" cx="${left}" cy="${top}" r="5"/><rect class="market-chart-hit-area" x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight}" fill="transparent"/></svg><div class="market-chart-tooltip" hidden></div></div>`;
-  const svg = target.querySelector('.market-chart-svg');
-  const hitArea = target.querySelector('.market-chart-hit-area');
-  const crosshair = target.querySelector('.market-chart-crosshair');
-  const dot = target.querySelector('.market-chart-dot');
-  const tooltip = target.querySelector('.market-chart-tooltip');
-  hitArea.addEventListener('pointermove', (event) => {
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const local = point.matrixTransform(svg.getScreenCTM().inverse());
-    const fraction = Math.max(0, Math.min(1, (local.x - left) / plotWidth));
-    const index = Math.round(fraction * (bars.length - 1));
-    const bar = bars[index];
-    const x = xAt(index);
-    const y = yAt(bar.close);
-    crosshair.setAttribute('x1', String(x));
-    crosshair.setAttribute('x2', String(x));
-    dot.setAttribute('cx', String(x));
-    dot.setAttribute('cy', String(y));
-    const time = new Date(bar.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    tooltip.innerHTML = `<strong>${escapeHtml(time)} KST</strong><span>${escapeHtml(new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 }).format(bar.close))} ${escapeHtml(instrument.unit || '')}</span>`;
-    tooltip.hidden = false;
-    tooltip.style.left = `${Math.max(12, Math.min(88, (x / width) * 100))}%`;
-  });
-  hitArea.addEventListener('pointerleave', () => { tooltip.hidden = true; });
-}
-
-function renderMarketDataCards(data) {
-  const status = document.getElementById('market-data-status-text');
-  const cards = document.getElementById('market-data-cards');
-  if (!status || !cards) return;
-  if (!data?.configured) {
-    status.textContent = '시세 공급원 연결 대기 · 계약/API 및 표시 권한 설정 후 팜유·대두유 시세를 표시합니다.';
-    cards.replaceChildren();
-    marketDataSnapshot = data || null;
-    renderMarketDataChart();
-    return;
-  }
-  marketDataSnapshot = data;
-  const instruments = Array.isArray(data.instruments) ? data.instruments : [];
-  status.textContent = data.errors?.length
-    ? data.stale
-      ? '시세 공급원 응답이 일부 끊겨 이전에 받은 값이 표시될 수 있습니다. 거래 시각과 상태를 확인하세요.'
-      : '시세 공급원 응답 일부를 받지 못했습니다. 기존 원천 차트와 링크는 계속 이용할 수 있습니다.'
-    : `Barchart OnDemand · ${data.generatedAt ? `서버 조회 ${new Date(data.generatedAt).toLocaleString('ko-KR')}` : '조회 시각 확인 불가'} · 가격 지연 유형을 종목별로 표시합니다.`;
-  cards.innerHTML = instruments.map((item) => {
-    const price = item.price !== null && item.price !== undefined && Number.isFinite(Number(item.price)) ? new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 }).format(Number(item.price)) : '시세 없음';
-    const change = item.change !== null && item.change !== undefined && Number.isFinite(Number(item.change)) ? Number(item.change) : null;
-    const changePercent = item.changePercent !== null && item.changePercent !== undefined && Number.isFinite(Number(item.changePercent)) ? Number(item.changePercent) : null;
-    const direction = change === null ? '' : change > 0 ? 'is-up' : change < 0 ? 'is-down' : '';
-    const quoteTime = item.timestamp ? new Date(item.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '거래 시각 없음';
-    const detail = item.available && price !== '시세 없음'
-      ? `<div class="market-data-price-row"><strong>${escapeHtml(price)}</strong><span class="${direction}">${change === null ? '등락 확인 불가' : `${change > 0 ? '+' : ''}${change} (${changePercent === null ? '-' : `${changePercent > 0 ? '+' : ''}${changePercent}%`})`}</span></div><div class="market-data-meta"><span>${escapeHtml(item.unit || '')}</span><span>${marketDataModeLabel(item.mode)}</span></div><div class="market-data-meta"><span>${escapeHtml(quoteTime)}</span><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">원천 ↗</a></div>`
-      : `<div class="market-data-unavailable">현재 시세를 받지 못했습니다.<br><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Barchart 원천 확인 ↗</a></div>`;
-    return `<article class="market-data-card"><div class="market-data-card-heading"><h3>${escapeHtml(item.label || '')}</h3><span>${escapeHtml(item.symbol || '')}</span></div>${detail}</article>`;
-  }).join('');
-  renderMarketDataChart();
-}
-
-async function loadMarketData() {
-  const status = document.getElementById('market-data-status-text');
-  if (!status) return;
-  try {
-    renderMarketDataCards(await api('/market-data'));
-  } catch (err) {
-    status.textContent = '시세 스냅샷을 불러오지 못했습니다. 기존 원천 차트와 링크를 이용해 주세요.';
-  }
-}
-
-function mountMarketWatch(initialSymbol = MARKET_WATCH_INSTRUMENTS[0].symbol) {
-  const chart = document.getElementById('market-chart-widget');
-  if (!chart) return;
-  chart.style.height = `${marketChartHeight}px`;
-  const instrument = MARKET_WATCH_INSTRUMENTS.find((entry) => entry.symbol === initialSymbol && entry.embeddable) || MARKET_WATCH_INSTRUMENTS.find((entry) => entry.embeddable);
-  const source = document.getElementById('market-chart-source');
-  if (source) source.href = instrument.url;
-  document.querySelectorAll('.market-watch-tab').forEach((button) => {
-    const active = button.dataset.marketSymbol === instrument.symbol;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  const widget = document.createElement('div');
-  widget.className = 'tradingview-widget-container__widget';
-  chart.replaceChildren(widget);
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.async = true;
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.textContent = JSON.stringify({
-    autosize: true,
-    symbol: instrument.symbol,
-    interval: 'D',
-    timezone: 'Asia/Seoul',
-    theme: 'light',
-    style: '1',
-    locale: 'kr',
-    allow_symbol_change: false,
-    calendar: false,
-    details: false,
-    hide_side_toolbar: true,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    hide_volume: false,
-    hotlist: false,
-    save_image: false,
-    withdateranges: true,
-    backgroundColor: 'rgba(255, 255, 255, 0)',
-    gridColor: 'rgba(120, 130, 140, 0.12)',
-    studies: [],
-  });
-  chart.appendChild(script);
-}
-
-function bindMarketWatch() {
-  const first = document.querySelector('.market-watch-tab');
-  if (!first) return;
-  mountMarketWatch(first.dataset.marketSymbol);
-  loadMarketData();
-  const select = document.getElementById('market-data-instrument');
-  if (select) {
-    select.value = marketChartSelected;
-    select.addEventListener('change', () => { marketChartSelected = select.value; renderMarketDataChart(); });
-  }
-  const height = document.getElementById('market-data-height');
-  if (height) height.addEventListener('input', () => {
-    marketChartHeight = Number(height.value) || 360;
-    const output = document.getElementById('market-data-height-value');
-    if (output) output.value = `${marketChartHeight}px`;
-    const dataChart = document.getElementById('market-data-chart');
-    if (dataChart) dataChart.style.height = `${marketChartHeight}px`;
-    const tradingView = document.getElementById('market-chart-widget');
-    if (tradingView) tradingView.style.height = `${marketChartHeight}px`;
-  });
-  if (height) height.addEventListener('change', () => {
-    if (!document.getElementById('market-data-tv-fallback')) renderMarketDataChart();
-  });
-  const refresh = document.getElementById('market-data-refresh');
-  if (refresh) refresh.addEventListener('click', async () => {
-    refresh.disabled = true;
-    try { await loadMarketData(); }
-    finally { refresh.disabled = false; }
-  });
-  document.querySelectorAll('.market-watch-tab').forEach((button) => {
-    button.addEventListener('click', () => mountMarketWatch(button.dataset.marketSymbol));
-  });
 }
 
 async function renderHeadlines() {
@@ -2676,29 +2454,34 @@ async function renderHeadlines() {
   try {
     const data = await api('/headlines/latest');
     if (!data) {
-      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section>${renderMarketWatch()}</div>`;
-      bindMarketWatch();
+      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 자료를 핵심 변화와 근거 중심으로 요약합니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>현재 DB에 쌓인 금일자 자료를 사용해 브리프를 만들 수 있습니다.</p><button class="btn primary" id="headline-retry" type="button">금일 자료로 브리프 생성</button></section>${renderHeadlineMarketLinks()}</div>`;
+      bindHeadlineRetry('금일 자료로 브리프 생성');
       return;
     }
-    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); bindMarketWatch(); return; }
+    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); return; }
     const states = {
       generating: ['브리프를 만들고 있습니다', '수집 자료를 정리 중입니다. 잠시 후 자동으로 다시 확인합니다.'],
       empty: ['오늘 아카이브된 자료가 없습니다', '오늘 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],
       failed: ['브리프 생성에 실패했습니다', '수집 자료는 보존되어 있습니다. 관리자 인증 후 생성 재시도를 할 수 있습니다.'],
     };
     const [title, description] = states[data.status] || ['브리프 상태 확인 중', '잠시 후 다시 확인해 주세요.'];
-    app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section></div>`;
-    const retry = document.getElementById('headline-retry');
-    if (retry) retry.onclick = async () => {
-      retry.disabled = true;
-      retry.textContent = '요청 중…';
-      try { await api('/headlines/generate', { method: 'POST' }); await renderHeadlines(); }
-      catch (err) { alert(`재시도 요청 실패: ${err.message}`); retry.disabled = false; retry.textContent = '브리프 다시 생성'; }
-    };
+    app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section>${renderHeadlineMarketLinks()}</div>`;
+    if (['failed', 'empty'].includes(data.status)) bindHeadlineRetry(data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성');
     if (data.status === 'generating') setTimeout(() => { if (parseHash().path === 'headlines') renderHeadlines(); }, 15000);
   } catch (err) {
     app.innerHTML = `<div class="headlines-page"><h1>헤드라인</h1><p class="headlines-error">브리프를 불러오지 못했습니다: ${escapeHtml(err.message)}</p><button class="btn" type="button" onclick="renderHeadlines()">다시 불러오기</button></div>`;
   }
+}
+
+function bindHeadlineRetry(defaultLabel) {
+  const retry = document.getElementById('headline-retry');
+  if (!retry) return;
+  retry.onclick = async () => {
+    retry.disabled = true;
+    retry.textContent = '요청 중…';
+    try { await api('/headlines/generate', { method: 'POST' }); await renderHeadlines(); }
+    catch (err) { alert(`브리프 생성 요청 실패: ${err.message}`); retry.disabled = false; retry.textContent = defaultLabel; }
+  };
 }
 
 // 리뷰어가 아직 적합/비적합을 확정하지 않은 항목 — "판단 미완료" 그룹을
