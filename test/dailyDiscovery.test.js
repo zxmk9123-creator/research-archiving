@@ -167,13 +167,49 @@ test('collectDailyDiscoveryNow: a candidate already archived (duplicate) is reje
 
 // --- maybeRunDailyDiscovery: the scheduler entry point ---
 
-test('maybeRunDailyDiscovery: does nothing outside the 08:00 KST hour', async () => {
+test('maybeRunDailyDiscovery: does nothing outside the 08:00 KST hour (no orphaned claim pending)', async () => {
   const { calls, restore } = mockPool([]);
   try {
     const result = await maybeRunDailyDiscovery(new Date('2026-01-15T00:00:00Z')); // 09:00 KST
     assert.equal(result.ran, false);
     assert.equal(result.reason, 'not_due_hour');
-    assert.equal(calls.length, 0);
+    // One query — isTodaysClaimOrphaned()'s own SELECT, run before the hour
+    // gate so an orphaned claim (see below) can be recovered even outside
+    // the 08:00 hour — but with no row found it defaults to not-orphaned,
+    // and the out-of-hour check still short-circuits before any claim/run.
+    assert.equal(calls.length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('maybeRunDailyDiscovery: resumes an orphaned claim (today, claimed, never completed) even outside the 08:00 hour', () => withNoProviders(async () => {
+  const { restore } = mockPool([
+    ['SELECT last_run_date, last_completed_at FROM scheduler_jobs', () => ({
+      rows: [{ last_run_date: '2026-01-15', last_completed_at: null }],
+    })],
+    ['FROM sources WHERE', () => ({ rows: [] })],
+  ]);
+  try {
+    // 2026-01-15T00:00:00Z is 09:00 KST on 2026-01-15 — outside the 08:00
+    // hour, but the orphaned claim is for that same KST day, so it still runs.
+    const result = await maybeRunDailyDiscovery(new Date('2026-01-15T00:00:00Z'));
+    assert.equal(result.ran, true);
+  } finally {
+    restore();
+  }
+}));
+
+test('maybeRunDailyDiscovery: a completed claim for today is NOT orphaned, even outside the 08:00 hour', async () => {
+  const { restore } = mockPool([
+    ['SELECT last_run_date, last_completed_at FROM scheduler_jobs', () => ({
+      rows: [{ last_run_date: '2026-01-15', last_completed_at: new Date('2026-01-14T23:30:00.000Z') }], // 08:30 KST on 01-15 — same day
+    })],
+  ]);
+  try {
+    const result = await maybeRunDailyDiscovery(new Date('2026-01-15T00:00:00Z')); // 09:00 KST
+    assert.equal(result.ran, false);
+    assert.equal(result.reason, 'not_due_hour');
   } finally {
     restore();
   }

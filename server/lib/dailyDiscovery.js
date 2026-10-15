@@ -140,10 +140,38 @@ async function recordDailyDiscoveryCompletion(result) {
   return failedSources;
 }
 
+// Production incident: a routine redeploy landed at 08:35 KST, SIGTERM-ing
+// the process mid-collectDailyDiscoveryNow() — claimDailyDiscoveryRunForToday()
+// had already set last_run_date to today (it runs BEFORE collection starts),
+// but the process died before recordDailyDiscoveryCompletion() ever ran, so
+// last_completed_at stayed unset. Every later check that KST day saw
+// already_ran_today and skipped — the Home status bar stayed "미완료" for
+// the rest of the day even though most sources had, in fact, already been
+// collected. A claim with no matching completion, for TODAY specifically,
+// is recognized as orphaned and retried once rather than trusted as done.
+async function isTodaysClaimOrphaned(now = new Date()) {
+  const today = kstPartsOf(now).date;
+  const { rows } = await pool.query(
+    `SELECT last_run_date, last_completed_at FROM scheduler_jobs WHERE job_name = $1`,
+    [JOB_NAME]
+  );
+  const row = rows[0];
+  if (!row || !row.last_run_date) return false;
+  const runDate = new Date(row.last_run_date).toISOString().slice(0, 10);
+  if (runDate !== today) return false;
+  if (!row.last_completed_at) return true;
+  return kstPartsOf(row.last_completed_at).date !== today;
+}
+
 async function maybeRunDailyDiscovery(now = new Date()) {
-  if (!isDailyDiscoveryHourKst(now)) return { ran: false, reason: 'not_due_hour' };
-  const claimed = await claimDailyDiscoveryRunForToday(now);
-  if (!claimed) return { ran: false, reason: 'already_ran_today' };
+  const orphaned = await isTodaysClaimOrphaned(now);
+  if (orphaned) {
+    console.log('daily_discovery resuming_orphaned_claim');
+  } else {
+    if (!isDailyDiscoveryHourKst(now)) return { ran: false, reason: 'not_due_hour' };
+    const claimed = await claimDailyDiscoveryRunForToday(now);
+    if (!claimed) return { ran: false, reason: 'already_ran_today' };
+  }
   // run_started logged as its own line, separate from run_completed, so a
   // run that crashes/times out partway still leaves a trace distinguishing
   // "never started" from "started but never finished" — previously only
@@ -182,6 +210,7 @@ module.exports = {
   kstPartsOf,
   isDailyDiscoveryHourKst,
   claimDailyDiscoveryRunForToday,
+  isTodaysClaimOrphaned,
   collectDailyDiscoveryNow,
   recordDailyDiscoveryCompletion,
   maybeRunDailyDiscovery,
