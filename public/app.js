@@ -880,7 +880,7 @@ function renderAnswerBlock(block, sources) {
     // Model numbering can restart at 1 when a logical sequence was split into blocks.
     // renderAnswerHtml assigns each top-level list its continuation number.
     const startAttr = Number.isInteger(block.start) && block.start > 1 ? ` start="${block.start}"` : '';
-    return `<ol class="ai-answer-list"${startAttr}>`${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
+    return `<ol class="ai-answer-list"${startAttr}>${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
       item.subLines.length
         ? `<ul class="ai-answer-list ai-answer-sublist">${item.subLines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`
         : ''
