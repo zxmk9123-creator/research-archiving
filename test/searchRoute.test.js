@@ -692,6 +692,42 @@ test('retrieveCandidates SQL: an inflected question keyword also matches a candi
       // query — only "생산에" (12 items) was ever searched.
       assert.ok(selectCall.params.includes('%생산에%'));
       assert.ok(selectCall.params.includes('%생산%'));
+      // Production incident #3 on this exact question: the old tokenizer
+      // stripped the hyphen in "e-SAF" before splitting on whitespace,
+      // turning it into "e" + "SAF" — then dropped the 1-char "e",
+      // collapsing "e-SAF" down to the same generic "saf" keyword a plain
+      // "SAF" question produces. With the distinguishing "e-" prefix gone,
+      // the chatbot could never rank e-SAF-specific material above the far
+      // more numerous AtJ/ethanol-based SAF articles — confirmed live: it
+      // answered with AtJ/ethanol SAF sources and reported no e-SAF data,
+      // despite e-SAF-tagged Published items existing in the archive.
+      assert.ok(selectCall.params.includes('%e-saf%'));
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('extractKeywords (via retrieveCandidates SQL): a hyphenated technical term keeps its hyphen as a distinct, specific keyword alongside its stripped-down fallback', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: 'e-SAF production status' }),
+      });
+      const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
+      assert.ok(selectCall);
+      // Both the specific compound ("e-saf") and its generic fallback
+      // ("saf") are searched — the specific one gets the higher IDF
+      // weight (rarer in the corpus), so e-SAF-tagged material outranks
+      // plain SAF material when both match, but a broader SAF question
+      // still finds broader material via the fallback.
+      assert.ok(selectCall.params.includes('%e-saf%'));
+      assert.ok(selectCall.params.includes('%saf%'));
     });
   } finally {
     restore();

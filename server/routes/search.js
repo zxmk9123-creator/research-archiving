@@ -76,19 +76,40 @@ function stemKorean(word) {
   return word;
 }
 
-// Simple, reliable retrieval: lowercase word tokens (Unicode-aware, so
-// Korean terms work) ILIKE-matched against the same fields the Detail page
-// already shows (title/summary/insight + the AI-drafted equivalents) plus
-// source/sector/usage names. No new search index, no embeddings.
+// Root cause of a real miss: "국내 e-SAF 생산 현황" never surfaced e-SAF
+// material and instead returned generic/AtJ/ethanol-based SAF articles.
+// The OLD tokenizer stripped every non-letter/non-digit character
+// (including hyphens) before splitting on whitespace, so "e-SAF" became
+// "e SAF" — and "e" (1 char) was then dropped by the length>=2 filter,
+// collapsing "e-SAF" down to the same generic "saf" keyword a plain "SAF"
+// question would produce. With that prefix gone, nothing in the keyword
+// set could distinguish an e-SAF-specific article from the far more
+// numerous AtJ/ethanol-based/generic SAF ones — "saf" alone has high
+// corpus frequency (low IDF weight) and ranks whatever the biggest SAF
+// subtype in the archive happens to be, not necessarily e-SAF.
+// Hyphens between letters/digits are now preserved as part of the token
+// ("e-saf" survives as its own keyword, rare → high IDF weight → ranks
+// e-SAF-tagged material above generic SAF), while STILL adding the
+// hyphen-stripped parts ("saf") as fallback keywords so a broader
+// question keeps matching broader material too.
 function extractKeywords(q) {
   const tokens = String(q || '')
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 2);
+    .map((w) => w.replace(/^-+|-+$/g, '')) // strip stray leading/trailing hyphens (e.g. a bare "-" bullet)
+    .filter((w) => w.replace(/-/g, '').length >= 2);
   const withStems = new Set();
   for (const token of tokens) {
     withStems.add(token);
+    if (token.includes('-')) {
+      for (const part of token.split('-')) {
+        if (part.length >= 2) withStems.add(part);
+      }
+      continue; // hyphenated compounds (e.g. "e-saf") are typically borrowed
+      // technical terms, not Korean inflected words — Korean suffix-stripping
+      // doesn't apply to them.
+    }
     const stem = stemKorean(token);
     if (stem !== token) withStems.add(stem);
   }
