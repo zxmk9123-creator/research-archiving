@@ -53,7 +53,7 @@ function validateBrief(raw, evidence) {
   const marketSummary = String(raw.market_summary || '').trim();
   if (!lead || !marketSummary) throw new Error('incomplete_brief');
   return {
-    lead: lead.slice(0, 500),
+    lead: lead.slice(0, 500).replace(/[.。]+$/u, ''),
     market_summary: marketSummary.slice(0, 800),
     developments: normalizedDevelopments,
     watchpoints,
@@ -206,6 +206,9 @@ async function getLatestDailyBrief() {
   );
   const brief = rows[0];
   if (!brief) return null;
+  if (brief.brief && typeof brief.brief === 'object') {
+    brief.brief.lead = String(brief.brief.lead || '').trim().replace(/[.。]+$/u, '');
+  }
   const sourceIds = Array.isArray(brief.source_item_ids)
     ? brief.source_item_ids.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0)
     : [];
