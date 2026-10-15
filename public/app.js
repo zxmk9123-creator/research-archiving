@@ -837,7 +837,7 @@ function normalizeAnswerMarkdown(rawAnswer) {
 // block is {type, lines} (or {type:'ordered-merged', items} — see the
 // merge pass in renderAnswerHtml below). Dispatches purely on `type`,
 // already determined while chunking — no re-detection from re-joined text.
-function renderAnswerBlock(block, sources) {
+function renderAnswerBlock(block, sources, orderedStart = 1) {
   if (block.type === 'heading') {
     return block.lines.map((l) => `<h3 class="ai-answer-heading">${renderInlineAnswerText(l.replace(/^#{1,6}\s+/, ''), sources)}</h3>`).join('');
   }
@@ -877,7 +877,7 @@ function renderAnswerBlock(block, sources) {
   // correctly, with each item's own detail nested under it instead of
   // floating as an unrelated top-level bullet.
   if (block.type === 'ordered-merged') {
-    return `<ol class="ai-answer-list">${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
+    return `<ol class="ai-answer-list" start="${orderedStart}">${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
       item.subLines.length
         ? `<ul class="ai-answer-list ai-answer-sublist">${item.subLines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`
         : ''
@@ -954,7 +954,17 @@ function renderAnswerHtml(rawAnswer, sources) {
     blocks.push({ type: 'ordered-merged', items });
   }
 
-  return `<div class="ai-answer">${blocks.map((block) => renderAnswerBlock(block, sources)).join('')}</div>`;
+  // Separate ordered-list blocks can be created by blank lines, headings,
+  // or intervening prose. Keep their visible numbering continuous across
+  // this answer while leaving nested unordered detail lists untouched.
+  let nextOrderedStart = 1;
+  const renderedBlocks = blocks.map((block) => {
+    const html = renderAnswerBlock(block, sources, nextOrderedStart);
+    if (block.type === 'ordered-merged') nextOrderedStart += block.items.length;
+    return html;
+  });
+
+  return `<div class="ai-answer">${renderedBlocks.join('')}</div>`;
 }
 
 // Compact citation chips — title/link indicator only, no dates/URLs/
