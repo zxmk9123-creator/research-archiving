@@ -747,12 +747,12 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
-  font-size: 15px;
+  font-size: 14px;
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
 #d-published-at-section .review-section-title {
   margin-bottom: 5px;
-  font-size: 13px;
+  font-size: 15px;
 }
 #d-published-at:hover { border-color: var(--text-tertiary); }
 #d-published-at:focus-visible {
