@@ -4,6 +4,7 @@ const { callProvider } = require('./ai/provider');
 const JOB_NAME = 'daily_headlines_brief';
 const MAX_EVIDENCE_ITEMS = 24;
 const GENERATION_STALE_AFTER_MINUTES = 25;
+const MAX_DAILY_GENERATION_ATTEMPTS = 2;
 
 function kstDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -119,7 +120,7 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
 // cron retry, an in-process scheduler tick, and a manual retry cannot all
 // issue duplicate LLM requests. A crashed 'generating' row is reclaimable
 // only after a bounded lease expires.
-async function queueDailyBriefGeneration(now = new Date()) {
+async function queueDailyBriefGeneration(now = new Date(), { force = false } = {}) {
   const briefDate = kstDate(now);
   const windowEnd = now;
   // The brief is a KST daily product. Use midnight in Seoul through the
@@ -133,11 +134,20 @@ async function queueDailyBriefGeneration(now = new Date()) {
        SET status = 'generating', window_start = EXCLUDED.window_start,
            window_end = EXCLUDED.window_end, error = NULL,
            attempt_count = daily_briefs.attempt_count + 1, updated_at = now()
-       WHERE daily_briefs.status IN ('failed','empty')
-          OR (daily_briefs.status = 'generating'
-              AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval)
+       WHERE (
+          NOT $5::boolean
+          AND (daily_briefs.status IN ('failed','empty')
+            OR (daily_briefs.status = 'generating'
+                AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval))
+       ) OR (
+          $5::boolean
+          AND daily_briefs.attempt_count < $6
+          AND (daily_briefs.status IN ('failed','empty','ready')
+            OR (daily_briefs.status = 'generating'
+                AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval))
+       )
      RETURNING brief_date, window_start, window_end`,
-    [briefDate, windowStart, windowEnd, GENERATION_STALE_AFTER_MINUTES]
+    [briefDate, windowStart, windowEnd, GENERATION_STALE_AFTER_MINUTES, Boolean(force), MAX_DAILY_GENERATION_ATTEMPTS]
   );
   const claimed = rows[0];
   if (!claimed) {
@@ -145,7 +155,11 @@ async function queueDailyBriefGeneration(now = new Date()) {
       `SELECT brief_date, status, item_count, attempt_count, completed_at
          FROM daily_briefs WHERE brief_date = $1`, [briefDate]
     );
-    return { started: false, current: existing[0] || null };
+    const current = existing[0] || null;
+    const reason = force && Number(current?.attempt_count || 0) >= MAX_DAILY_GENERATION_ATTEMPTS
+      ? 'daily_attempt_limit_reached'
+      : 'already_running_or_not_retryable';
+    return { started: false, reason, current };
   }
 
   buildDailyBrief(briefDate, new Date(claimed.window_start), new Date(claimed.window_end))
@@ -158,6 +172,12 @@ async function queueDailyBriefGeneration(now = new Date()) {
       ).catch((updateErr) => console.error(`daily_brief failure state update failed: ${updateErr.message}`));
     });
   return { started: true, briefDate };
+}
+
+// A direct command trigger uses the same DB-backed generator as the routine,
+// without starting collection or ingestion.
+async function requestDailyBriefRegeneration(now = new Date()) {
+  return queueDailyBriefGeneration(now, { force: true });
 }
 
 async function getLatestDailyBrief() {
@@ -186,4 +206,4 @@ async function getLatestDailyBrief() {
   return brief;
 }
 
-module.exports = { kstDate, queueDailyBriefGeneration, getLatestDailyBrief };
+module.exports = { kstDate, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
