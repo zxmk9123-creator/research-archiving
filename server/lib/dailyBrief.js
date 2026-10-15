@@ -82,7 +82,7 @@ function validateBrief(raw, evidence) {
     ...normalizedDevelopments.flatMap((item) => [item.summary, item.significance]),
     ...watchpoints,
   ].join(' ');
-  if (/[\\u0E00-\\u0E7F\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF]/u.test(briefText)) {
+  if (/[\u0E00-\u0E7F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u.test(briefText)) {
     throw new Error('unexpected_non_korean_script');
   }
   return {
