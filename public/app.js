@@ -824,7 +824,7 @@ function renderInlineAnswerText(line, sources) {
 }
 
 function normalizeAnswerMarkdown(rawAnswer) {
-  return String(rawAnswer || '')
+  return LatexText.latexToPlainText(String(rawAnswer || ''))
     // Some model responses escape Markdown markers even though this UI
     // intentionally renders a small, safe Markdown subset.
     .replace(/(^|\n)\\+(?=\s*#{1,6}\s)/g, '$1')
