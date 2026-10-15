@@ -6,7 +6,7 @@ const API_BASE = 'https://ondemand.websol.barchart.com';
 const QUOTE_TTL_MS = 60 * 1000;
 const HISTORY_TTL_MS = 15 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 7000;
-const HISTORY_DAYS = 90;
+const HISTORY_DAYS = 5;
 
 const INSTRUMENTS = [
   { id: 'palm-oil', label: '팜유 선물', symbol: 'KO*0', unit: 'MYR/metric ton', sourceUrl: 'https://www.barchart.com/futures/quotes/KO%2A0/overview' },
@@ -96,16 +96,18 @@ async function getHistory() {
     const entries = await Promise.all(INSTRUMENTS.map(async (instrument) => {
       const rows = await requestJson('getHistory', {
         symbol: instrument.symbol,
-        type: 'dailyNearest',
+        type: 'minutes',
         startDate: formatDate(start),
         endDate: formatDate(end),
-        maxRecords: HISTORY_DAYS,
+        interval: 60,
+        maxRecords: HISTORY_DAYS * 24,
         order: 'asc',
       });
       const bars = rows.map((row) => ({
-        date: row.tradingDay || row.timestamp || null,
+        timestamp: row.timestamp || null,
+        tradingDay: row.tradingDay || null,
         close: finiteOrNull(row.close),
-      })).filter((row) => row.date && row.close !== null);
+      })).filter((row) => row.timestamp && row.close !== null);
       return [instrument.id, bars];
     }));
     const value = Object.fromEntries(entries);
@@ -124,6 +126,7 @@ async function getMarketData() {
     return {
       configured: false,
       provider: 'Barchart OnDemand',
+      historyInterval: '60-minute',
       generatedAt: new Date().toISOString(),
       reason: 'provider_not_enabled',
       instruments: INSTRUMENTS.map((instrument) => ({ ...instrument, available: false, price: null, bars: [] })),
@@ -155,6 +158,7 @@ async function getMarketData() {
   return {
     configured: true,
     provider: 'Barchart OnDemand',
+    historyInterval: '60-minute',
     generatedAt: new Date().toISOString(),
     stale: errors.length > 0 && (quotes || Object.keys(history).length > 0),
     errors,
@@ -163,4 +167,3 @@ async function getMarketData() {
 }
 
 module.exports = { getMarketData, INSTRUMENTS };
-
