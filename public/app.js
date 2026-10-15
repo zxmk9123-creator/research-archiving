@@ -2199,6 +2199,7 @@ function opsFailureLabel(failureType) {
 const OPS_LAST_SNAPSHOT_KEY = 'ra_ops_last_snapshot';
 let opsTriageOffset = 0;
 let opsTriageShowClosed = false;
+let opsTriageExpanded = false;
 const OPS_TRIAGE_STATUS_LABELS = {
   open: '확인 필요', investigating: '분석 중', retry_planned: '재시도 예정',
   resolved: '해결', dismissed: '제외',
@@ -2239,14 +2240,21 @@ function renderOpsTriageHtml(triage) {
   return `<div class="section ops-triage">
     <div class="section-header"><h2>Draft 실패·적체 트리아지</h2><div class="ops-triage-tools"><span class="meta">${first}–${last} / ${triage.total}건</span><button class="btn" type="button" onclick="toggleOpsTriageClosed()">${triage.includeClosed ? '미해결만 보기' : '해결·제외 포함'}</button></div></div>
     <p class="ops-triage-note-help">실패·자동 발행 보류·15분 이상 처리 대기·24시간 이상 미검수 Draft를 우선 표시합니다. 상태와 메모만 기록하며, AI 재시도·자료 발행 상태에는 영향을 주지 않습니다.</p>
-    ${triage.rows.length ? `<div class="ops-triage-table-wrap"><table class="ops-triage-table"><thead><tr><th>분류 / 사유</th><th>자료</th><th>조치 상태</th><th>운영 메모</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="ops-triage-empty">현재 트리아지 대상 Draft가 없습니다.</p>'}
-    <div class="ops-triage-pagination">${triage.offset > 0 ? `<button class="btn" type="button" onclick="changeOpsTriagePage(-1)">이전</button>` : ''}${triage.hasMore ? `<button class="btn" type="button" onclick="changeOpsTriagePage(1)">다음 100건</button>` : ''}</div>
+    <details class="ops-triage-details" ${opsTriageExpanded ? 'open' : ''} ontoggle="setOpsTriageExpanded(this.open)">
+      <summary>상세 테이블 · ${triage.total}건</summary>
+      ${triage.rows.length ? `<div class="ops-triage-table-wrap"><table class="ops-triage-table"><thead><tr><th>분류 / 사유</th><th>자료</th><th>조치 상태</th><th>운영 메모</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="ops-triage-empty">현재 트리아지 대상 Draft가 없습니다.</p>'}
+      <div class="ops-triage-pagination">${triage.offset > 0 ? `<button class="btn" type="button" onclick="changeOpsTriagePage(-1)">이전</button>` : ''}${triage.hasMore ? `<button class="btn" type="button" onclick="changeOpsTriagePage(1)">다음 100건</button>` : ''}</div>
+    </details>
   </div>`;
 }
 
 window.changeOpsTriagePage = function changeOpsTriagePage(direction) {
   opsTriageOffset = Math.max(0, opsTriageOffset + direction * 100);
   renderOps();
+};
+
+window.setOpsTriageExpanded = function setOpsTriageExpanded(isExpanded) {
+  opsTriageExpanded = Boolean(isExpanded);
 };
 
 window.toggleOpsTriageClosed = function toggleOpsTriageClosed() {

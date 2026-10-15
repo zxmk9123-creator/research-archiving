@@ -600,6 +600,9 @@ p { margin: 0; }
 .ops-stat-label { display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
 
 .ops-triage-note-help { margin: 0 0 var(--sp-3); color: var(--text-secondary); font-size: 13px; }
+.ops-triage-details { margin-top: var(--sp-3); }
+.ops-triage-details > summary { cursor: pointer; user-select: none; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.ops-triage-details[open] > summary { margin-bottom: var(--sp-3); }
 .ops-triage-table-wrap { overflow-x: auto; }
 .ops-triage-table { min-width: 900px; }
 .ops-triage-table th, .ops-triage-table td { vertical-align: top; }
