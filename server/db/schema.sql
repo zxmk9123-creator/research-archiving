@@ -1149,3 +1149,34 @@ CREATE TABLE IF NOT EXISTS scope_terms (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (term, mode)
 );
+
+-- Daily Discovery news-query expansion (2026-10-16). The 17 news queries were
+-- all English and had a single SAF query focused on investment/plants, so
+-- e-SAF technology, Korean-language/domestic coverage, UCO feedstock, EU SAF
+-- mandates and renewable-diesel/biodiesel policy were effectively unsearched.
+-- Same idempotent INSERT...WHERE NOT EXISTS convention as the seeds above;
+-- is_archive_discovery stays false, so these keep the past-week freshness bias.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: e-SAF power-to-liquid project offtake', 'e-SAF power-to-liquid synthetic aviation fuel project offtake FID'),
+  ('Web Discovery: UCO tallow SAF HEFA feedstock', 'used cooking oil UCO tallow SAF HEFA feedstock prices supply'),
+  ('Web Discovery: ReFuelEU SAF mandate e-SAF sub-mandate', 'ReFuelEU Aviation SAF mandate e-SAF sub-mandate policy'),
+  ('Web Discovery: renewable diesel biodiesel HEFA margins', 'renewable diesel biodiesel HEFA margins capacity expansion'),
+  ('Web Discovery: Indonesia B40 B50 biodiesel mandate', 'Indonesia B40 B50 biodiesel mandate palm oil'),
+  ('Web Discovery: India edible oil import duty', 'India edible oil import duty palm soybean sunflower'),
+  ('Web Discovery: 국내 e-SAF SAF 생산 기업 실증', '국내 e-SAF 지속가능항공유 SAF 생산 기업 실증'),
+  ('Web Discovery: 국내 SAF 의무혼합 바이오디젤 정책', 'SAF 의무혼합 바이오디젤 혼합의무 정책 산업통상자원부'),
+  ('Web Discovery: 국내 식용유 가격 팜유 대두유 수입', '식용유 가격 팜유 대두유 수입 제일제당 사조'),
+  ('Web Discovery: 정유사 SAF 바이오항공유 투자', '정유사 SAF 바이오항공유 투자 SK에너지 GS칼텍스 HD현대오일뱅크 에쓰오일')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+-- Scope terms matching the new queries: the static relevance filter dropped
+-- plain Korean "식용유", "바이오디젤", renewable-diesel/HEFA and power-to-liquid
+-- titles, which would have discarded most of what these queries return. Seeded
+-- as ordinary scope_terms rows, so each can be revoked from the Ops card.
+INSERT INTO scope_terms (term, mode)
+VALUES ('식용유', 'include'), ('바이오디젤', 'include'), ('renewable diesel', 'include'),
+       ('hefa', 'include'), ('power-to-liquid', 'include')
+ON CONFLICT (term, mode) DO NOTHING;
