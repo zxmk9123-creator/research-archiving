@@ -601,15 +601,15 @@ p { margin: 0; }
 /* Daily Headlines follows the shared page-lede, section, and card patterns
    used by Home, Archive, and Review. */
 .headlines-page { max-width: 1120px; margin: 0 auto; padding: 0; }
-.headlines-header { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-4); margin-bottom: var(--sp-1); }
+.headlines-header { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-4); margin-bottom: 0; }
 .headlines-eyebrow, .headlines-section-kicker { display: none; }
 .headlines-header h1 { margin: 0; font-size: 30px; letter-spacing: -.02em; }
 .headlines-subtitle { margin: 7px 0 0; color: var(--text-secondary); font-size: 15px; }
 .headlines-date { flex: 0 0 auto; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-.headlines-basis { margin: 0 0 var(--sp-5); }
+.headlines-basis { margin: 0 0 var(--sp-5); line-height: 23px; }
 .headline-lead { padding: 0 0 var(--sp-5); border-bottom: 1px solid var(--border); background: transparent; }
 .headline-lead h2 { max-width: none; margin: 0; padding-bottom: var(--sp-4); border-bottom: 1px solid var(--border); font-size: 18px; line-height: 1.5; letter-spacing: -.01em; }
-.headline-lead > p:last-child { max-width: none; margin: var(--sp-4) 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.7; }
+.headline-lead > p:last-child { max-width: none; margin: var(--sp-4) 0 0; color: var(--text-secondary); font-size: 15px; line-height: 23px; }
 .headlines-columns { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(250px, .8fr); gap: var(--sp-4); margin-top: var(--sp-4); align-items: start; }
 .headline-panel { min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .headline-panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); padding: 0; border: 0; }
