@@ -233,6 +233,26 @@ function scope4MajorCompanies(text) {
 
 // title/description are matched together since RSS descriptions are often
 // where the specific scope term appears even when the title is generic.
+// Operator-approved scope adjustments (scope_terms table, see
+// scopeAnalysis.js), cached here so this synchronous gate never touches the
+// database per candidate. `include` terms ADD scope (after the static
+// scopes); `exclude` terms drop a candidate only when found in its TITLE —
+// deliberately conservative, since a title hit is much stronger evidence of
+// an off-topic article than a body mention.
+let dynamicIncludeTerms = [];
+let dynamicExcludeTerms = [];
+
+function normalizeTerms(terms) {
+  return Array.from(new Set((terms || [])
+    .map((t) => normalizeHyphens(String(t || '').toLowerCase().trim()))
+    .filter((t) => t.length >= 3)));
+}
+
+function setDynamicScopeTerms({ include = [], exclude = [] } = {}) {
+  dynamicIncludeTerms = normalizeTerms(include);
+  dynamicExcludeTerms = normalizeTerms(exclude);
+}
+
 function isRelevantToOilFatsScope(title, description) {
   const text = normalizeHyphens(`${title || ''} ${description || ''}`);
   // Checked first and exclusively on the title — a generic reference page
@@ -241,16 +261,23 @@ function isRelevantToOilFatsScope(title, description) {
   // or "ADM" without being market news about either).
   if (isGenericReferencePage(normalizeHyphens(title || ''))) return false;
 
+  const lowerTitle = normalizeHyphens(String(title || '').toLowerCase());
+  if (dynamicExcludeTerms.some((term) => lowerTitle.includes(term))) return false;
+
   if (scope1LogisticsShipping(text)) return true;
   if (scope2CrudeEnergy(text)) return true;
   if (scope3RegulationsPolicies(text)) return true;
   if (scope4MajorCompanies(text)) return true;
+
+  const lowerText = text.toLowerCase();
+  if (dynamicIncludeTerms.some((term) => lowerText.includes(term))) return true;
 
   return false;
 }
 
 module.exports = {
   isRelevantToOilFatsScope,
+  setDynamicScopeTerms,
   isGenericReferencePage,
   scope1LogisticsShipping,
   scope2CrudeEnergy,

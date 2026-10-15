@@ -1149,3 +1149,10 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
   .detail { padding: var(--sp-4); border-radius: var(--radius-card); }
   h1 { font-size: 26px; }
 }
+
+/* Ops: weekly scope-tuning proposals */
+.ops-scope-card { padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
+.ops-scope-card:first-of-type { border-top: 0; }
+.ops-scope-kind { display: inline-block; padding: 1px 8px; margin-right: 6px; border-radius: 999px; background: var(--action-soft); color: var(--action); font-size: 12px; font-weight: 700; }
+.ops-scope-rationale { margin: 4px 0; color: var(--text-secondary); font-size: 13px; }
+.ops-scope-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }

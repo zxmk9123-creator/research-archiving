@@ -344,4 +344,4 @@ async function getLatestDailyBrief() {
   return brief;
 }
 
-module.exports = { kstDate, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { kstDate, parseJsonObject, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

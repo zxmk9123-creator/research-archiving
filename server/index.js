@@ -2,6 +2,7 @@ const path = require('path');
 const express = require('express');
 const { runDueCollections } = require('./lib/collector');
 const { maybeRunDailyDiscovery } = require('./lib/dailyDiscovery');
+const { refreshScopeTerms, maybeRunWeeklyScopeAnalysis } = require('./lib/scopeAnalysis');
 const { requeueStalledPendingDrafts } = require('./lib/aiDraft');
 
 const app = express();
@@ -16,6 +17,7 @@ app.use('/api/picks', require('./routes/picks'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/headlines', require('./routes/headlines'));
 app.use('/api/market-data', require('./routes/marketData'));
+app.use('/api/scope-proposals', require('./routes/scopeProposals'));
 app.use('/api', require('./routes/taxonomy'));
 
 // Root cause of several "the deploy went out but the browser still shows
@@ -80,6 +82,16 @@ setInterval(() => {
 maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run failed', err));
 setInterval(() => {
   maybeRunDailyDiscovery().catch((err) => console.error('daily discovery run failed', err));
+}, COLLECTION_CHECK_INTERVAL_MS);
+
+// Operator-approved scope terms (scope_terms) feed the synchronous relevance
+// filter through an in-memory cache — load it at boot, and run the weekly
+// scope analysis on the same hourly tick (it self-gates to Mondays from
+// 10:00 KST and claims the week atomically, so restarts can't double-run it).
+refreshScopeTerms().catch((err) => console.error('scope terms load failed', err));
+maybeRunWeeklyScopeAnalysis().catch((err) => console.error('scope analysis run failed', err));
+setInterval(() => {
+  maybeRunWeeklyScopeAnalysis().catch((err) => console.error('scope analysis run failed', err));
 }, COLLECTION_CHECK_INTERVAL_MS);
 
 // Recovers Review-tab items stuck forever at ai_status='pending' — see

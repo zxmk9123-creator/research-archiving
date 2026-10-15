@@ -2281,7 +2281,56 @@ window.saveOpsDraftTriage = async function saveOpsDraftTriage(id, button) {
   }
 };
 
-function renderOpsHtml(stats, triage) {
+const SCOPE_KIND_LABELS = { expand_scope: '범위 확장', narrow_scope: '범위 축소', add_query: '검색어 추가' };
+
+function renderScopeProposalsHtml(data, isAdmin) {
+  if (!data) {
+    return '<div class="section ops-scope"><div class="section-header"><h2>범위 조정 제안 (주간 분석)</h2></div><p class="stale">제안 목록을 불러오지 못했습니다.</p></div>';
+  }
+  const cards = data.proposals.map((p) => {
+    const evidence = (Array.isArray(p.evidence) ? p.evidence : []).slice(0, 3).map((e) => (
+      e.url ? `<a href="${escapeHtml(e.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.title || e.url)}</a>` : escapeHtml(e.title || '')
+    )).join(' · ');
+    const buttons = isAdmin
+      ? `<div class="ops-scope-actions"><button class="btn" type="button" onclick="decideScopeProposal(${p.id}, 'approve', this)">승인</button><button class="btn" type="button" onclick="decideScopeProposal(${p.id}, 'reject', this)">거절</button></div>`
+      : '';
+    return `<div class="ops-scope-card"><div><span class="ops-scope-kind">${SCOPE_KIND_LABELS[p.kind] || escapeHtml(p.kind)}</span> <strong>${escapeHtml(p.term)}</strong></div>
+      <p class="ops-scope-rationale">${escapeHtml(p.rationale || '')}</p>${evidence ? `<p class="meta">근거: ${evidence}</p>` : ''}${buttons}</div>`;
+  }).join('');
+  const active = data.activeTerms.length
+    ? `<p class="meta">적용 중인 조정: ${data.activeTerms.map((t) => `${t.mode === 'include' ? '＋' : '－'}${escapeHtml(t.term)}`).join(', ')}</p>` : '';
+  const runButton = isAdmin
+    ? `<button class="btn" type="button" onclick="runScopeAnalysisNow(this)" ${data.analysisRunning ? 'disabled' : ''}>${data.analysisRunning ? '분석 중…' : '지금 분석 실행'}</button>` : '';
+  return `<div class="section ops-scope">
+    <div class="section-header"><h2>범위 조정 제안 (주간 분석)</h2>${runButton}</div>
+    <p class="ops-triage-note-help">매주 월요일 제외된 후보·발행 자료·부적합 자료를 분석해 수집 범위 조정과 새 검색어를 제안합니다. 승인한 항목만 적용되며, 제외 후보가 ${data.minExclusions}건 이상 쌓여야 분석합니다.</p>
+    ${cards || '<p class="ops-triage-empty">대기 중인 제안이 없습니다.</p>'}${active}
+  </div>`;
+}
+
+window.decideScopeProposal = async function decideScopeProposal(id, action, button) {
+  button.disabled = true;
+  try {
+    await api(`/scope-proposals/${id}/${action}`, { method: 'POST' });
+    renderOps();
+  } catch (err) {
+    button.disabled = false;
+    alert(`처리 실패: ${err.message}`);
+  }
+};
+
+window.runScopeAnalysisNow = async function runScopeAnalysisNow(button) {
+  button.disabled = true;
+  try {
+    await api('/scope-proposals/run', { method: 'POST' });
+    button.textContent = '분석 시작됨 — 잠시 후 새로고침';
+  } catch (err) {
+    button.disabled = false;
+    alert(`실행 실패: ${err.message}`);
+  }
+};
+
+function renderOpsHtml(stats, triage, scope, isAdmin) {
   const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
   const backlogRows = backlog.ok
@@ -2346,6 +2395,7 @@ function renderOpsHtml(stats, triage) {
     </div>
 
     ${renderOpsTriageHtml(triage)}
+    ${renderScopeProposalsHtml(scope, isAdmin)}
 
     <div class="section">
       <div class="section-header"><h2>수집 오류 중인 소스 (최근 실행 기준)</h2></div>
@@ -2382,7 +2432,11 @@ async function renderOps() {
   } catch (err) {
     triage = { ok: false, error: err.message, rows: [], total: 0, offset: opsTriageOffset };
   }
-  const body = stats ? renderOpsHtml(stats, triage) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
+  const [scope, isAdmin] = await Promise.all([
+    api('/scope-proposals?status=pending').catch(() => null),
+    isAdminAuthenticated(),
+  ]);
+  const body = stats ? renderOpsHtml(stats, triage, scope, isAdmin) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
   app.innerHTML = banner + body;
 }
 

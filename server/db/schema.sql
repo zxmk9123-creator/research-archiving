@@ -1124,3 +1124,28 @@ CREATE TABLE IF NOT EXISTS discovery_exclusions (
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_exclusions_last_seen ON discovery_exclusions(last_seen_at DESC);
+
+-- Scope-tuning proposals produced by the weekly analysis (scopeAnalysis.js)
+-- and decided by an operator. Nothing here changes behavior until approved.
+CREATE TABLE IF NOT EXISTS scope_proposals (
+  id SERIAL PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('expand_scope','narrow_scope','add_query')),
+  term TEXT NOT NULL,
+  rationale TEXT,
+  evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','applied','rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scope_proposals_pending_unique
+  ON scope_proposals(kind, lower(term)) WHERE status = 'pending';
+
+-- Operator-approved terms the relevance pre-filter consults at runtime.
+CREATE TABLE IF NOT EXISTS scope_terms (
+  id SERIAL PRIMARY KEY,
+  term TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('include','exclude')),
+  proposal_id INTEGER REFERENCES scope_proposals(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (term, mode)
+);
