@@ -54,9 +54,9 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
        FROM items i
        LEFT JOIN sources s ON s.id = i.source_id
       WHERE i.status = 'Published'
-        AND COALESCE(i.published_at, i.collected_at) >= $1
-        AND COALESCE(i.published_at, i.collected_at) < $2
-      ORDER BY COALESCE(i.published_at, i.collected_at) DESC, i.id DESC
+        AND i.collected_at >= $1
+        AND i.collected_at < $2
+      ORDER BY i.collected_at DESC, i.id DESC
       LIMIT $3`,
     [windowStart, windowEnd, MAX_EVIDENCE_ITEMS]
   );
@@ -116,7 +116,9 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
 async function queueDailyBriefGeneration(now = new Date()) {
   const briefDate = kstDate(now);
   const windowEnd = now;
-  const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  // The brief is a KST daily product. Use midnight in Seoul through the
+  // collection-completion time, rather than a rolling 24-hour window.
+  const windowStart = new Date(`${briefDate}T00:00:00+09:00`);
   const { rows } = await pool.query(
     `INSERT INTO daily_briefs
        (brief_date, status, window_start, window_end, attempt_count)
@@ -158,7 +160,24 @@ async function getLatestDailyBrief() {
             source_item_ids, brief, error, attempt_count, created_at, updated_at, completed_at
        FROM daily_briefs ORDER BY brief_date DESC LIMIT 1`
   );
-  return rows[0] || null;
+  const brief = rows[0];
+  if (!brief) return null;
+  const sourceIds = Array.isArray(brief.source_item_ids)
+    ? brief.source_item_ids.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0)
+    : [];
+  if (sourceIds.length) {
+    const { rows: sources } = await pool.query(
+      `SELECT id AS item_id, title, source_url
+         FROM items
+        WHERE id = ANY($1::bigint[])`,
+      [sourceIds]
+    );
+    const sourceById = new Map(sources.map((source) => [Number(source.item_id), source]));
+    brief.sources = sourceIds.map((id) => sourceById.get(id)).filter(Boolean);
+  } else {
+    brief.sources = [];
+  }
+  return brief;
 }
 
 module.exports = { kstDate, queueDailyBriefGeneration, getLatestDailyBrief };
