@@ -1,6 +1,5 @@
 const express = require('express');
 const dailyBriefModule = require('../lib/dailyBrief');
-const { requireAuth } = require('../lib/auth');
 
 const router = express.Router();
 
@@ -13,15 +12,15 @@ router.get('/latest', async (req, res) => {
   }
 });
 
-// Retry a failed/stale brief without repeating the article collection.
-// Generation itself runs in the background and the dashboard polls the
-// read endpoint; a request never waits on the provider's long cascade.
-router.post('/generate', requireAuth, async (req, res) => {
+// Direct command endpoint: regenerate from the existing archive only.
+// The scheduled routine keeps using queueDailyBriefGeneration() independently.
+router.post('/generate', async (req, res) => {
   try {
-    const result = await dailyBriefModule.queueDailyBriefGeneration(new Date(), {
-      force: req.body?.force === true,
-    });
-    res.status(result.started ? 202 : 200).json(result);
+    const result = await dailyBriefModule.requestDailyBriefRegeneration();
+    const status = result.started ? 202
+      : result.reason === 'daily_attempt_limit_reached' ? 429
+        : 200;
+    res.status(status).json(result);
   } catch (err) {
     console.error(`POST /api/headlines/generate failed: ${err.message}`);
     res.status(500).json({ error: '헤드라인 생성 작업을 시작하지 못했습니다.' });
