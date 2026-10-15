@@ -2412,27 +2412,30 @@ function renderHeadlineBrief(data) {
 }
 
 const MARKET_WATCH_INSTRUMENTS = [
+  { symbol: 'TVC:USOIL', label: 'WTI 원유 CFD', group: '에너지 참고', embeddable: true, url: 'https://www.tradingview.com/symbols/USOIL/?exchange=TVC' },
+  { symbol: 'TVC:UKOIL', label: '브렌트 원유 CFD', group: '에너지 참고', embeddable: true, url: 'https://www.tradingview.com/symbols/UKOIL/?exchange=TVC' },
   { symbol: 'MYX:FCPO1!', label: '팜유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/MYX-FCPO1%21/' },
   { symbol: 'CBOT:ZL1!', label: '대두유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/CBOT-ZL1%21/' },
   { symbol: 'MYX:FPKO1!', label: '팜핵유 선물', group: '유지 원료', url: 'https://www.tradingview.com/symbols/MYX-FPKO1%21/' },
   { symbol: 'ICEUS:RS1!', label: '카놀라 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/ICEUS-RS1%21/' },
-  { symbol: 'NYMEX:CL1!', label: 'WTI 원유', group: '에너지 참고', url: 'https://www.tradingview.com/symbols/NYMEX-CL1%21/' },
 ];
 
 function renderMarketWatch() {
-  const buttons = MARKET_WATCH_INSTRUMENTS.map((instrument, index) => `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`).join('');
+  const buttons = MARKET_WATCH_INSTRUMENTS.map((instrument, index) => instrument.embeddable
+    ? `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`
+    : `<a class="market-watch-tab market-watch-external" href="${instrument.url}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(instrument.label)} ↗</span><small>${escapeHtml(instrument.group)} · TradingView에서 보기</small></a>`).join('');
   return `<section class="market-watch" aria-labelledby="market-watch-title">
-    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>주요 선물의 가격 흐름을 한 차트에서 전환해 확인합니다.</p></div><span class="market-watch-provider">차트·시세: TradingView</span></div>
+    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>에너지 지표 차트와 유지 선물 원천 화면을 한곳에서 확인합니다.</p></div><span class="market-watch-provider">차트·시세: TradingView</span></div>
     <div class="market-watch-tabs" role="group" aria-label="차트 종목 선택">${buttons}</div>
     <div class="market-watch-chart-frame"><div id="market-chart-widget" class="market-watch-chart tradingview-widget-container" aria-label="선택한 시장 종목 차트"></div></div>
-    <p class="market-watch-disclaimer">선물 연속 계약 차트이며 실시간 여부와 제공 조건은 거래소·TradingView 정책에 따릅니다. 투자 판단 전 원천 화면에서 가격·단위·지연 여부를 확인하세요. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
+    <p class="market-watch-disclaimer">WTI·브렌트는 원유 CFD 지표이며 식용유 선물 가격을 대체하지 않습니다. 팜유·대두유 등 거래소 선물은 TradingView 위젯 제공 범위 제한으로 원천 화면에서 열립니다. 시세 제공·지연 여부와 단위는 각 원천에서 확인하세요. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
   </section>`;
 }
 
 function mountMarketWatch(initialSymbol = MARKET_WATCH_INSTRUMENTS[0].symbol) {
   const chart = document.getElementById('market-chart-widget');
   if (!chart) return;
-  const instrument = MARKET_WATCH_INSTRUMENTS.find((entry) => entry.symbol === initialSymbol) || MARKET_WATCH_INSTRUMENTS[0];
+  const instrument = MARKET_WATCH_INSTRUMENTS.find((entry) => entry.symbol === initialSymbol && entry.embeddable) || MARKET_WATCH_INSTRUMENTS.find((entry) => entry.embeddable);
   const source = document.getElementById('market-chart-source');
   if (source) source.href = instrument.url;
   document.querySelectorAll('.market-watch-tab').forEach((button) => {
