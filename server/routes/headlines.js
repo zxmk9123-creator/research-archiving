@@ -18,7 +18,9 @@ router.get('/latest', async (req, res) => {
 // read endpoint; a request never waits on the provider's long cascade.
 router.post('/generate', requireAuth, async (req, res) => {
   try {
-    const result = await dailyBriefModule.queueDailyBriefGeneration();
+    const result = await dailyBriefModule.queueDailyBriefGeneration(new Date(), {
+      force: req.body?.force === true,
+    });
     res.status(result.started ? 202 : 200).json(result);
   } catch (err) {
     console.error(`POST /api/headlines/generate failed: ${err.message}`);
