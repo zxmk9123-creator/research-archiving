@@ -103,13 +103,12 @@ function validateBrief(raw, evidence) {
   if (!hasTodayPublished || !hasRecentPublished) {
     await pool.query(
       `UPDATE daily_briefs
-          SET status = 'empty', item_count = $2, source_item_ids = $3,
-              error = $4, updated_at = now(), completed_at = now()
+          SET status = 'empty',
+              item_count = CASE WHEN brief IS NULL THEN 0 ELSE item_count END,
+              error = $2, updated_at = now(), completed_at = now()
         WHERE brief_date = $1 AND status = 'generating'`,
       [
         briefDate,
-        items.length,
-        JSON.stringify(itemIds),
         !hasTodayPublished && !hasRecentPublished
           ? 'missing_today_and_recent_published_items'
           : !hasTodayPublished ? 'missing_today_published_items' : 'missing_recent_published_items',
