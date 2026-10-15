@@ -139,7 +139,7 @@ function validateBrief(raw, evidence) {
     'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"오늘 자료 묶음의 관찰 요약","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
     'developments는 중요도 4 이상, 최대 5개, watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
-  ].join('\\n');
+  ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 1순위 오늘 발행, 2순위 직전 6일 발행(오늘 제외). 양 기간 자료를 모두 제공함.\n자료:\n${JSON.stringify(evidence)}`;
 
   const raw = parseJsonObject(await callProvider({ system, user }));
