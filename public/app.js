@@ -2440,6 +2440,7 @@ async function renderHeadlines() {
       app.innerHTML = renderHeadlineBrief(data);
       if (data.refresh_status === 'generating') {
         setTimeout(() => { if (parseHash().path === 'headlines') renderHeadlines(); }, 15000);
+      }
       return;
     }
     const states = {
