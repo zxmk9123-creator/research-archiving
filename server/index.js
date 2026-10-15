@@ -15,6 +15,7 @@ app.use('/api/search', require('./routes/search'));
 app.use('/api/picks', require('./routes/picks'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/headlines', require('./routes/headlines'));
+app.use('/api/market-data', require('./routes/marketData'));
 app.use('/api', require('./routes/taxonomy'));
 
 // Root cause of several "the deploy went out but the browser still shows
