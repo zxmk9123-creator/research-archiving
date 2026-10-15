@@ -2399,7 +2399,7 @@ function renderHeadlineBrief(data) {
     return `<article class="headline-story">
     <span class="headline-story-index">${index + 1}</span><div>
       <p><a class="headline-story-title" href="${detailLink}">${escapeHtml(source?.title || '자료 상세 보기 →')}</a></p>
-      <p class="headline-story-summary"><strong>본문 발췌</strong> ${escapeHtml(entry.summary || '')}</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
+      <p class="headline-story-summary">&quot;${escapeHtml(entry.summary || '')}&quot;</p><p class="headline-significance">${escapeHtml(entry.significance || '')}</p>
     </div>
   </article>`;
   }).join('');
