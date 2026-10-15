@@ -8,6 +8,35 @@ const { hasValidClassification, deriveContentCategory } = require('../lib/classi
 
 const router = express.Router();
 
+function titleFromUrlPath(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    let segment;
+    try {
+      segment = decodeURIComponent(segments[i]);
+    } catch {
+      continue;
+    }
+    segment = segment.replace(/\.(html?|article|aspx?)$/i, '');
+    if (!/[a-z]/i.test(segment) || /^\d+$/.test(segment)) continue;
+    const words = segment.replace(/[-_]+/g, ' ').trim().split(/\s+/);
+    return words.map((word) => {
+      const lower = word.toLowerCase();
+      if (['uk', 'saf', 'eu', 'us'].includes(lower)) return lower.toUpperCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    }).join(' ');
+  }
+  return null;
+}
+
 router.post('/extract-metadata', requireAuth, async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
@@ -15,7 +44,26 @@ router.post('/extract-metadata', requireAuth, async (req, res) => {
     const meta = await extractMetadata(url);
     res.json(meta);
   } catch (err) {
-    res.status(422).json({ error: `metadata extraction failed: ${err.message}` });
+    // Preserve the SSRF/URL validation boundary: only ordinary page-fetch or
+    // extraction failures receive this manual-form fallback. Invalid and
+    // explicitly unsafe URLs still return an error.
+    if (/^unsafe URL:|^unsafe url:/i.test(err.message)) {
+      return res.status(422).json({ error: `metadata extraction failed: ${err.message}` });
+    }
+    const title = titleFromUrlPath(url);
+    if (!title) {
+      return res.status(422).json({ error: `metadata extraction failed: ${err.message}` });
+    }
+    console.warn(`manual metadata fallback: URL title only for ${url}: ${err.message}`);
+    res.json({
+      title,
+      summary: null,
+      thumbnail_url: null,
+      published_at: null,
+      body_text: null,
+      metadata_source: 'url_fallback',
+      metadata_warning: '페이지 접근이 제한되어 URL에서 제목만 추정했습니다. 원문 확인이 필요합니다.',
+    });
   }
 });
 

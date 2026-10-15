@@ -2524,7 +2524,7 @@ async function renderReview() {
           if (meta.thumbnail_url) document.getElementById('d-thumb').value = meta.thumbnail_url;
           if (meta.published_at) document.getElementById('d-date').value = meta.published_at;
           extractedBodyText = meta.body_text || null;
-          status.textContent = '메타데이터를 가져왔습니다. 확인 후 필요하면 수정하세요.';
+          status.textContent = meta.metadata_warning || '메타데이터를 가져왔습니다. 확인 후 필요하면 수정하세요.';
         } catch (err) {
           status.textContent = `자동 추출 실패: ${err.message} — 직접 입력해주세요.`;
         }
