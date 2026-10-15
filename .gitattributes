@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo so edits from Windows/Codex and
+# Linux/Claude sessions never produce whole-file CRLF diffs or merge conflicts.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
