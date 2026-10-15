@@ -877,7 +877,10 @@ function renderAnswerBlock(block, sources) {
   // correctly, with each item's own detail nested under it instead of
   // floating as an unrelated top-level bullet.
   if (block.type === 'ordered-merged') {
-    return `<ol class="ai-answer-list">${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
+    // Model numbering can restart at 1 when a logical sequence was split into blocks.
+    // renderAnswerHtml assigns each top-level list its continuation number.
+    const startAttr = Number.isInteger(block.start) && block.start > 1 ? ` start="${block.start}"` : '';
+    return `<ol class="ai-answer-list"${startAttr}>${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
       item.subLines.length
         ? `<ul class="ai-answer-list ai-answer-sublist">${item.subLines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`
         : ''
@@ -954,7 +957,19 @@ function renderAnswerHtml(rawAnswer, sources) {
     blocks.push({ type: 'ordered-merged', items });
   }
 
-  return `<div class="ai-answer">${blocks.map((block) => renderAnswerBlock(block, sources)).join('')}</div>`;
+  // The prompt asks numbered sections to continue through the answer. Keep each
+  // Markdown list as its own <ol>, but set its native start value so prose and
+  // detail blocks between lists do not restart the visible numbering. This same
+  // renderer serves both streaming updates and the final answer.
+  let nextOrderedNumber = 1;
+  const numberedBlocks = blocks.map((block) => {
+    if (block.type !== 'ordered-merged') return block;
+    const numbered = { ...block, start: nextOrderedNumber };
+    nextOrderedNumber += block.items.length;
+    return numbered;
+  });
+
+  return `<div class="ai-answer">${numberedBlocks.map((block) => renderAnswerBlock(block, sources)).join('')}</div>`;
 }
 
 // Compact citation chips — title/link indicator only, no dates/URLs/
