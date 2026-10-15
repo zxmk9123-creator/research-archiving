@@ -1106,3 +1106,21 @@ WHERE a.source_url IS NOT NULL
   AND a.id > b.id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_items_source_url_unique ON items(source_url);
+
+-- Candidates dropped by the pre-insert gates (out-of-scope filter, staleness).
+-- Input for periodic scope-tuning analysis: without it a filtered candidate
+-- leaves no trace, so a wrongly excluded topic can never be noticed. One row
+-- per URL; repeat sightings bump seen_count/last_seen_at instead of adding rows.
+CREATE TABLE IF NOT EXISTS discovery_exclusions (
+  id SERIAL PRIMARY KEY,
+  source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+  url TEXT NOT NULL UNIQUE,
+  title TEXT,
+  summary TEXT,
+  published_at TIMESTAMPTZ,
+  reason TEXT NOT NULL,
+  seen_count INTEGER NOT NULL DEFAULT 1,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_exclusions_last_seen ON discovery_exclusions(last_seen_at DESC);

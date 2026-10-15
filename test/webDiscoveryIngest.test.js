@@ -222,6 +222,11 @@ test('collectWebDiscoverySource: an irrelevant candidate is filtered after extra
     assert.equal(result.filtered, 1);
     assert.equal(result.archived, 0);
     assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')));
+    // The dropped candidate is recorded for scope-tuning analysis.
+    const exclusion = calls.find((c) => c.text.includes('INSERT INTO discovery_exclusions'));
+    assert.ok(exclusion);
+    assert.equal(exclusion.params[1], 'https://example.org/sports');
+    assert.equal(exclusion.params[5], 'out_of_scope');
   } finally {
     restoreSearch();
     restoreMeta();
@@ -490,6 +495,7 @@ test('collectWebDiscoverySource: with freshness requested, a candidate whose ext
     assert.equal(result.filtered, 1);
     assert.equal(result.archived, 0);
     assert.ok(!calls.some((c) => c.text.includes('INSERT INTO items')), 'a clearly stale candidate must never be inserted when freshness was requested');
+    assert.equal(calls.find((c) => c.text.includes('INSERT INTO discovery_exclusions')).params[5], 'stale');
   } finally {
     restoreSearch();
     restoreMeta();

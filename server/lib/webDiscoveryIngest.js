@@ -17,6 +17,7 @@ const pool = require('../db/pool');
 const webSearchAdapter = require('./adapters/searchTiers');
 const extractMetadataModule = require('./extractMetadata');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
+const { recordExclusion } = require('./discoveryExclusions');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const { titleSimilarity } = require('./similarity');
 
@@ -147,6 +148,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
 
       if (searchOptions.freshness && !searchOptions.skipStaleCheck && isClearlyStale(meta.published_at)) {
         filtered++;
+        await recordExclusion({ sourceId: source.id, url: candidate.link, title: candidate.title, summary: meta.summary, publishedAt: meta.published_at, reason: 'stale' });
         details.push({ title: candidate.title, link: candidate.link, stage: 'stale_for_daily_discovery', published_at: meta.published_at });
         continue;
       }
@@ -162,6 +164,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       const aiDraftText = meta.body_text || extractedText;
       if (!isRelevantToOilFatsScope(candidate.title, extractedText)) {
         filtered++;
+        await recordExclusion({ sourceId: source.id, url: candidate.link, title: candidate.title, summary: extractedText, publishedAt: meta.published_at, reason: 'out_of_scope' });
         details.push({ title: candidate.title, link: candidate.link, stage: 'filtered' });
         continue;
       }

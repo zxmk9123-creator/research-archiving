@@ -5,6 +5,7 @@ const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
+const { recordExclusion } = require('./discoveryExclusions');
 const { collectInstitutionSource } = require('./institutionalIngest');
 const { collectStructuredSource } = require('./structuredDataIngest');
 const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
@@ -119,6 +120,7 @@ async function collectSource(source) {
       // only ever runs on items that already passed this check.
       if (!isRelevantToOilFatsScope(fi.title, fi.description)) {
         filtered++;
+        await recordExclusion({ sourceId: source.id, url: fi.link, title: fi.title, summary: fi.description, publishedAt: toDateOnly(fi.pubDate), reason: 'out_of_scope' });
         continue;
       }
 
