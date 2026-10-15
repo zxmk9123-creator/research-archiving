@@ -2407,7 +2407,78 @@ function renderHeadlineBrief(data) {
       <section class="headline-panel"><div class="headline-panel-heading"><div><p class="headlines-section-kicker">WHAT MOVED</p><h2>주목할 자료</h2></div><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
       <aside class="headline-panel headline-watchpoints"><p class="headlines-section-kicker">KEEP IN VIEW</p><h2>후속 확인</h2>${watchpoints ? `<ul>${watchpoints}</ul>` : '<p class="headline-empty">추가로 지정된 후속 확인 사항이 없습니다.</p>'}<div class="headline-coverage"><strong>이번 브리프의 근거</strong><span>${Number(data.item_count) || 0}건의 최근 발행 자료</span><a href="#/archive">자료 전체 보기 →</a></div></aside>
     </div>
+    ${renderMarketWatch()}
   </div>`;
+}
+
+const MARKET_WATCH_INSTRUMENTS = [
+  { symbol: 'MYX:FCPO1!', label: '팜유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/MYX-FCPO1%21/' },
+  { symbol: 'CBOT:ZL1!', label: '대두유 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/CBOT-ZL1%21/' },
+  { symbol: 'MYX:FPKO1!', label: '팜핵유 선물', group: '유지 원료', url: 'https://www.tradingview.com/symbols/MYX-FPKO1%21/' },
+  { symbol: 'ICEUS:RS1!', label: '카놀라 선물', group: '식용유지', url: 'https://www.tradingview.com/symbols/ICEUS-RS1%21/' },
+  { symbol: 'NYMEX:CL1!', label: 'WTI 원유', group: '에너지 참고', url: 'https://www.tradingview.com/symbols/NYMEX-CL1%21/' },
+];
+
+function renderMarketWatch() {
+  const buttons = MARKET_WATCH_INSTRUMENTS.map((instrument, index) => `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`).join('');
+  return `<section class="market-watch" aria-labelledby="market-watch-title">
+    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>주요 선물의 가격 흐름을 한 차트에서 전환해 확인합니다.</p></div><span class="market-watch-provider">차트·시세: TradingView</span></div>
+    <div class="market-watch-tabs" role="group" aria-label="차트 종목 선택">${buttons}</div>
+    <div class="market-watch-chart-frame"><div id="market-chart-widget" class="market-watch-chart tradingview-widget-container" aria-label="선택한 시장 종목 차트"></div></div>
+    <p class="market-watch-disclaimer">선물 연속 계약 차트이며 실시간 여부와 제공 조건은 거래소·TradingView 정책에 따릅니다. 투자 판단 전 원천 화면에서 가격·단위·지연 여부를 확인하세요. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
+  </section>`;
+}
+
+function mountMarketWatch(initialSymbol = MARKET_WATCH_INSTRUMENTS[0].symbol) {
+  const chart = document.getElementById('market-chart-widget');
+  if (!chart) return;
+  const instrument = MARKET_WATCH_INSTRUMENTS.find((entry) => entry.symbol === initialSymbol) || MARKET_WATCH_INSTRUMENTS[0];
+  const source = document.getElementById('market-chart-source');
+  if (source) source.href = instrument.url;
+  document.querySelectorAll('.market-watch-tab').forEach((button) => {
+    const active = button.dataset.marketSymbol === instrument.symbol;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const widget = document.createElement('div');
+  widget.className = 'tradingview-widget-container__widget';
+  chart.replaceChildren(widget);
+  const script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.async = true;
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  script.textContent = JSON.stringify({
+    autosize: true,
+    symbol: instrument.symbol,
+    interval: 'D',
+    timezone: 'Asia/Seoul',
+    theme: 'light',
+    style: '1',
+    locale: 'kr',
+    allow_symbol_change: false,
+    calendar: false,
+    details: false,
+    hide_side_toolbar: true,
+    hide_top_toolbar: false,
+    hide_legend: false,
+    hide_volume: false,
+    hotlist: false,
+    save_image: false,
+    withdateranges: true,
+    backgroundColor: 'rgba(255, 255, 255, 0)',
+    gridColor: 'rgba(120, 130, 140, 0.12)',
+    studies: [],
+  });
+  chart.appendChild(script);
+}
+
+function bindMarketWatch() {
+  const first = document.querySelector('.market-watch-tab');
+  if (!first) return;
+  mountMarketWatch(first.dataset.marketSymbol);
+  document.querySelectorAll('.market-watch-tab').forEach((button) => {
+    button.addEventListener('click', () => mountMarketWatch(button.dataset.marketSymbol));
+  });
 }
 
 async function renderHeadlines() {
@@ -2415,10 +2486,11 @@ async function renderHeadlines() {
   try {
     const data = await api('/headlines/latest');
     if (!data) {
-      app.innerHTML = '<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section></div>';
+      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><p class="headlines-eyebrow">OIL &amp; FAT MARKET BRIEF</p><h1>헤드라인</h1><p class="headlines-subtitle">일일 수집이 완료되면 요약 브리프가 여기에 쌓입니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>다음 일일 수집 완료 후 자동으로 생성됩니다.</p></section>${renderMarketWatch()}</div>`;
+      bindMarketWatch();
       return;
     }
-    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); return; }
+    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); bindMarketWatch(); return; }
     const states = {
       generating: ['브리프를 만들고 있습니다', '수집 자료를 정리 중입니다. 잠시 후 자동으로 다시 확인합니다.'],
       empty: ['이 기간에 발행된 자료가 없습니다', '새로 발행된 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],

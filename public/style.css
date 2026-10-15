@@ -635,11 +635,30 @@ p { margin: 0; }
 .headline-state p { margin: 8px 0 0; line-height: 1.6; }
 .headline-state .btn { margin-top: var(--sp-4); }
 .headlines-loading { padding: var(--sp-6) 0; }
+.market-watch { margin-top: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.market-watch-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.market-watch-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.market-watch-heading > div > p:last-child { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
+.market-watch-provider { flex: 0 0 auto; color: var(--text-tertiary); font-size: 11px; }
+.market-watch-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 var(--sp-3); }
+.market-watch-tab { display: flex; flex: 0 0 auto; flex-direction: column; gap: 3px; min-width: 118px; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.market-watch-tab span { font-size: 12px; font-weight: 700; }
+.market-watch-tab small { color: var(--text-tertiary); font-size: 10px; }
+.market-watch-tab:hover, .market-watch-tab.is-active { border-color: var(--action); background: var(--action-soft); }
+.market-watch-chart-frame { overflow: hidden; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.market-watch-chart { width: 100%; height: 420px; }
+.market-watch-chart .tradingview-widget-container__widget { width: 100%; height: 100%; }
+.market-watch-disclaimer { margin: 10px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.65; }
+.market-watch-disclaimer a { margin-left: 5px; color: var(--action); font-weight: 700; text-decoration: none; }
+.market-watch-disclaimer a:hover { text-decoration: underline; }
 @media (max-width: 720px) {
   .headlines-page { padding: var(--sp-5) var(--sp-3) var(--sp-7); }
   .headlines-header { align-items: flex-start; }
   .headlines-columns { grid-template-columns: 1fr; }
   .headline-panel { padding: var(--sp-4); }
+  .market-watch { padding: var(--sp-4); }
+  .market-watch-heading { align-items: flex-start; flex-direction: column; }
+  .market-watch-chart-frame, .market-watch-chart { min-height: 360px; height: 360px; }
 }
 
 .ops-triage-note-help { margin: 0 0 var(--sp-3); color: var(--text-secondary); font-size: 13px; }
