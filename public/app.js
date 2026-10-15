@@ -2425,11 +2425,66 @@ function renderMarketWatch() {
     ? `<button type="button" class="market-watch-tab${index === 0 ? ' is-active' : ''}" data-market-symbol="${escapeHtml(instrument.symbol)}" aria-pressed="${index === 0}" aria-controls="market-chart-widget"><span>${escapeHtml(instrument.label)}</span><small>${escapeHtml(instrument.group)}</small></button>`
     : `<a class="market-watch-tab market-watch-external" href="${instrument.url}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(instrument.label)} ↗</span><small>${escapeHtml(instrument.group)} · TradingView에서 보기</small></a>`).join('');
   return `<section class="market-watch" aria-labelledby="market-watch-title">
-    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>에너지 지표 차트와 유지 선물 원천 화면을 한곳에서 확인합니다.</p></div><span class="market-watch-provider">차트·시세: TradingView</span></div>
+    <div class="market-watch-heading"><div><p class="headlines-section-kicker">MARKET WATCH</p><h2 id="market-watch-title">유지·원료 시장 차트</h2><p>원유 참고 차트와 식용유지 선물 시세·원천을 한곳에서 확인합니다.</p></div><span class="market-watch-provider">원유 차트: TradingView · 유지 시세: Barchart API</span></div>
+    <section class="market-data-snapshot" aria-label="유지 선물 시세 스냅샷"><div class="market-data-status"><span id="market-data-status-text" aria-live="polite">공급원 연동 상태를 확인하는 중입니다…</span><button type="button" class="market-data-refresh" id="market-data-refresh">새로고침</button></div><div id="market-data-cards" class="market-data-cards"></div></section>
     <div class="market-watch-tabs" role="group" aria-label="차트 종목 선택">${buttons}</div>
     <div class="market-watch-chart-frame"><div id="market-chart-widget" class="market-watch-chart tradingview-widget-container" aria-label="선택한 시장 종목 차트"></div></div>
-    <p class="market-watch-disclaimer">WTI·브렌트는 원유 CFD 지표이며 식용유 선물 가격을 대체하지 않습니다. 팜유·대두유 등 거래소 선물은 TradingView 위젯 제공 범위 제한으로 원천 화면에서 열립니다. 시세 제공·지연 여부와 단위는 각 원천에서 확인하세요. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
+    <p class="market-watch-disclaimer">WTI·브렌트는 원유 CFD 지표이며 식용유 선물 가격을 대체하지 않습니다. 팜유·대두유 시세 스냅샷은 Barchart API 계약·표시 권한 설정 후에만 표시되며, 실시간/지연 여부·거래 시각·단위를 함께 확인하세요. 상세 차트와 기타 유지 원료는 각 원천 화면을 이용합니다. <a id="market-chart-source" href="${MARKET_WATCH_INSTRUMENTS[0].url}" target="_blank" rel="noopener noreferrer">원천 차트 열기 ↗</a></p>
   </section>`;
+}
+
+function marketDataModeLabel(mode) {
+  return ({ R: '실시간', I: '지연 시세', D: '종가' })[mode] || '시세 유형 확인 필요';
+}
+
+function marketDataSparkline(bars) {
+  const values = (Array.isArray(bars) ? bars : []).map((bar) => Number(bar.close)).filter(Number.isFinite);
+  if (values.length < 2) return '<div class="market-data-chart-empty">가격 이력 없음</div>';
+  const width = 240;
+  const height = 42;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values.map((value, index) => `${(index / (values.length - 1)) * width},${height - ((value - min) / range) * (height - 4) - 2}`).join(' ');
+  return `<svg class="market-data-sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 90일 종가 추이"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" /></svg>`;
+}
+
+function renderMarketDataCards(data) {
+  const status = document.getElementById('market-data-status-text');
+  const cards = document.getElementById('market-data-cards');
+  if (!status || !cards) return;
+  if (!data?.configured) {
+    status.textContent = '시세 공급원 연결 대기 · 계약/API 및 표시 권한 설정 후 팜유·대두유 시세를 표시합니다.';
+    cards.replaceChildren();
+    return;
+  }
+  const instruments = Array.isArray(data.instruments) ? data.instruments : [];
+  status.textContent = data.errors?.length
+    ? data.stale
+      ? '시세 공급원 응답이 일부 끊겨 이전에 받은 값이 표시될 수 있습니다. 거래 시각과 상태를 확인하세요.'
+      : '시세 공급원 응답 일부를 받지 못했습니다. 기존 원천 차트와 링크는 계속 이용할 수 있습니다.'
+    : `Barchart OnDemand · ${data.generatedAt ? `서버 조회 ${new Date(data.generatedAt).toLocaleString('ko-KR')}` : '조회 시각 확인 불가'} · 가격 지연 유형을 종목별로 표시합니다.`;
+  cards.innerHTML = instruments.map((item) => {
+    const price = item.price !== null && item.price !== undefined && Number.isFinite(Number(item.price)) ? new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 }).format(Number(item.price)) : '시세 없음';
+    const change = item.change !== null && item.change !== undefined && Number.isFinite(Number(item.change)) ? Number(item.change) : null;
+    const changePercent = item.changePercent !== null && item.changePercent !== undefined && Number.isFinite(Number(item.changePercent)) ? Number(item.changePercent) : null;
+    const direction = change === null ? '' : change > 0 ? 'is-up' : change < 0 ? 'is-down' : '';
+    const quoteTime = item.timestamp ? new Date(item.timestamp).toLocaleString('ko-KR') : '거래 시각 없음';
+    const detail = item.available && price !== '시세 없음'
+      ? `<div class="market-data-price-row"><strong>${escapeHtml(price)}</strong><span class="${direction}">${change === null ? '등락 확인 불가' : `${change > 0 ? '+' : ''}${change} (${changePercent === null ? '-' : `${changePercent > 0 ? '+' : ''}${changePercent}%`})`}</span></div><div class="market-data-meta"><span>${escapeHtml(item.unit || '')}</span><span>${marketDataModeLabel(item.mode)}</span></div><div class="market-data-meta"><span>${escapeHtml(quoteTime)}</span><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">원천 ↗</a></div>${marketDataSparkline(item.bars)}`
+      : `<div class="market-data-unavailable">현재 시세를 받지 못했습니다.<br><a href="${escapeHtml(item.sourceUrl)}" target="_blank" rel="noopener noreferrer">Barchart 원천 확인 ↗</a></div>`;
+    return `<article class="market-data-card"><div class="market-data-card-heading"><h3>${escapeHtml(item.label || '')}</h3><span>${escapeHtml(item.symbol || '')}</span></div>${detail}</article>`;
+  }).join('');
+}
+
+async function loadMarketData() {
+  const status = document.getElementById('market-data-status-text');
+  if (!status) return;
+  try {
+    renderMarketDataCards(await api('/market-data'));
+  } catch (err) {
+    status.textContent = '시세 스냅샷을 불러오지 못했습니다. 기존 원천 차트와 링크를 이용해 주세요.';
+  }
 }
 
 function mountMarketWatch(initialSymbol = MARKET_WATCH_INSTRUMENTS[0].symbol) {
@@ -2479,6 +2534,13 @@ function bindMarketWatch() {
   const first = document.querySelector('.market-watch-tab');
   if (!first) return;
   mountMarketWatch(first.dataset.marketSymbol);
+  loadMarketData();
+  const refresh = document.getElementById('market-data-refresh');
+  if (refresh) refresh.addEventListener('click', async () => {
+    refresh.disabled = true;
+    try { await loadMarketData(); }
+    finally { refresh.disabled = false; }
+  });
   document.querySelectorAll('.market-watch-tab').forEach((button) => {
     button.addEventListener('click', () => mountMarketWatch(button.dataset.marketSymbol));
   });
