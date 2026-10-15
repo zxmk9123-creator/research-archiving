@@ -71,20 +71,14 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
   if (!items.length) {
     await pool.query(
       `UPDATE daily_briefs
-          SET status = 'empty', item_count = 0, source_item_ids = '[]'::jsonb,
-              brief = NULL, error = NULL, updated_at = now(), completed_at = now()
+          SET status = 'empty',
+              item_count = CASE WHEN brief IS NULL THEN 0 ELSE item_count END,
+              error = NULL, updated_at = now(), completed_at = now()
         WHERE brief_date = $1 AND status = 'generating'`,
       [briefDate]
     );
     return;
   }
-
-  await pool.query(
-    `UPDATE daily_briefs
-        SET item_count = $2, source_item_ids = $3, updated_at = now()
-      WHERE brief_date = $1 AND status = 'generating'`,
-    [briefDate, items.length, JSON.stringify(itemIds)]
-  );
 
   const evidence = items.map((item) => ({
     item_id: Number(item.id),
@@ -114,9 +108,10 @@ async function buildDailyBrief(briefDate, windowStart, windowEnd) {
   const brief = validateBrief(raw, itemIds);
   await pool.query(
     `UPDATE daily_briefs
-        SET status = 'ready', brief = $2, error = NULL, updated_at = now(), completed_at = now()
+        SET status = 'ready', brief = $2, item_count = $3, source_item_ids = $4,
+            error = NULL, updated_at = now(), completed_at = now()
       WHERE brief_date = $1 AND status = 'generating'`,
-    [briefDate, JSON.stringify(brief)]
+    [briefDate, JSON.stringify(brief), items.length, JSON.stringify(itemIds)]
   );
 }
 

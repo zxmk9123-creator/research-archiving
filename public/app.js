@@ -2390,6 +2390,14 @@ async function renderOps() {
 function renderHeadlineBrief(data) {
   const date = escapeHtml(String(data.brief_date || '').slice(0, 10));
   const brief = data.brief || {};
+  const refreshStatus = data.refresh_status || 'ready';
+  const refreshNotice = refreshStatus === 'generating'
+    ? '새 기준으로 브리프를 갱신 중입니다. 마지막 성공본을 계속 표시합니다.'
+    : refreshStatus === 'failed'
+      ? '갱신에 실패했습니다. 마지막 성공본을 계속 표시합니다.'
+      : refreshStatus === 'empty'
+        ? '새 기준을 충족하는 자료가 없습니다. 마지막 성공본을 계속 표시합니다.'
+        : '';
   const evidenceIds = new Set((Array.isArray(data.source_item_ids) ? data.source_item_ids : []).map(Number));
   const developments = (Array.isArray(brief.developments) ? brief.developments : []).filter((entry) => evidenceIds.has(Number(entry.item_id)));
   const sourceById = new Map((Array.isArray(data.sources) ? data.sources : []).map((source) => [Number(source.item_id), source]));
@@ -2407,6 +2415,7 @@ function renderHeadlineBrief(data) {
   return `<div class="headlines-page">
     <header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 기사와 보고서에서 시장 판단에 필요한 변화를 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
     <p class="page-lede headlines-basis">오늘 수집된 기사와 최근 7일 이내 발행된 신규 소식 중 주목할 변화를 요약합니다. · ${Number(data.item_count) || 0}건</p>
+    <div class="headline-refresh"><p>${refreshNotice}</p><button class="btn ${refreshStatus === 'generating' ? '' : 'primary'}" id="headline-retry" type="button" ${refreshStatus === 'generating' ? 'disabled' : ''}>${refreshStatus === 'generating' ? '새 브리프 생성 중…' : '새 기준으로 다시 생성'}</button></div>
     <section class="headline-lead"><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
     <div class="headlines-columns">
       <section class="section headline-panel"><div class="section-header headline-panel-heading"><h2>주목할 자료</h2><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>
@@ -2433,11 +2442,19 @@ async function renderHeadlines() {
   try {
     const data = await api('/headlines/latest');
     if (!data) {
-      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">오늘 수집된 자료와 최근 7일 내 발행된 신규 소식을 요약합니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>현재 DB에 쌓인 금일자 자료를 사용해 브리프를 만들 수 있습니다.</p><button class="btn primary" id="headline-retry" type="button">금일 자료로 브리프 생성</button></section>${renderHeadlineMarketLinks()}</div>`;
-      bindHeadlineRetry('금일 자료로 브리프 생성');
+      app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 수집 기사와 최근 7일 이내 신규 소식을 선별해 요약합니다.</p></div></header><section class="headline-state"><h2>아직 생성된 브리프가 없습니다</h2><p>일일 수집 완료 후 선별된 신규 소식으로 생성됩니다.</p><button class="btn primary" id="headline-retry" type="button">현재 자료로 브리프 생성</button></section>${renderHeadlineMarketLinks()}</div>`;
+      bindHeadlineRetry('현재 자료로 브리프 생성');
       return;
     }
-    if (data.status === 'ready') { app.innerHTML = renderHeadlineBrief(data); return; }
+    if (data.status === 'ready') {
+      app.innerHTML = renderHeadlineBrief(data);
+      if (data.refresh_status === 'generating') {
+        setTimeout(() => { if (parseHash().path === 'headlines') renderHeadlines(); }, 15000);
+      } else {
+        bindHeadlineRetry('새 기준으로 다시 생성', { force: true });
+      }
+      return;
+    }
     const states = {
       generating: ['브리프를 만들고 있습니다', '수집 자료를 정리 중입니다. 잠시 후 자동으로 다시 확인합니다.'],
       empty: ['오늘 아카이브된 자료가 없습니다', '오늘 자료가 추가됐다면 관리자 인증 후 브리프를 다시 만들 수 있습니다.'],
@@ -2445,20 +2462,25 @@ async function renderHeadlines() {
     };
     const [title, description] = states[data.status] || ['브리프 상태 확인 중', '잠시 후 다시 확인해 주세요.'];
     app.innerHTML = `<div class="headlines-page"><header class="headlines-header"><div><h1>헤드라인</h1></div><span class="headlines-date">${escapeHtml(String(data.brief_date || '').slice(0, 10))}</span></header><section class="headline-state"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(description)}</p>${['failed', 'empty'].includes(data.status) ? `<button class="btn primary" id="headline-retry" type="button">${data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성'}</button>` : ''}</section>${renderHeadlineMarketLinks()}</div>`;
-    if (['failed', 'empty'].includes(data.status)) bindHeadlineRetry(data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성');
+    if (['failed', 'empty'].includes(data.status)) {
+      bindHeadlineRetry(data.status === 'empty' ? '새 자료로 다시 생성' : '브리프 다시 생성');
+    }
     if (data.status === 'generating') setTimeout(() => { if (parseHash().path === 'headlines') renderHeadlines(); }, 15000);
   } catch (err) {
     app.innerHTML = `<div class="headlines-page"><h1>헤드라인</h1><p class="headlines-error">브리프를 불러오지 못했습니다: ${escapeHtml(err.message)}</p><button class="btn" type="button" onclick="renderHeadlines()">다시 불러오기</button></div>`;
   }
 }
 
-function bindHeadlineRetry(defaultLabel) {
+function bindHeadlineRetry(defaultLabel, { force = false } = {}) {
   const retry = document.getElementById('headline-retry');
   if (!retry) return;
   retry.onclick = async () => {
     retry.disabled = true;
     retry.textContent = '요청 중…';
-    try { await api('/headlines/generate', { method: 'POST' }); await renderHeadlines(); }
+    try {
+      await api('/headlines/generate', { method: 'POST', body: JSON.stringify({ force }) });
+      await renderHeadlines();
+    }
     catch (err) { alert(`브리프 생성 요청 실패: ${err.message}`); retry.disabled = false; retry.textContent = defaultLabel; }
   };
 }
@@ -3115,11 +3137,17 @@ function updateActiveNavTab(path) {
 // ran at all because `seenKey` was already set — so callers can chain a
 // next tour onto this one unconditionally (see startHomeTour below)
 // without caring which of those three happened.
+let activeSpotlightTourCancel = null;
 function runSpotlightTour(steps, seenKey, onDone) {
+  if (activeSpotlightTourCancel) {
+    activeSpotlightTourCancel();
+    activeSpotlightTourCancel = null;
+  }
   if (localStorage.getItem(seenKey)) { if (onDone) onDone(); return; }
 
   let step = 0;
   let highlightedEl = null;
+  let finished = false;
   const card = document.createElement('div');
   card.className = 'onboard-card';
   document.body.appendChild(card);
@@ -3134,14 +3162,28 @@ function runSpotlightTour(steps, seenKey, onDone) {
   window.addEventListener('scroll', positionCard, { passive: true });
   window.addEventListener('resize', positionCard);
 
-  function finish() {
+  function cleanup() {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
     window.removeEventListener('scroll', positionCard);
     window.removeEventListener('resize', positionCard);
     card.remove();
+  }
+
+  function cancel() {
+    if (finished) return;
+    finished = true;
+    cleanup();
+  }
+
+  function finish() {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    if (activeSpotlightTourCancel === cancel) activeSpotlightTourCancel = null;
     localStorage.setItem(seenKey, '1');
     if (onDone) onDone();
   }
+  activeSpotlightTourCancel = cancel;
 
   function renderStep(direction) {
     if (highlightedEl) highlightedEl.classList.remove('onboard-highlight');
