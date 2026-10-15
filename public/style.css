@@ -599,6 +599,25 @@ p { margin: 0; }
 .ops-stat-value { display: block; font-size: 28px; font-weight: 800; color: var(--text); }
 .ops-stat-label { display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
 
+.ops-triage-note-help { margin: 0 0 var(--sp-3); color: var(--text-secondary); font-size: 13px; }
+.ops-triage-table-wrap { overflow-x: auto; }
+.ops-triage-table { min-width: 900px; }
+.ops-triage-table th, .ops-triage-table td { vertical-align: top; }
+.ops-triage-table td:nth-child(1) { min-width: 150px; }
+.ops-triage-table td:nth-child(2) { min-width: 240px; }
+.ops-triage-table td:nth-child(3) { min-width: 130px; }
+.ops-triage-table td:nth-child(4) { min-width: 250px; }
+.ops-triage-tools { display: flex; align-items: center; gap: var(--sp-2); }
+.ops-triage-tools .btn { min-height: 30px; padding: 0 9px; font-size: 12px; }
+.ops-triage-reason { display: inline-block; font-size: 12px; font-weight: 700; color: var(--danger); }
+.ops-triage-status, .ops-triage-note { width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.ops-triage-status { min-height: 34px; padding: 0 8px; }
+.ops-triage-note { min-height: 56px; padding: 7px 8px; resize: vertical; }
+.ops-triage-save { min-height: 32px; padding: 0 10px; font-size: 12px; }
+.ops-triage-saved { display: block; max-width: 140px; margin-top: 5px; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.ops-triage-pagination { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
+.ops-triage-empty { padding: var(--sp-4); color: var(--text-secondary); font-size: 13px; }
+
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--border); }
 td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); color: var(--text); }
