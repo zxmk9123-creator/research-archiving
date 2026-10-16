@@ -53,6 +53,7 @@ function normalizeTablesInText(text) {
     const width = header.length;
     const notes = [];
     for (let c = 1; c < width; c++) {
+      if (/원문/.test(header[c])) continue; // an "original wording" column is mixed on purpose
       // malformed number text in any cell of the column
       rows.forEach((r) => {
         if (r[c] !== undefined && MALFORMED.test(r[c])) { r[c] = r[c].replace(MALFORMED, MARK_UNVERIFIED); warnings++; }

@@ -946,3 +946,31 @@ test('enforced coverage: companies with supplied materials cannot be omitted fro
   assert.match(out, /추가 확인된 업체[\s\S]*\*\*Beta Fuels\*\*: Beta Fuels adds 60 kt \[2\]/);
   assert.equal(searchRouter.ensureCompanyCoverage('Alpha Oil [1] Beta Fuels [2]', req, cands), 'Alpha Oil [1] Beta Fuels [2]');
 });
+
+test('finalizeAnswer with a verified dataset: the system table+chart lead, the model\'s own table/chart are dropped, footnotes cover the dataset sources', async () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const mt = (m) => [m.title, m.summary].filter(Boolean).join(' ');
+  const cands = [
+    { id: 11, title: 'Neste', summary: 'Neste Rotterdam 1.2 Mt/a; Singapore 1.0 Mt/a', source_name: 's' },
+    { id: 12, title: 'DGD', summary: 'Port Arthur SAF 235 million gallons per year', source_name: 's' },
+    { id: 13, title: 'Eni', summary: 'Gela 400 kt per year', source_name: 's' },
+  ];
+  const rec = (o) => ({ site: null, period: '연간', status: '가동', year: null, ...o });
+  const dataset = dp.buildDataset(dp.verifyRecords([
+    rec({ entity: 'Neste', site: '로테르담', value: 1.2, unit: 'Mt', source: 1 }),
+    rec({ entity: 'DGD', site: 'Port Arthur', value: 235, unit: 'million gallons', source: 2 }),
+    rec({ entity: 'Eni', site: 'Gela', value: 400, unit: 'kt', source: 3 }),
+  ], cands, mt), []);
+  const restoreProvider = mockProvider(async () => ({ text: '[]', provider: 'freellmapi' }));
+  try {
+    const model = '핵심 해석입니다. [1]\n| 모델표 | 값 |\n| --- | --- |\n| a | 1 |\n```chart\n{"type":"bar","labels":["a","b"],"series":[{"name":"x","data":[1,2]}]}\n```\nEni도 큽니다. [3]';
+    const { answer, sources } = await searchRouter.finalizeAnswer(model, cands, undefined, [], 'SAF Capa를 그래프로', dataset);
+    assert.ok(answer.startsWith('| 업체 | 거점 | 구분 |'));
+    assert.equal((answer.match(/```chart/g) || []).length, 1);
+    assert.ok(!answer.includes('모델표'));
+    assert.match(answer, /핵심 해석입니다\./);
+    assert.deepEqual(sources.map((s) => s.id).sort(), [11, 12, 13]);
+  } finally {
+    restoreProvider();
+  }
+});

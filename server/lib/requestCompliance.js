@@ -120,6 +120,7 @@ function enforceCompleteChart(text, req) {
   const m = String(text).match(/```chart[^\n]*\n([\s\S]*?)```/);
   let existing = null;
   if (m) { try { existing = JSON.parse(m[1]); } catch (_) { existing = null; } }
+  if (existing && existing.auto === 'dataset') return { text, rebuilt: false }; // already built in code from verified records
   const existingN = existing && Array.isArray(existing.labels) ? existing.labels.length : 0;
   const hasTotalBar = existing && existing.labels.some((l) => TOTAL_ROW.test(String(l)));
   if (existing && existingN >= built.chart.labels.length && !hasTotalBar) return { text, rebuilt: false };

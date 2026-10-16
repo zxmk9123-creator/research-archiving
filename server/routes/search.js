@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const numberCheck = require('../lib/numberCheck');
 const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
+const datasetPipeline = require('../lib/datasetPipeline');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -856,8 +857,46 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
   });
 }
 
-async function finalizeAnswer(rawText, candidates, signal, required = [], question = '') {
-  const verified = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
+// Quantitative visualization requests: build the verified dataset (table + chart)
+// in code (see lib/datasetPipeline.js). Null on any failure -> normal generation.
+const DATASET_TIMEOUT_MS = 75000;
+async function tryBuildDataset(question, candidates, required, signal) {
+  const req = requestCompliance.parseRequest(question);
+  if (!datasetPipeline.isDatasetRequest(req, question)) return null;
+  try {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal && signal.reason);
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      const result = await withTimeout(
+        provider.callProviderWithFallback(
+          { system: datasetPipeline.EXTRACTION_SYSTEM, user: datasetPipeline.buildExtractionUser(question, buildMaterialsBlock(candidates)) },
+          { signal: controller.signal }
+        ),
+        DATASET_TIMEOUT_MS,
+        () => { controller.abort(); throw new Error(`dataset extraction timed out after ${DATASET_TIMEOUT_MS}ms`); }
+      );
+      const records = datasetPipeline.verifyRecords(datasetPipeline.parseRecords(result.text), candidates, materialText);
+      const dataset = datasetPipeline.buildDataset(records, required);
+      if (dataset) console.log(`ai-search dataset built records=${dataset.records}`);
+      return dataset;
+    } finally {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    }
+  } catch (err) {
+    console.error('ai-search dataset pipeline failed:', err.message);
+    return null;
+  }
+}
+
+async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null) {
+  let modelText = normalizeCitationMarkers(rawText);
+  if (dataset) {
+    // The system draws the table and chart; drop any the model still wrote.
+    modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
+  }
+  const verifiedModel = await verifyCitations(modelText, candidates, signal);
+  const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
   // Number fidelity: figures are checked against the materials cited for them and
   // corrected/flagged (see lib/numberCheck.js) BEFORE footnotes are renumbered.
@@ -958,7 +997,12 @@ async function handleSearch(req, res, signal) {
   }
 
   const required = requiredCompanies(question, candidates, await getRoster());
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}`;
+  const dataset = await tryBuildDataset(question, candidates, required, signal);
+  if (signal.aborted || res.destroyed) return;
+  const datasetBlock = dataset
+    ? `\n\n[검증된 데이터셋 — 시스템이 아래 표와 차트를 답변 맨 앞에 자동으로 붙인다. 너는 표·차트·수치 나열을 다시 쓰지 말고, 이 데이터셋과 자료를 근거로 핵심 해석 3~6개 불릿과 주의점(미공시, 단위 환산, 가동/건설/계획 구분, 총계와 거점 값 구분)만 쓴다. 데이터셋과 다른 수치는 쓰지 않는다.]\n${dataset.table}`
+    : '';
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${datasetBlock}`;
 
   if (!streaming) {
     let text;
@@ -978,7 +1022,7 @@ async function handleSearch(req, res, signal) {
       return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     }
     if (signal.aborted || res.destroyed) return;
-    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question);
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset);
     if (signal.aborted || res.destroyed) return;
     await recordSearchTelemetry({
       requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
@@ -1004,6 +1048,7 @@ async function handleSearch(req, res, signal) {
   });
   const sendEvent = (event, data) => { if (!signal.aborted && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
+  if (dataset) sendEvent('token', { delta: `${dataset.markdown}\n\n` });
   let rawText;
   let ttftMs = null;
   let modelUsed = null;
@@ -1030,7 +1075,7 @@ async function handleSearch(req, res, signal) {
   }
 
   if (signal.aborted || res.destroyed) return;
-  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question);
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset);
   if (signal.aborted || res.destroyed) return;
   sendEvent('done', { answer, insufficient: false, sources });
   res.end();
