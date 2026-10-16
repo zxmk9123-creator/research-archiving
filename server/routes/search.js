@@ -4,6 +4,7 @@ const numberCheck = require('../lib/numberCheck');
 const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
+const workloadPlan = require('../lib/workloadPlan');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -351,7 +352,7 @@ async function retrieveForWatchlist(otherForms) {
   return out;
 }
 
-async function retrieveCandidates(question, history) {
+async function retrieveCandidates(question, history, { light = false } = {}) {
   const retrievalQuery = resolveRetrievalQuery(question, history);
   const concepts = extractConcepts(retrievalQuery);
   if (!concepts.length) return [];
@@ -429,7 +430,7 @@ async function retrieveCandidates(question, history) {
   }
   let baseCovered = base.concat(coverage);
   let ceiling = MAX_TOTAL_CANDIDATES;
-  if (isCollectiveQuestion(retrievalQuery)) {
+  if (!light && isCollectiveQuestion(retrievalQuery)) {
     const nonGeneric = concepts.filter((forms, i) => docFreqs[i] > 0 && docFreqs[i] <= SPECIFIC_DOCFREQ * 8).flat();
     const known = new Set(baseCovered.map((r) => r.id));
     const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
@@ -730,9 +731,9 @@ function withTimeout(promise, ms, onTimeout) {
 const ANSWER_CACHE_TTL_MS = 15 * 60 * 1000;
 const ANSWER_CACHE_MAX = 100;
 const answerCache = new Map();
-function answerCacheKey(question, candidates) {
+function answerCacheKey(question, candidates, mode = 'full') {
   const norm = String(question || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return crypto.createHash('sha256').update(`${norm}|${candidates.map((c) => c.id).join(',')}`).digest('hex');
+  return crypto.createHash('sha256').update(`${mode}|${norm}|${candidates.map((c) => c.id).join(',')}`).digest('hex');
 }
 const answerCacheEnabled = () => process.env.AI_SEARCH_CACHE !== 'off';
 function answerCacheGet(key) {
@@ -967,14 +968,15 @@ async function tryBuildDataset(question, candidates, required, signal) {
   }
 }
 
-async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null) {
+async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false, datasetExpected = false } = {}) {
   let modelText = normalizeCitationMarkers(rawText);
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
-  const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
+  const failureNote = datasetExpected && !dataset ? '\n\n※ 표·차트 자동 생성에 실패해 해석만 제공합니다. 같은 질문을 다시 요청하면 대부분 해결됩니다.' : '';
+  const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : `${verifiedModel}${failureNote}`;
   const covered = ensureCompanyCoverage(verified, required, candidates);
   // Number fidelity: figures are checked against the materials cited for them and
   // corrected/flagged (see lib/numberCheck.js) BEFORE footnotes are renumbered.
@@ -987,6 +989,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   // Explicit user requests are enforced in code (chart kind, unit, a chart when one
   // was asked for) — see lib/requestCompliance.js.
   const req = requestCompliance.parseRequest(question);
+  if (quick) req.completeness = false; // quick scope: no forced completeness rebuild
   const completed = requestCompliance.enforceCompleteChart(tabled.text, req);
   if (completed.rebuilt) console.log('ai-search request_compliance chart_rebuilt_for_completeness');
   const ensured = requestCompliance.ensureChartPresent(completed.text, req);
@@ -1050,10 +1053,15 @@ async function handleSearch(req, res, signal) {
   const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
   if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
   const fingerprint = questionFingerprint(question);
+  // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
+  const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
+  const confirmed = scope.confirmed === true;
+  const quick = confirmed && scope.mode === 'quick';
 
   let candidates;
   try {
-    candidates = await retrieveCandidates(question, req.body.history);
+    candidates = await retrieveCandidates(question, req.body.history, { light: quick });
+    if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);
     if (signal.aborted || res.destroyed) return;
   } catch (err) {
     console.error('ai-search retrieval failed:', err.message);
@@ -1074,11 +1082,11 @@ async function handleSearch(req, res, signal) {
     return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
   }
 
-  const required = requiredCompanies(question, candidates, await getRoster());
+  const required = quick ? [] : requiredCompanies(question, candidates, await getRoster());
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
-  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates);
+  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, quick ? 'quick' : 'full');
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
     await recordSearchTelemetry({
@@ -1091,9 +1099,25 @@ async function handleSearch(req, res, signal) {
     res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, sources: cached.sources })}\n\n`);
     return res.end();
   }
-  const datasetPromise = tryBuildDataset(question, candidates, required, signal);
+  // Heavy requests are confirmed with the user before any AI work starts.
+  if (!confirmed) {
+    const materialsChars = buildMaterialsBlock(candidates).length;
+    const assessment = workloadPlan.assessWorkload({
+      question, candidates, required, systemChars: SYSTEM_PROMPT.length, materialsChars,
+      extractionChars: buildMaterialsBlock(candidates, { onlyWithQuantities: true }).length,
+      quickMaterialsChars: buildMaterialsBlock(candidates.slice(0, workloadPlan.QUICK_CANDIDATES)).length,
+    });
+    if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
+  }
+  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal);
   datasetPromise.catch(() => {});
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}`;
+  const wantsDatasetBlock = !quick && datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question);
+  const scopeBlock = quick
+    ? '\n\n[범위: 핵심 요약 모드 — 사용자가 빠른 요약을 선택했다. 상위 10개 안팎의 주요 대상만 간결하게 정리하고 나머지는 한 줄로 언급한다.]'
+    : wantsDatasetBlock
+      ? '\n\n[이 질문의 표와 차트는 시스템이 검증된 데이터로 생성해 답변 맨 앞에 붙인다. 표·차트·수치 나열은 쓰지 말고, 자료에 근거한 핵심 해석 3~6개 불릿과 주의점(미공시, 단위 환산, 가동/건설/계획 구분, 총계와 거점 값 구분)만 간결하게 쓴다.]'
+      : '';
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${scopeBlock}`;
 
   if (!streaming) {
     let text;
@@ -1114,7 +1138,7 @@ async function handleSearch(req, res, signal) {
     }
     if (signal.aborted || res.destroyed) return;
     const dataset = await datasetPromise;
-    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset);
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset, { quick, datasetExpected: wantsDatasetBlock });
     if (signal.aborted || res.destroyed) return;
     if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
     await recordSearchTelemetry({
@@ -1143,8 +1167,7 @@ async function handleSearch(req, res, signal) {
 
   // Tokens are held back until the dataset settles (usually already done by the time the
   // model has written its first paragraph), so the system table/chart can lead the stream.
-  const wantsDataset = datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question);
-  let datasetSettled = !wantsDataset; // other requests stream straight through
+  let datasetSettled = !wantsDatasetBlock; // other requests stream straight through
   let held = '';
   const flushed = datasetPromise.then((d) => {
     datasetSettled = true;
@@ -1179,7 +1202,7 @@ async function handleSearch(req, res, signal) {
 
   if (signal.aborted || res.destroyed) return;
   const dataset = await flushed;
-  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset);
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick, datasetExpected: wantsDatasetBlock });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
   sendEvent('done', { answer, insufficient: false, sources });

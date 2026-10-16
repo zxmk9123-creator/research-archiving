@@ -1060,3 +1060,62 @@ test('answer cache: the same question over the same evidence is served without c
     if (prev === undefined) process.env.AI_SEARCH_CACHE = 'off'; else process.env.AI_SEARCH_CACHE = prev;
   }
 });
+
+test('guide card: a heavy request returns a scope plan first and starts NO AI work until confirmed', async () => {
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
+  let providerCalls = 0;
+  const restoreProvider = mockProvider(async () => { providerCalls++; return { text: '답변 [1]', provider: 'p' }; });
+  try {
+    await withServer(async (base) => {
+      const post = (body) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+      const card = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
+      assert.equal(card.needsConfirmation, true);
+      assert.equal(providerCalls, 0);
+      assert.deepEqual(card.plan.options.map((o) => o.id), ['full', 'quick']);
+      assert.equal(card.plan.recommended, 'full');
+      for (const o of card.plan.options) assert.ok(o.tokens > 0 && o.aiCalls && o.seconds && o.tokensText);
+      assert.ok(card.plan.options[1].tokens < card.plan.options[0].tokens || card.plan.options[1].aiCalls === '1회');
+      // confirmed: the work runs
+      const done = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘', scope: { confirmed: true, mode: 'full' } });
+      assert.ok(done.answer);
+      assert.ok(providerCalls > 0);
+      // an ordinary question never shows a card
+      providerCalls = 0;
+      const plain = await post({ question: '팜유 가격 이유' });
+      assert.ok(plain.answer && !plain.needsConfirmation);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('guide card: the quick scope skips the dataset extraction and the roster sweep', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM companies WHERE watched', () => ({ rows: [{ id: 1, name: 'Alpha', aliases: [] }] })],
+    ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
+  ]);
+  const seenSystems = [];
+  const restoreProvider = mockProvider(async ({ system }) => { seenSystems.push(system === searchRouter.VERIFICATION_SYSTEM_PROMPT ? 'verify' : /extract a structured dataset/i.test(system) ? 'extract' : 'write'); return { text: '요약 [1]', provider: 'p' }; });
+  try {
+    await withServer(async (base) => {
+      const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '글로벌 SAF 플랜트 Capa를 누락없이 그래프로', scope: { confirmed: true, mode: 'quick' } }) }).then((x) => x.json());
+      assert.ok(r.answer);
+    });
+    assert.ok(!seenSystems.includes('extract'));
+    assert.ok(!calls.some((c) => c.text.includes('item_companies ic WHERE')), 'no roster sweep in quick mode');
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
+test('workloadPlan: light requests are never heavy; dataset and whole-roster requests are', () => {
+  const wp = require('../server/lib/workloadPlan');
+  const base = { candidates: [{ id: 1 }, { id: 2 }], required: [], systemChars: 9000, materialsChars: 20000, extractionChars: 8000 };
+  assert.equal(wp.assessWorkload({ ...base, question: '팜유 가격 이유' }).heavy, false);
+  assert.equal(wp.assessWorkload({ ...base, question: 'SAF Capa 알려줘' }).heavy, false);
+  assert.equal(wp.assessWorkload({ ...base, question: 'SAF Capa를 그래프로' }).heavy, true);
+  const roster = [1, 2, 3].map((i) => ({ name: `C${i}` }));
+  assert.equal(wp.assessWorkload({ ...base, required: roster, question: '모든 업체 현황을 누락 없이' }).heavy, true);
+});

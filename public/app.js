@@ -1346,7 +1346,7 @@ function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources) {
 // whose content-type comes back as JSON anyway (the insufficient-
 // evidence case, or a 4xx/5xx before any stream could start) is handled
 // exactly like before streaming existed; this is purely additive.
-async function runAiSearchTurn(turnEl, question, submitBtn) {
+async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
   const moduleEl = document.getElementById('ai-search');
   const bodyEl = turnEl.querySelector('.ai-search-turn-body');
   bodyEl.innerHTML = '<p class="ai-search-status"></p>';
@@ -1394,13 +1394,19 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ question, history: aiSearchHistory }),
+      body: JSON.stringify({ question, history: aiSearchHistory, ...(scope ? { scope } : {}) }),
     });
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         bodyEl.innerHTML = aiSearchErrorHtml(body.error || 'AI 검색 중 오류가 발생했습니다.');
+        return;
+      }
+      if (body.needsConfirmation && body.plan) {
+        // Heavy request: nothing has been started yet — show the scope card first.
+        stopAiSearchStatus(moduleEl);
+        bodyEl.innerHTML = aiScopeCardHtml(body.plan);
         return;
       }
       finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources);
@@ -1471,6 +1477,38 @@ async function runAiSearchTurn(turnEl, question, submitBtn) {
   }
 }
 
+// Guide card for heavy requests: scope, steps, honest cost per option; the work
+// starts only after the user picks an option and confirms.
+function aiScopeCardHtml(plan) {
+  const sc = plan.scope || {};
+  const chips = (sc.companyNames || []).map((n) => `<span class="ai-scope-chip">${escapeHtml(n)}</span>`).join('')
+    + (sc.moreCompanies ? `<span class="ai-scope-chip more">+${sc.moreCompanies}</span>` : '');
+  const steps = (plan.steps || []).map((t, i) => `<li><b>${i + 1}</b>${escapeHtml(t)}</li>`).join('');
+  const options = (plan.options || []).map((o) => `
+    <label class="ai-scope-option">
+      <input type="radio" name="ai-scope-mode" value="${escapeHtml(o.id)}"${o.id === plan.recommended ? ' checked' : ''}>
+      <span class="ai-scope-option-body">
+        <span class="ai-scope-option-head">${escapeHtml(o.label)}${o.id === plan.recommended ? '<em>추천</em>' : ''}</span>
+        <span class="ai-scope-option-detail">${escapeHtml(o.detail)}</span>
+        <span class="ai-scope-meta"><i>AI 호출 ${escapeHtml(o.aiCalls)}</i><i>${escapeHtml(o.tokensText)}</i><i>${escapeHtml(o.seconds)}</i></span>
+      </span>
+    </label>`).join('');
+  return `<div class="ai-scope-card" role="group" aria-label="작업 범위 확인">
+    <div class="ai-scope-title">${escapeHtml(plan.title || '작업 범위를 확인해 주세요')}</div>
+    <p class="ai-scope-reason">${escapeHtml(plan.reason || '')}</p>
+    <div class="ai-scope-block"><div class="ai-scope-label">대상</div>
+      <div class="ai-scope-targets">관련 자료 <b>${escapeHtml(String(sc.materials || 0))}</b>건${sc.companies ? ` · 관심 기업 <b>${escapeHtml(String(sc.companies))}</b>곳` : ''}</div>
+      ${chips ? `<div class="ai-scope-chips">${chips}</div>` : ''}</div>
+    <div class="ai-scope-block"><div class="ai-scope-label">진행 단계</div><ol class="ai-scope-steps">${steps}</ol></div>
+    <div class="ai-scope-block"><div class="ai-scope-label">범위 선택</div><div class="ai-scope-options">${options}</div></div>
+    <div class="ai-scope-actions">
+      <button type="button" class="btn ai-scope-start">이 범위로 시작</button>
+      <button type="button" class="btn-text ai-scope-cancel">질문 수정</button>
+    </div>
+    ${(plan.notes || []).map((n) => `<p class="ai-scope-note">${escapeHtml(n)}</p>`).join('')}
+  </div>`;
+}
+
 function aiSearchErrorHtml(message) {
   return `<p class="meta">${escapeHtml(message)}</p>
     <button type="button" class="btn ai-search-retry-btn">재검색</button>`;
@@ -1495,6 +1533,21 @@ function bindAiSearchForm() {
   // button, including ones added after this bind (each new turn's button
   // is a fresh element, but the listener lives on their shared ancestor).
   resultEl.onclick = (e) => {
+    const startBtn = e.target.closest('.ai-scope-start');
+    if (startBtn && !submitBtn.disabled) {
+      const turnEl = startBtn.closest('.ai-search-turn');
+      const picked = turnEl.querySelector('input[name="ai-scope-mode"]:checked');
+      runAiSearchTurn(turnEl, turnEl.dataset.question, submitBtn, { confirmed: true, mode: picked ? picked.value : 'full' });
+      return;
+    }
+    const cancelBtn = e.target.closest('.ai-scope-cancel');
+    if (cancelBtn) {
+      const turnEl = cancelBtn.closest('.ai-search-turn');
+      turnEl.querySelector('.ai-search-turn-body').innerHTML = '<p class="meta">작업을 시작하지 않았습니다. 질문을 고쳐 다시 입력하거나, 범위를 바꿔 다시 요청해 주세요.</p>';
+      const input = document.getElementById('ai-search-input');
+      if (input) { input.value = turnEl.dataset.question; input.focus(); }
+      return;
+    }
     const btn = e.target.closest('.ai-search-retry-btn');
     if (!btn || submitBtn.disabled) return;
     const turnEl = btn.closest('.ai-search-turn');
