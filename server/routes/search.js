@@ -132,6 +132,8 @@ const QUESTION_FRAMING_TERMS = new Set([
   // not itself a topic and used to pull in unrelated "analysis" articles
   '그래프', '차트', '도표', '시각화', '그림', '그려', '그리', '만들', '작성', '비교', '비교분석', '분석', '표로', '정리',
   'chart', 'graph', 'plot', 'table', 'visualize', 'visualization', 'compare', 'comparison', 'analysis',
+  // data-request words
+  '데이터', '자료', '전체', '모든', '가져', '가져와', '불러', '찾아',
   '알려', '알고', '설명', '궁금', '질문', '내용', '정보', '개념', '정의', '의미', '있는지', '있나요', '인가요', '인지', '부탁',
   'tell', 'about', 'explain', 'please', 'what', 'how', 'why', 'when', 'where', 'who', 'which',
   'give', 'show', 'describe', 'detail', 'details', 'information', 'overview', 'the', 'and', 'for', 'are', 'is',
@@ -298,6 +300,50 @@ async function retrieveForTarget(target, otherForms) {
   return rows;
 }
 
+// P9 Collective questions cover the whole roster. "글로벌 정유업체의 전체 SAF
+// CAPA", "major producers", "기업별 ..." name NO company, so term matching alone
+// surfaces whichever few companies happen to use the question's exact words
+// (a real answer covered 4 companies while the archive held 9+). When the
+// question speaks of companies in general, every watchlist company (the
+// `companies` table, with aliases) gets its own slots, ranked by overlap with
+// the question's other terms.
+const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|compan|major|producer|supplier|refiner|player|operator)/i;
+const MAX_WATCHLIST = 12;
+async function retrieveForWatchlist(otherForms) {
+  let companies;
+  try {
+    ({ rows: companies } = await pool.query(
+      `SELECT id, name, aliases FROM companies WHERE watched = true ORDER BY id LIMIT ${MAX_WATCHLIST}`
+    ));
+  } catch (_) {
+    return [];
+  }
+  const out = [];
+  if (!otherForms.length) return []; // nothing besides "companies" to anchor relevance on
+  const others = otherForms.map((f) => `%${f}%`);
+  for (const c of companies) {
+    const pats = [c.name, ...(c.aliases || [])].filter((n) => n && n.trim().length >= 3).map((n) => `%${n.trim()}%`);
+    if (!pats.length) continue;
+    try {
+      const { rows } = await pool.query(
+        `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name, 0 AS relevance_score
+         FROM items i LEFT JOIN sources s ON s.id = i.source_id
+         WHERE i.status = 'Published' AND (
+           i.title ILIKE ANY($1) OR i.summary ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1)
+           OR EXISTS (SELECT 1 FROM item_companies ic WHERE ic.item_id = i.id AND ic.company_id = $3))
+           AND (i.title ILIKE ANY($2) OR i.summary ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.insight ILIKE ANY($2) OR i.ai_insight ILIKE ANY($2))
+         ORDER BY ((CASE WHEN (i.summary ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.insight ILIKE ANY($2) OR i.ai_insight ILIKE ANY($2)) THEN 2 ELSE 0 END)
+                   + (CASE WHEN i.title ILIKE ANY($2) THEN 1 ELSE 0 END)
+                   + (CASE WHEN i.title ILIKE ANY($1) THEN 1 ELSE 0 END)) DESC, i.published_at DESC NULLS LAST
+         LIMIT ${PER_TARGET}`,
+        [pats, others, c.id]
+      );
+      out.push(...rows);
+    } catch (_) { /* best-effort per company */ }
+  }
+  return out;
+}
+
 async function retrieveCandidates(question, history) {
   const retrievalQuery = resolveRetrievalQuery(question, history);
   const concepts = extractConcepts(retrievalQuery);
@@ -374,9 +420,17 @@ async function retrieveCandidates(question, history) {
       } catch (_) { /* best-effort */ }
     }
   }
-  const baseCovered = base.concat(coverage);
+  let baseCovered = base.concat(coverage);
+  let ceiling = MAX_TOTAL_CANDIDATES;
+  if (COLLECTIVE_ENTITY_RE.test(retrievalQuery)) {
+    const nonGeneric = concepts.filter((forms, i) => docFreqs[i] > 0 && docFreqs[i] <= SPECIFIC_DOCFREQ * 8).flat();
+    const known = new Set(baseCovered.map((r) => r.id));
+    const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
+    baseCovered = baseCovered.concat(fromRoster);
+    ceiling = MAX_TOTAL_CANDIDATES + MAX_WATCHLIST * PER_TARGET - 8;
+  }
   const targets = await taxonomyTargets(concepts);
-  if (!targets.length) return baseCovered.slice(0, MAX_TOTAL_CANDIDATES);
+  if (!targets.length) return baseCovered.slice(0, ceiling);
   const targetSet = new Set(targets.map((t) => t.toLowerCase()));
   const otherForms = concepts.filter((forms) => !forms.some((f) => targetSet.has(f.toLowerCase()))).flat();
   const seen = new Set(baseCovered.map((r) => r.id));
@@ -386,7 +440,7 @@ async function retrieveCandidates(question, history) {
       for (const r of await retrieveForTarget(t, otherForms)) if (!seen.has(r.id)) { seen.add(r.id); extras.push(r); }
     } catch (_) { /* best-effort */ }
   }
-  return baseCovered.concat(extras).slice(0, MAX_TOTAL_CANDIDATES);
+  return baseCovered.concat(extras).slice(0, ceiling);
 }
 
 // Per-claim traceability: the model must mark, after every sentence that

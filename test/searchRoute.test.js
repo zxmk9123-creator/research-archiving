@@ -894,3 +894,27 @@ test('P8: each specific subject of a multi-subject question gets its own retriev
     restore();
   }
 });
+
+test('P9: a question about companies in general covers every watchlist company (any roster)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT count(*)', () => ({ rows: [{ cnt: 20 }] })],
+    ['FROM companies WHERE watched', () => ({ rows: [{ id: 1, name: 'Alpha Oil', aliases: ['Alpha'] }, { id: 2, name: 'Beta Fuels', aliases: [] }] })],
+    ['FROM sectors p JOIN sectors c', () => ({ rows: [] })],
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '글로벌 정유업체의 전체 SAF Capa 데이터를 가져와서 시각화해줘' }) });
+    });
+    const perCompany = calls.filter((c) => c.text.includes('item_companies ic WHERE')).map((c) => c.params[0]);
+    assert.deepEqual(perCompany.map((p) => p[0]), ['%Alpha Oil%', '%Beta Fuels%']);
+    // a company-specific question does not trigger the roster sweep
+    const before = calls.length;
+    await withServer(async (base) => {
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '팜유 수출 정책 변화' }) });
+    });
+    assert.ok(!calls.slice(before).some((c) => c.text.includes('item_companies ic WHERE')));
+  } finally {
+    restore();
+  }
+});
