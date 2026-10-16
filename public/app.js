@@ -925,6 +925,8 @@ function renderChartHtml(jsonText) {
   const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut', 'scatter'].includes(c.type) ? c.type : 'bar';
   const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
   const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
+  const uSfx = c.unit ? ` ${c.unit}` : '';
+  const sName = (s) => (series.length > 1 && s.name ? ` · ${s.name}` : '');
   const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
   // Single-series bar whose labels are "Entity(detail)" with repeating entities
   // (or explicit "groups"): merge each entity into ONE cluster, with the detail
@@ -1009,7 +1011,7 @@ function renderChartHtml(jsonText) {
     g += `<text x="${(L + W - R) / 2}" y="${H - 6}" font-size="11" text-anchor="middle" fill="currentColor">${escapeHtml(String(c.xLabel || series[0].name))}</text>`
       + `<text x="${L}" y="${T + 2}" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel || series[1].name))}</text>`;
     pts.forEach((p, i) => {
-      g += `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="5" fill="${colors[i % colors.length]}" fill-opacity=".85"><title>${escapeHtml(p.l)}: (${fmt(p.x)}, ${fmt(p.y)})</title></circle>`
+      g += `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="5" fill="${colors[i % colors.length]}" fill-opacity=".85"><title>${escapeHtml(p.l)}: ${fmt(p.x)} / ${fmt(p.y)}</title></circle>`
         + (pts.length <= 12 ? `<text x="${px(p.x) + 7}" y="${py(p.y) - 6}" font-size="10" fill="currentColor">${escapeHtml(trunc(p.l, 14))}</text>` : '');
     });
     return wrap(g, '');
@@ -1033,7 +1035,7 @@ function renderChartHtml(jsonText) {
         : ri
           ? `M ${P(r, a0)} A ${r} ${r} 0 ${large} 1 ${P(r, a1)} L ${P(ri, a1)} A ${ri} ${ri} 0 ${large} 0 ${P(ri, a0)} Z`
           : `M ${cx} ${cy} L ${P(r, a0)} A ${r} ${r} 0 ${large} 1 ${P(r, a1)} Z`;
-      g += `<path d="${d}" fill="${colors[i % colors.length]}" stroke="var(--surface, #fff)" stroke-width="1.5"><title>${escapeHtml(labels[i])}: ${fmt(v)} (${fmt(frac * 100)}%)</title></path>`;
+      g += `<path d="${d}" fill="${colors[i % colors.length]}" stroke="var(--surface, #fff)" stroke-width="1.5"><title>${escapeHtml(labels[i])}: ${fmt(v)}${escapeHtml(uSfx)}\n비중 ${fmt(frac * 100)}%</title></path>`;
       a0 = a1;
     });
     labels.forEach((l, i) => {
@@ -1104,7 +1106,7 @@ function renderChartHtml(jsonText) {
         g += `<polygon fill="${col}" fill-opacity=".55" points="${pts.concat(bottom).map((p) => p.join(',')).join(' ')}"/>`;
       }
       g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.map((p) => p.join(',')).join(' ')}"/>`
-        + s.data.map((v, i) => (top[i] ? `<circle cx="${top[i][0]}" cy="${top[i][1]}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></circle>` : '')).join('');
+        + s.data.map((v, i) => (top[i] ? `<circle cx="${top[i][0]}" cy="${top[i][1]}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}${escapeHtml(sName(s))}: ${fmt(v)}${escapeHtml(uSfx)}</title></circle>` : '')).join('');
     });
   } else {
     const cum = labels.map(() => 0);
@@ -1123,8 +1125,8 @@ function renderChartHtml(jsonText) {
         const lo = Math.min(a, b), len = Math.abs(a - b);
         const showVal = !stacked && n * series.length <= 12;
         g += horizontal
-          ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>${showVal ? `<text x="${Math.max(a, b) + 4}" y="${pos + bw / 2 + 3.5}" font-size="10" fill="currentColor">${compactNumber(v)}</text>` : ''}`
-          : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>${showVal ? `<text x="${pos + bw / 2}" y="${(v >= 0 ? lo : lo + len) + (v >= 0 ? -4 : 11)}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>` : ''}`;
+          ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}${escapeHtml(sName(s))}: ${fmt(v)}${escapeHtml(uSfx)}</title></rect>${showVal ? `<text x="${Math.max(a, b) + 4}" y="${pos + bw / 2 + 3.5}" font-size="10" fill="currentColor">${compactNumber(v)}</text>` : ''}`
+          : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}${escapeHtml(sName(s))}: ${fmt(v)}${escapeHtml(uSfx)}</title></rect>${showVal ? `<text x="${pos + bw / 2}" y="${(v >= 0 ? lo : lo + len) + (v >= 0 ? -4 : 11)}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>` : ''}`;
       });
     });
   }
@@ -3839,3 +3841,70 @@ document.addEventListener('click', async (e) => {
   btn.classList.add('copied');
   setTimeout(() => btn.classList.remove('copied'), 1500);
 });
+
+// Chart hover card: replaces the browser's plain native tooltip. The chart's
+// own <title> text is the data source ("헤더: 값" first line, optional notes,
+// a "… 합계: …" footer); it is moved into data-tt on first hover so the
+// native tooltip never shows twice. Built with textContent only (no HTML).
+(() => {
+  let card = null;
+  const ensureCard = () => {
+    if (card) return card;
+    card = document.createElement('div');
+    card.className = 'ai-tt';
+    card.setAttribute('role', 'tooltip');
+    document.body.appendChild(card);
+    return card;
+  };
+  const targetOf = (e) => (e.target && e.target.closest ? e.target.closest('.ai-chart rect, .ai-chart circle, .ai-chart path') : null);
+  const place = (e) => {
+    if (!card) return;
+    const pad = 14;
+    const w = card.offsetWidth, h = card.offsetHeight;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+    card.style.left = `${Math.max(8, x)}px`;
+    card.style.top = `${Math.max(8, y)}px`;
+  };
+  document.addEventListener('mouseover', (e) => {
+    const el = targetOf(e);
+    if (!el) return;
+    const titleEl = el.querySelector('title');
+    if (titleEl) { el.setAttribute('data-tt', titleEl.textContent || ''); titleEl.remove(); }
+    const tip = el.getAttribute('data-tt');
+    if (!tip) return;
+    const lines = tip.split('\n').filter(Boolean);
+    const first = lines.shift() || '';
+    const cut = first.lastIndexOf(': ');
+    const head = cut > 0 ? first.slice(0, cut) : first;
+    const value = cut > 0 ? first.slice(cut + 2) : '';
+    const c = ensureCard();
+    c.textContent = '';
+    const h = document.createElement('div');
+    h.className = 'ai-tt-head';
+    const dot = document.createElement('i');
+    const fill = el.getAttribute('fill');
+    if (fill && fill !== 'none') dot.style.background = fill;
+    const ht = document.createElement('span');
+    ht.textContent = head;
+    h.append(dot, ht);
+    c.appendChild(h);
+    if (value) {
+      const v = document.createElement('div');
+      v.className = 'ai-tt-value';
+      v.textContent = value;
+      c.appendChild(v);
+    }
+    for (const line of lines) {
+      const row = document.createElement('div');
+      row.className = /합계|비중/.test(line) ? 'ai-tt-foot' : 'ai-tt-note';
+      row.textContent = line;
+      c.appendChild(row);
+    }
+    c.classList.add('show');
+    place(e);
+  });
+  document.addEventListener('mousemove', (e) => { if (card && card.classList.contains('show') && targetOf(e)) place(e); });
+  document.addEventListener('mouseout', (e) => { if (card && targetOf(e)) card.classList.remove('show'); });
+})();
