@@ -9,6 +9,7 @@ const { collectWebDiscoverySource } = require('../lib/webDiscoveryIngest');
 // time and can't be monkey-patched afterward).
 const dailyDiscoveryModule = require('../lib/dailyDiscovery');
 const { requireAuth } = require('../lib/auth');
+const companyProfileCollection = require('../lib/companyProfileCollection');
 const { extractMetadata } = require('../lib/extractMetadata');
 const { suggestSourceMetadata } = require('../lib/sourceMetadataSuggest');
 
@@ -130,6 +131,18 @@ router.post('/:id/collect', requireAuth, async (req, res) => {
 // only the search step's date window differs. Safe to call more than once;
 // dedup makes a repeat run a no-op for anything already archived. Intended
 // to be removed after the one-time backfill it was added for.
+// ONE-TIME MANUAL TOOL — see lib/companyProfileCollection.js. Runs in the
+// background (many queries + AI screening exceed a request timeout); poll GET
+// /collect-company-profiles/status. Safe to repeat: dedup makes reruns no-ops.
+router.post('/collect-company-profiles', requireAuth, async (req, res) => {
+  const only = Array.isArray(req.body && req.body.only) ? req.body.only : undefined;
+  const r = await companyProfileCollection.runCompanyProfileCollection({ only });
+  res.status(r.started ? 202 : 409).json(r);
+});
+router.get('/collect-company-profiles/status', requireAuth, (req, res) => {
+  res.json(companyProfileCollection.getStatus());
+});
+
 router.post('/backfill-7day-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
