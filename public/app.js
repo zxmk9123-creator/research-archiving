@@ -904,6 +904,14 @@ function renderChartHtml(jsonText) {
   const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
   const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
   const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
+  // Single-series category charts: colour by owning entity ("groups", or the
+  // label text before "(" / first space), so one company's items share a colour.
+  const groupOf = (l, i) => String((Array.isArray(c.groups) && c.groups[i]) || l.split(/[(（]/)[0].trim().split(/\s+/)[0] || l);
+  const grouped = series.length === 1 && ['bar', 'hbar'].includes(type) && !(type === 'pie');
+  const groupNames = grouped ? Array.from(new Set(labels.map(groupOf))) : [];
+  // Only when an entity actually repeats (or groups were given); plain one-bar-per-category charts keep one colour.
+  const useGroups = grouped && groupNames.length > 1 && (groupNames.length < labels.length || Array.isArray(c.groups));
+  const barColor = (si, i) => colors[(useGroups ? groupNames.indexOf(groupOf(labels[i], i)) : si) % colors.length];
   const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
   const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 260" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
@@ -963,7 +971,10 @@ function renderChartHtml(jsonText) {
       g += `<text x="${L - 6}" y="${cat(i) + band / 2 + 4}" font-size="10" text-anchor="end" fill="currentColor">${escapeHtml(trunc(l, 14))}</text>`;
     } else {
       const x = cat(i) + band / 2;
-      g += `<text x="${x}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor" transform="rotate(${n > 6 ? 30 : 0} ${x} ${H - B + 14})">${escapeHtml(trunc(l, 10))}</text>`;
+      const m = l.match(/^(.*?)\s*([(（].*)$/);
+      const [l1, l2] = m && m[1] ? [m[1], m[2]] : [l, ''];
+      const lim = n > 6 ? 10 : 14;
+      g += `<text x="${x}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor" transform="rotate(${n > 6 ? 30 : 0} ${x} ${H - B + 14})">${escapeHtml(trunc(l1, lim))}${l2 ? `<tspan x="${x}" dy="12">${escapeHtml(trunc(l2, lim))}</tspan>` : ''}</text>`;
     }
   });
   const base = val(Math.max(0, min));
@@ -982,13 +993,13 @@ function renderChartHtml(jsonText) {
   } else {
     const cum = labels.map(() => 0);
     series.forEach((s, si) => {
-      const col = colors[si % colors.length];
       const bw = stacked ? band * 0.6 : (band * 0.7) / series.length;
       s.data.forEach((v, i) => {
         const off = stacked ? band * 0.2 : band * 0.15 + bw * si;
         let a = base, b = val(v);
         if (stacked) { a = val(cum[i]); cum[i] += Math.max(0, v); b = val(cum[i]); }
         const pos = cat(i) + off;
+        const col = barColor(si, i);
         const lo = Math.min(a, b), len = Math.abs(a - b);
         g += horizontal
           ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`
@@ -996,7 +1007,7 @@ function renderChartHtml(jsonText) {
       });
     });
   }
-  return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : '');
+  return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : (useGroups ? legendOf(groupNames) : ''));
 }
 
 // Bullet lines keep their leading indentation; deeper indent => nested <ul>,
