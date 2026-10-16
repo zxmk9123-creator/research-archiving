@@ -1062,6 +1062,7 @@ test('answer cache: the same question over the same evidence is served without c
 });
 
 test('guide card: a heavy request returns a scope plan first and starts NO AI work until confirmed', async () => {
+  process.env.DATASET_PENDING_LIMIT = '-1'; // force the card: this fixture has no stored-facts rows
   const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
   let providerCalls = 0;
   const restoreProvider = mockProvider(async () => { providerCalls++; return { text: '답변 [1]', provider: 'p' }; });
@@ -1085,6 +1086,7 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
       assert.ok(plain.answer && !plain.needsConfirmation);
     });
   } finally {
+    delete process.env.DATASET_PENDING_LIMIT;
     restore();
     restoreProvider();
   }
@@ -1324,4 +1326,13 @@ test('requiredCompanies binds to the question subject (palm oil question ignores
   ];
   const out = requiredCompanies('팜유 주요 리파이너리 업체들 숏리스트', candidates, roster);
   assert.deepEqual(out.map((c) => c.name), ['Wilmar']);
+});
+
+test('workload: a dataset request with stored facts (few live extractions) shows no scope card; many pending still do', () => {
+  const wp = require('../server/lib/workloadPlan');
+  const cands = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, title: `t${i}`, summary: 'x' }));
+  const base = { question: '팜유 업체별 생산량을 표로 비교해줘', candidates: cands, systemChars: 1000, materialsChars: 5000, extractionChars: 3000, quickMaterialsChars: 2000 };
+  assert.equal(wp.assessWorkload({ ...base, pendingExtractions: 3 }).heavy, false);
+  assert.equal(wp.assessWorkload({ ...base, pendingExtractions: 25 }).heavy, true);
+  assert.equal(wp.assessWorkload({ ...base, pendingExtractions: null }).heavy, true);
 });

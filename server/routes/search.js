@@ -1224,7 +1224,10 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
     // (and its own unit-conversion remarks: the dataset states the basis itself)
-    modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l) && !/환산|변환|밀도|conversion|density/i.test(l)).join('\n').trim();
+    // (and any sentence claiming a company's figure is missing when the dataset HAS one — the table must not be contradicted)
+    const have = (dataset.entities || []).map((n) => String(n).toLowerCase());
+    const contradicts = (l) => /(미공시|명시되지|확인되지|수치가 없|수치 미)/.test(l) && have.some((n) => l.toLowerCase().includes(n));
+    modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l) && !/환산|변환|밀도|conversion|density/i.test(l) && !contradicts(l)).join('\n').trim();
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
@@ -1382,7 +1385,10 @@ async function handleSearch(req, res, signal) {
   // Heavy requests are confirmed with the user before any AI work starts.
   if (!confirmed) {
     const materialsChars = buildMaterialsBlock(candidates).length;
+    let pendingExtractions = null;
+    try { pendingExtractions = await itemFacts.countPendingExtraction(candidates); } catch (_) { /* unknown -> treated as heavy */ }
     const assessment = workloadPlan.assessWorkload({
+      pendingExtractions,
       question, candidates, required, expectLong: /(상세|자세히|종합|보고서|리포트|심층|모두|전부|전체|전수|누락)/.test(question) && candidates.length >= 20 && intent.type !== 'entity',
       systemChars: SYSTEM_PROMPT.length, materialsChars,
       extractionChars: buildMaterialsBlock(candidates, { onlyWithQuantities: true }).length,

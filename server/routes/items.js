@@ -58,6 +58,15 @@ router.post('/annual-report-trial', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Read-only view of the stored annual-report facts (review / debugging): ?entity=&q=<metric text>
+router.get('/annual-report-facts', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT entity, fiscal_year, segment, scope, location, metric, value, value_max, unit, definition, page FROM annual_report_facts
+     WHERE ($1::text IS NULL OR lower(entity) = lower($1)) AND ($2::text IS NULL OR metric ILIKE '%' || $2 || '%') ORDER BY entity, page, id LIMIT 500`,
+    [req.query.entity || null, req.query.q || null]
+  );
+  res.json({ count: rows.length, rows });
+});
 router.post('/annual-report-rebuild', requireAuth, async (req, res) => {
   try { res.json(await require('../lib/annualReportIngest').rebuildReportItems()); } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -258,7 +258,9 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   const unitLabel = GROUP_LABEL[basis.group];
   const valueOf = basis.valueIn;
   const statusOrder = { 가동: 0, 건설중: 1, 계획: 2, 목표: 3 };
-  const sorted = records.slice().sort((a, b) => a.entity.localeCompare(b.entity) || (a.site || '').localeCompare(b.site || '') || (statusOrder[a.status] - statusOrder[b.status]) || ((b.year || 0) - (a.year || 0)));
+  const seenRows = new Set();
+  const sorted = records.slice().sort((a, b) => a.entity.localeCompare(b.entity) || (a.site || '').localeCompare(b.site || '') || (statusOrder[a.status] - statusOrder[b.status]) || ((b.year || 0) - (a.year || 0)))
+    .filter((r) => { const k = `${r.entity.toLowerCase()}|${r.site || ''}|${r.status}|${r.year || 0}|${Math.round(r.amount)}|${r.group}`; if (seenRows.has(k)) return false; seenRows.add(k); return true; }); // the same figure stated twice is one row
   const have = new Set(records.map((r) => r.entity.toLowerCase()));
   const cellOf = (r) => {
     const v = valueOf(r);
@@ -309,7 +311,7 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   if (excluded) notes.push(`다른 단위의 ${excluded}건은 차트에서 제외했고 표에 원문 표기로 남겼습니다${basis.group === 'mass' && !density ? ' (제품 밀도를 알 수 없어 톤으로 환산하지 않음)' : ''}.`);
   notes.push('현재 값은 거점별 가장 최근 기준, 계획·목표는 거점별 가장 먼 연도의 값을 막대로 그렸고, 전사 합계는 거점 값과 합산하지 않았습니다. 표에는 모든 값과 기준 연도를 기재했습니다.');
   const chartBlocks = charts.map((c) => `\`\`\`chart\n${JSON.stringify(c)}\n\`\`\``).join('\n\n');
-  return { table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
+  return { entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
 module.exports = { canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

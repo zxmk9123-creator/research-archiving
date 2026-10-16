@@ -78,6 +78,15 @@ async function loadFactRecords(candidates) {
   return { records, statusById };
 }
 
+// How many of these materials would still need a LIVE extraction (state a quantity, facts never extracted).
+async function countPendingExtraction(candidates) {
+  const ids = candidates.map((c) => c.id).filter(Boolean);
+  if (!ids.length) return 0;
+  const { rows } = await pool.query('SELECT id FROM items WHERE id = ANY($1) AND facts_status IS NULL', [ids]);
+  const pending = new Set(rows.map((r) => r.id));
+  return candidates.filter((c) => pending.has(c.id) && hasQuantity(textOf(c))).length;
+}
+
 // DB-wide facts for a topic ("SAF", "팜유"...): every stored fact of every PUBLISHED item whose
 // text mentions one of the topic terms — so a quantity dataset is complete over the whole
 // archive, not just over the handful of articles that happened to rank into the chat's top-N.
@@ -169,4 +178,4 @@ async function classifyEntities() {
   return { started: true, total: names.length };
 }
 
-module.exports = { classifyEntities, getClassifyStatus: () => classifyStatus, loadFactsByTopic, extractFactsForItem, extractFactsInBackground, loadFactRecords, runBackfill, getBackfillStatus: () => backfillStatus, hasQuantity, textOf };
+module.exports = { countPendingExtraction, classifyEntities, getClassifyStatus: () => classifyStatus, loadFactsByTopic, extractFactsForItem, extractFactsInBackground, loadFactRecords, runBackfill, getBackfillStatus: () => backfillStatus, hasQuantity, textOf };

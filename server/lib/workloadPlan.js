@@ -14,9 +14,14 @@ const tokens = (chars) => Math.round(chars / CHARS_PER_TOKEN);
 const round100 = (n) => Math.round(n / 100) * 100;
 const human = (n) => (n >= 10000 ? `약 ${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : `약 ${n.toLocaleString('en-US')}`);
 
-function assessWorkload({ question, candidates, required = [], expectLong = false, systemChars = 0, materialsChars = 0, extractionChars = 0, quickMaterialsChars = 0 }) {
+// A dataset request whose figures are already stored (item_facts / annual reports) needs at most a few live
+// extractions: the table and chart are built in code, so there is nothing to confirm with the user.
+const PENDING_EXTRACTION_LIMIT = 10;
+
+function assessWorkload({ question, candidates, required = [], expectLong = false, systemChars = 0, materialsChars = 0, extractionChars = 0, quickMaterialsChars = 0, pendingExtractions = null }) {
   const req = rc.parseRequest(question);
   const dataset = dp.isDatasetRequest(req, question);
+  if (dataset && pendingExtractions !== null && pendingExtractions <= Number(process.env.DATASET_PENDING_LIMIT ?? PENDING_EXTRACTION_LIMIT)) return { heavy: false, reason: 'stored_facts' };
   const sweep = required.length >= 3 && req.completeness;
   const heavy = dataset || sweep || expectLong;
   if (!heavy) return { heavy: false };
@@ -74,4 +79,4 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
   };
 }
 
-module.exports = { assessWorkload, QUICK_CANDIDATES };
+module.exports = { assessWorkload, QUICK_CANDIDATES, PENDING_EXTRACTION_LIMIT };

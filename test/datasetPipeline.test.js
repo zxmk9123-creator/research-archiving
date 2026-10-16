@@ -152,3 +152,11 @@ test('canonicalizeEntities merges Hangul/Latin roster aliases and suffix variant
   const out = dp.canonicalizeEntities([{ entity: '에코세레스' }, { entity: 'ecoceres' }, { entity: 'Neste Oyj' }, { entity: 'NESTE' }], roster);
   assert.deepEqual(out.map((r) => r.entity), ['EcoCeres', 'EcoCeres', 'Neste Oyj', 'Neste Oyj']);
 });
+
+test('buildDataset: the same figure stated twice is one row; entities list names those with values', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const r = (entity, amount, extra = {}) => ({ entity, site: null, status: '가동', year: 2025, source: 1, group: 'mass', amount, basis: '직접', original: `${amount} 톤`, tons: amount, ...extra });
+  const ds = dp2.buildDataset([r('KLK', 1362787), r('KLK', 1362787, { original: 'dup' }), r('IOI', 660294), r('SD Guthrie', 2224833)], [], {});
+  assert.equal(ds.table.split('\n').filter((l) => /^\| KLK /.test(l)).length, 1);
+  assert.deepEqual(ds.entities.sort(), ['IOI', 'KLK', 'SD Guthrie']);
+});
