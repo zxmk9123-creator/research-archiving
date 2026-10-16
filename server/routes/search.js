@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const numberCheck = require('../lib/numberCheck');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -472,6 +473,7 @@ Formatting:
   3. Build it readable: always set a specific "title" (what, where, when), the "unit", and axis names "xLabel"/"yLabel" when the axes are not obvious; put the unit in "yLabel" (e.g. "만 톤") and do NOT set "xLabel" when the category names are self-explanatory (never generic words like "항목", "구분", "범주", "값"); use "xLabel" only for a real axis such as "연도"; all bars in one chart must share the same unit and the same kind of measure (do not mix volume and price); keep labels short; at most 12 categories and 4 series; do not add decoration.
   4. Interpret it: right after the chart or table write 1-3 sentences of takeaways (the highest/lowest, the trend or gap, anything notable), each with [N]; do not claim causes the materials do not state; mention data gaps or comparability caveats (different years, units, definitions).
 - Visuals: when the user asks for a table/chart/graph, or when numeric comparisons across 3+ items/periods would be clearer visually, include one. Tables use standard Markdown pipe tables. Charts use a fenced block exactly like \`\`\`chart followed by one-line-or-multi-line JSON {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","xLabel":"...","yLabel":"...","labels":["..."],"series":[{"name":"...","data":[numbers]}]} and a closing \`\`\`. When several bars belong to ONE entity and ADD UP (a company's plants/sites, regions, product lines — e.g. Neste Rotterdam + Neste Singapore capacity), do NOT draw them as separate bars: send a single series with one entry per part, "labels" like "Neste 로테르담", a parallel "groups" array naming the entity ("Neste") — identical spelling for every part of that entity — "combine":"sum", and an optional parallel "notes" array with a short detail per part (status, year, plan vs operating; shown on hover). The chart then draws one row per entity, parts as differently coloured segments, with the total at the end. Use this only for additive quantities of the same unit and basis (capacity, volume, investment); keep at most 10 entities. When several values belong to one entity (e.g. a company's capacity now vs 2030, or cost by scenario), MERGE them into ONE cluster per entity: make the entities the "labels" and the detail (현재, 2030년, 시나리오 A ...) the "series", with identical series names for every entity (max 4) and null for a missing value. Never list one bar per entity-detail pair. (Writing labels as "Entity(detail)" is also merged automatically, but the labels/series form is preferred.) Different details of the same entity are NOT additive, so use "bar"/"hbar" (never "stacked") for them. When the user asks to compare MULTIPLE targets (e.g. "식용유지들의 생산량 비교" = palm, soybean, rapeseed, sunflower oil), never chart just one of them: build ONE chart with every target the materials give numbers for as separate series (max 4, most-covered first), using a "line" chart over the shared periods (years) as labels; use null where a target has no figure for a period. If targets lack a common period, use a "bar" chart of the same year or the latest comparable figure per target, and say so in one sentence. Always list in text which requested targets had no usable data instead of silently dropping them. For "scatter": "labels" are the point names, series[0].data are the X values, series[1].data the Y values (same length, both numeric, name the series after the X and Y variables). Pick the type by the data: "line" for a time trend; "area" for cumulative/volume over time; "bar" to compare categories (or a few periods); "hbar" for rankings or long labels; "stacked" for composition of totals across categories/periods (one series per component); "pie"/"donut" ONLY for shares of ONE whole that sum to roughly 100% (single series, max 8 slices). Use several series (max 4) only when they share the same unit and labels. Use ONLY numbers stated in the supplied materials (never estimate or invent; omit the chart if fewer than 3 real data points), keep it to 12 labels and 4 series at most, and cite the source [N] in a sentence right after the chart or table.
+- NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with the material's own scale and unit — "50만 톤" stays "50만 톤" (never "5만 톤"), "1.2 Mt" stays "1.2 Mt", "340 million gallons" stays "340 million gallons". Do not convert between 만/천/백만/억, kt/Mt/톤, or gallons/barrels/tonnes yourself; if a comparison needs one common unit, give the converted value only when the materials state it, otherwise show each figure in its original unit side by side. A range uses the material's two stated endpoints ("50만~120만 톤", not "5만~12만 톤"). Count digits and zeros twice before writing; a figure that cannot be found in the cited material must not be written at all. Chart data must use the same figures (scaled consistently to the chart's unit).
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
@@ -823,13 +825,15 @@ function enrichChartJson(chart, roster) {
   if (!mergeable.size) return chart;
   return { ...chart, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)) };
 }
-async function enrichChartBlocks(text) {
+async function enrichChartBlocks(text, candidates = []) {
   if (!/```chart/.test(text)) return text;
   const roster = await getRoster();
   if (!roster.length) return text;
   return text.replace(/```chart[^\n]*\n([\s\S]*?)```/g, (whole, body) => {
     try {
-      const enriched = enrichChartJson(JSON.parse(body), roster);
+      const guardedChart = numberCheck.guardChartNumbers(JSON.parse(body), candidates, materialText);
+      if (guardedChart.fixed || guardedChart.dropped) console.log(`ai-search chart_number_guard fixed=${guardedChart.fixed} dropped=${guardedChart.dropped}`);
+      const enriched = enrichChartJson(guardedChart.chart, roster);
       return `\`\`\`chart\n${JSON.stringify(enriched)}\n\`\`\``;
     } catch (_) { return whole; }
   });
@@ -837,7 +841,12 @@ async function enrichChartBlocks(text) {
 
 async function finalizeAnswer(rawText, candidates, signal, required = []) {
   const verified = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
-  const text = ensureCompanyCoverage(verified, required, candidates);
+  const covered = ensureCompanyCoverage(verified, required, candidates);
+  // Number fidelity: figures are checked against the materials cited for them and
+  // corrected/flagged (see lib/numberCheck.js) BEFORE footnotes are renumbered.
+  const guarded = numberCheck.guardAnswerNumbers(covered, candidates, extractCitedIndices, materialText);
+  if (guarded.fixed || guarded.flagged) console.log(`ai-search number_guard fixed=${guarded.fixed} flagged=${guarded.flagged}`);
+  const text = guarded.text;
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -847,7 +856,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = []) {
   // back to showing every retrieved candidate rather than an empty list.
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
-  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text));
+  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text), candidates);
   const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
@@ -1007,6 +1016,7 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.enrichChartBlocks = enrichChartBlocks;
 module.exports.requiredCompanies = requiredCompanies;
 module.exports.ensureCompanyCoverage = ensureCompanyCoverage;
 module.exports.buildCoverageBlock = buildCoverageBlock;
