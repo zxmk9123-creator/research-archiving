@@ -58,6 +58,9 @@ router.post('/annual-report-trial', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+router.post('/annual-report-rebuild', requireAuth, async (req, res) => {
+  try { res.json(await require('../lib/annualReportIngest').rebuildReportItems()); } catch (err) { res.status(500).json({ error: err.message }); }
+});
 router.post('/classify-entities', requireAuth, async (req, res) => {
   const r = await require('../lib/itemFacts').classifyEntities();
   res.status(r.started ? 202 : 409).json(r);

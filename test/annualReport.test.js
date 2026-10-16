@@ -75,3 +75,13 @@ test('selectPages relaxes the threshold when a report states few figures', () =>
   const sel = ar.selectPages([mk(1), mk(2), { n: 3, text: 'nothing relevant' }]);
   assert.ok(sel.length >= 1 && sel.every((p) => p.score >= 5));
 });
+
+test('buildReportText marks a different fiscal year per line', () => {
+  const { buildReportText } = require('../server/lib/annualReportIngest');
+  const t = buildReportText('SD Guthrie', 2025, [
+    { segment: 'plantation', metric: 'Yield per Hectare', value: 18.95, unit: 'MT/ha', page: 11, fiscal_year: 2025 },
+    { segment: 'plantation', metric: 'Yield per Hectare', value: 18.41, unit: 'MT/ha', page: 11, fiscal_year: 2024 },
+  ], 'u');
+  assert.match(t, /\[plantation\] Yield per Hectare: 18\.95/);
+  assert.match(t, /\[plantation\] FY2024 Yield per Hectare: 18\.41/);
+});

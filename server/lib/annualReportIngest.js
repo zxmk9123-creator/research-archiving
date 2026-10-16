@@ -16,7 +16,8 @@ function buildReportText(entity, fiscalYear, records, url) {
   const lines = [`${entity} ${fiscalYear ? `FY${fiscalYear} ` : ''}연차보고서 기준 팜유(CPO)·플랜테이션·설비 현황 (원문: ${url}):`];
   for (const r of records) {
     const where = r.location ? `${r.location} ` : '';
-    lines.push(`- [${r.segment}] ${where}${r.metric}: ${valueText(r)}${r.definition ? ` (기준: ${r.definition})` : ''} — 보고서 p.${r.page}`);
+    const yr = r.fiscal_year && r.fiscal_year !== fiscalYear ? `FY${r.fiscal_year} ` : '';
+    lines.push(`- [${r.segment}] ${yr}${where}${r.metric}: ${valueText(r)}${r.definition ? ` (기준: ${r.definition})` : ''} — 보고서 p.${r.page}`);
   }
   return lines.join('\n');
 }
@@ -42,7 +43,7 @@ function cleanUrl(raw) {
 
 async function ingestAnnualReport({ url: rawUrl, entity, publishedAt = null, store = true }) {
   const url = cleanUrl(rawUrl);
-  const pages = await extractPdfPages(await fetchPdfBuffer(url, 60 * 1024 * 1024));
+  const pages = await extractPdfPages(await fetchPdfBuffer(url, 60 * 1024 * 1024, 150000));
   const selected = ar.selectPages(pages);
   const user = selected.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n');
   let records = [];
@@ -85,4 +86,24 @@ async function ingestAnnualReport({ url: rawUrl, entity, publishedAt = null, sto
   return { ...out, stored: true, itemId: rows[0].id };
 }
 
-module.exports = { cleanUrl, ingestAnnualReport, buildReportText, valueText };
+// Rebuilds every stored report item's text from annual_report_facts (no AI call).
+async function rebuildReportItems() {
+  const { rows } = await pool.query('SELECT * FROM annual_report_facts ORDER BY entity, source_url, page, id');
+  const groups = new Map();
+  for (const r of rows) {
+    const key = `${r.entity}|${r.source_url}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...r, value: Number(r.value), value_max: r.value_max == null ? null : Number(r.value_max) });
+  }
+  let updated = 0;
+  for (const [key, facts] of groups) {
+    const [entity, url] = key.split('|');
+    const years = facts.map((f) => f.fiscal_year).filter(Boolean);
+    const body = buildReportText(entity, years.length ? Math.max(...years) : null, facts, url);
+    const u = await pool.query('UPDATE items SET summary = $1, ai_summary = $1 WHERE source_url = $2', [body, `${url}#annual-report-facts`]);
+    updated += u.rowCount;
+  }
+  return { groups: groups.size, updated };
+}
+
+module.exports = { rebuildReportItems, cleanUrl, ingestAnnualReport, buildReportText, valueText };
