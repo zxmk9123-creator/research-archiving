@@ -974,3 +974,89 @@ test('finalizeAnswer with a verified dataset: the system table+chart lead, the m
     restoreProvider();
   }
 });
+
+test('callHedged: a stalled first attempt is hedged by a second; first valid answer wins and the loser is aborted', async () => {
+  let calls = 0;
+  let loserAborted = false;
+  const restoreProvider = mockProvider((msgs, { signal }) => {
+    calls++;
+    if (calls === 1) {
+      return new Promise((resolve, reject) => { signal.addEventListener('abort', () => { loserAborted = true; reject(new Error('aborted')); }); }); // stalls forever
+    }
+    return Promise.resolve({ text: 'fast second', provider: 'p' });
+  });
+  try {
+    const r = await searchRouter.callHedged({ system: 's', user: 'u' }, { hedgeAfterMs: 20 });
+    assert.equal(r.text, 'fast second');
+    assert.equal(calls, 2);
+    assert.equal(loserAborted, true);
+  } finally {
+    restoreProvider();
+  }
+});
+
+test('callHedged: a fast failure retries once immediately; two failures reject; a fast success never hedges', async () => {
+  let calls = 0;
+  let restoreProvider = mockProvider(() => { calls++; return calls === 1 ? Promise.reject(new Error('boom')) : Promise.resolve({ text: 'ok' }); });
+  try {
+    assert.equal((await searchRouter.callHedged({}, { hedgeAfterMs: 5000 })).text, 'ok');
+    assert.equal(calls, 2);
+  } finally { restoreProvider(); }
+  calls = 0;
+  restoreProvider = mockProvider(() => { calls++; return Promise.reject(new Error('down')); });
+  try {
+    await assert.rejects(searchRouter.callHedged({}, { hedgeAfterMs: 5000 }), /down/);
+    assert.equal(calls, 2);
+  } finally { restoreProvider(); }
+  calls = 0;
+  restoreProvider = mockProvider(() => { calls++; return Promise.resolve({ text: 'quick' }); });
+  try {
+    await searchRouter.callHedged({}, { hedgeAfterMs: 30 });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(calls, 1);
+  } finally { restoreProvider(); }
+});
+
+test('verification is deterministic-first: concretely grounded claims trigger NO verifier call', async () => {
+  const cands = [{ id: 1, title: 'Neste Rotterdam', summary: 'Neste Rotterdam refinery SAF capacity 1.2 Mt per year 2026 expansion', source_name: 's' }];
+  let verifierCalls = 0;
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) verifierCalls++;
+    return { text: '[]', provider: 'p' };
+  });
+  try {
+    await searchRouter.finalizeAnswer('Neste 로테르담은 2026년 1.2 Mt SAF capacity 증설 [1]', cands, undefined, [], '', null);
+    assert.equal(verifierCalls, 0);
+    await searchRouter.finalizeAnswer('팜유 가격이 크게 상승했다 [1]', cands, undefined, [], '', null);
+    assert.equal(verifierCalls, 1); // an ungrounded claim still goes to the judge
+  } finally {
+    restoreProvider();
+  }
+});
+
+test('answer cache: the same question over the same evidence is served without calling the provider again', async () => {
+  const prev = process.env.AI_SEARCH_CACHE;
+  process.env.AI_SEARCH_CACHE = 'on';
+  searchRouter._clearAnswerCache();
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
+  let providerCalls = 0;
+  const restoreProvider = mockProvider(async () => { providerCalls++; return { text: '인도네시아 수출 정책으로 팜유 가격이 상승했습니다. [1]', provider: 'p' }; });
+  try {
+    await withServer(async (base) => {
+      const ask = () => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '팜유 가격 이유' }) }).then((r) => r.json());
+      const a = await ask();
+      const callsAfterFirst = providerCalls;
+      const b = await ask();
+      assert.equal(b.answer, a.answer);
+      assert.equal(providerCalls, callsAfterFirst); // no new provider call
+      const withHistory = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '팜유 가격 이유', history: [{ role: 'user', content: 'x' }] }) }).then((r) => r.json());
+      assert.ok(withHistory.answer);
+      assert.ok(providerCalls > callsAfterFirst); // follow-ups are never cached
+    });
+  } finally {
+    restore();
+    restoreProvider();
+    searchRouter._clearAnswerCache();
+    if (prev === undefined) process.env.AI_SEARCH_CACHE = 'off'; else process.env.AI_SEARCH_CACHE = prev;
+  }
+});

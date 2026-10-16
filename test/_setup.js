@@ -10,3 +10,4 @@
 // that happens to fetch an ordinary-looking example.org/example.com URL.
 const dns = require('dns').promises;
 dns.lookup = async () => ([{ address: '93.184.216.34', family: 4 }]);
+process.env.AI_SEARCH_CACHE = 'off';

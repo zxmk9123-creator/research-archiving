@@ -510,14 +510,27 @@ function truncateField(text, maxChars) {
   return str.length > maxChars ? `${str.slice(0, maxChars)}…` : str;
 }
 
-function buildMaterialsBlock(candidates) {
-  return candidates.map((m, i) => [
-    `자료 ${i + 1} — 제목: ${m.title}`,
-    `출처: ${m.source_name || '미확인'}`,
-    `발행일: ${m.published_at ? String(m.published_at).slice(0, 10) : '미확인'}`,
-    `요약: ${truncateField(m.summary || m.ai_summary || '(요약 없음)', MAX_SUMMARY_CHARS)}`,
-    (m.insight || m.ai_insight) ? `인사이트: ${truncateField(m.insight || m.ai_insight, MAX_INSIGHT_CHARS)}` : null,
-  ].filter(Boolean).join('\n')).join('\n\n');
+// Evidence budget: the first FULL_MATERIALS candidates keep the full summary/insight
+// budget; later ones (roster/coverage additions) are trimmed harder — the model reads
+// ~40% fewer tokens with the best-ranked evidence intact. onlyWithQuantities keeps
+// the original 자료 numbers but lists only materials that state a capacity-type figure
+// (used by the dataset extraction call, which only needs those).
+const FULL_MATERIALS = 16;
+const TAIL_SUMMARY_CHARS = 380;
+const TAIL_INSIGHT_CHARS = 200;
+const CAPACITY_CLASSES = new Set(['mass', 'gal', 'bbl', 'bpd', 'liter']);
+function buildMaterialsBlock(candidates, { onlyWithQuantities = false } = {}) {
+  return candidates.map((m, i) => {
+    if (onlyWithQuantities && !numberCheck.extractQuantities(materialText(m)).some((q) => CAPACITY_CLASSES.has(q.cls))) return null;
+    const tail = i >= FULL_MATERIALS;
+    return [
+      `자료 ${i + 1} — 제목: ${m.title}`,
+      `출처: ${m.source_name || '미확인'}`,
+      `발행일: ${m.published_at ? String(m.published_at).slice(0, 10) : '미확인'}`,
+      `요약: ${truncateField(m.summary || m.ai_summary || '(요약 없음)', tail ? TAIL_SUMMARY_CHARS : MAX_SUMMARY_CHARS)}`,
+      (m.insight || m.ai_insight) ? `인사이트: ${truncateField(m.insight || m.ai_insight, tail ? TAIL_INSIGHT_CHARS : MAX_INSIGHT_CHARS)}` : null,
+    ].filter(Boolean).join('\n');
+  }).filter(Boolean).join('\n\n');
 }
 
 function buildHistoryBlock(history) {
@@ -628,7 +641,7 @@ function materialText(m) {
 // Cheap guard against verifier over-flagging: a claim that shares a number or
 // at least two content terms with one of its cited materials is concretely
 // grounded there, whatever a noisy yes/no judgement said.
-function claimOverlapsMaterials(claimLine, indices, candidates) {
+function claimOverlapsMaterials(claimLine, indices, candidates, minTerms = 2) {
   const claim = claimLine.replace(/\[\d{1,2}\]/g, '').toLowerCase();
   const hay = indices.map((i) => materialText(candidates[i - 1] || {})).join(' ').toLowerCase();
   // Shared TOPIC words alone are not grounding (a title match is exactly the
@@ -638,7 +651,7 @@ function claimOverlapsMaterials(claimLine, indices, candidates) {
   const numbers = (claim.match(/\d[\d,.]*/g) || []).map((n) => n.replace(/[,.]$/, '')).filter((n) => n.replace(/\D/g, '').length >= 2);
   if (numbers.some((n) => hay.includes(n))) return true;
   const terms = Array.from(new Set((claim.match(/[a-z가-힣]{2,}/g) || []).map((t) => stemKorean(t)).filter((t) => t.length >= 2 && !isQuestionFraming(t))));
-  return terms.filter((t) => body.includes(t)).length >= 2;
+  return terms.filter((t) => body.includes(t)).length >= minTerms;
 }
 
 function buildVerificationPrompt(claims, candidates) {
@@ -711,8 +724,73 @@ function withTimeout(promise, ms, onTimeout) {
 // Fails open (changes nothing) on any error, timeout, or unparseable
 // response: this is a quality layer on the base answer, never allowed to
 // block or break it.
+// Answer cache: the same question over the same evidence set returns the finished
+// answer instantly (follow-ups with history are never cached). Keyed by the question
+// and the candidate ids, so newly published/changed material changes the key.
+const ANSWER_CACHE_TTL_MS = 15 * 60 * 1000;
+const ANSWER_CACHE_MAX = 100;
+const answerCache = new Map();
+function answerCacheKey(question, candidates) {
+  const norm = String(question || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return crypto.createHash('sha256').update(`${norm}|${candidates.map((c) => c.id).join(',')}`).digest('hex');
+}
+const answerCacheEnabled = () => process.env.AI_SEARCH_CACHE !== 'off';
+function answerCacheGet(key) {
+  if (!answerCacheEnabled()) return null;
+  const hit = answerCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > ANSWER_CACHE_TTL_MS) { answerCache.delete(key); return null; }
+  answerCache.delete(key); answerCache.set(key, hit); // refresh recency
+  return hit.value;
+}
+function answerCacheSet(key, value) {
+  if (!answerCacheEnabled()) return;
+  answerCache.set(key, { at: Date.now(), value });
+  while (answerCache.size > ANSWER_CACHE_MAX) answerCache.delete(answerCache.keys().next().value);
+}
+
+// Hedged call for non-streaming work: if the first attempt has not answered within
+// hedgeAfterMs (the router can land on a stalled upstream for 30-45 s), a second
+// attempt is started in parallel and the first valid answer wins; the loser is aborted.
+// A fast failure triggers the second attempt immediately.
+function callHedged(promptMessages, { signal, hedgeAfterMs = 12000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const controllers = [];
+    let settled = false;
+    let started = 0;
+    let failures = 0;
+    let timer = null;
+    const onCallerAbort = () => controllers.forEach((c) => c.abort());
+    if (signal) signal.addEventListener('abort', onCallerAbort, { once: true });
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onCallerAbort);
+      controllers.forEach((c) => c.abort());
+      fn(value);
+    };
+    const launch = () => {
+      if (settled || started >= 2) return;
+      started++;
+      const c = new AbortController();
+      controllers.push(c);
+      Promise.resolve(provider.callProviderWithFallback(promptMessages, { signal: c.signal })).then(
+        (r) => finish(resolve, r),
+        (err) => { failures++; if (failures >= started) { if (started < 2) launch(); else finish(reject, err); } }
+      );
+    };
+    timer = setTimeout(launch, hedgeAfterMs);
+    launch();
+  });
+}
+
 async function verifyCitations(text, candidates, signal) {
-  const claims = splitClaimLines(text, candidates.length);
+  const allClaims = splitClaimLines(text, candidates.length);
+  // Deterministic first: a claim sharing a figure, or >= 3 body terms, with the material it
+  // cites is concretely grounded and never needs the (slow, token-heavy) LLM judge. Only
+  // doubtful claims are sent — most answers need no verification call at all.
+  const claims = allClaims.filter((c) => !claimOverlapsMaterials(c.line, c.indices, candidates, 3));
   if (!claims.length) return text;
   try {
     const timeoutMs = getVerificationTimeoutMs();
@@ -722,10 +800,10 @@ async function verifyCitations(text, candidates, signal) {
     signal?.addEventListener('abort', abortFromCaller, { once: true });
     try {
       const result = await withTimeout(
-        provider.callProviderWithFallback({
+        callHedged({
           system: VERIFICATION_SYSTEM_PROMPT,
           user: buildVerificationPrompt(claims, candidates),
-        }, { signal: controller.signal }),
+        }, { signal: controller.signal, hedgeAfterMs: 5000 }),
         timeoutMs,
         () => {
           controller.abort();
@@ -869,9 +947,9 @@ async function tryBuildDataset(question, candidates, required, signal) {
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     try {
       const result = await withTimeout(
-        provider.callProviderWithFallback(
-          { system: datasetPipeline.EXTRACTION_SYSTEM, user: datasetPipeline.buildExtractionUser(question, buildMaterialsBlock(candidates)) },
-          { signal: controller.signal }
+        callHedged(
+          { system: datasetPipeline.EXTRACTION_SYSTEM, user: datasetPipeline.buildExtractionUser(question, buildMaterialsBlock(candidates, { onlyWithQuantities: true })) },
+          { signal: controller.signal, hedgeAfterMs: 15000 }
         ),
         DATASET_TIMEOUT_MS,
         () => { controller.abort(); throw new Error(`dataset extraction timed out after ${DATASET_TIMEOUT_MS}ms`); }
@@ -997,12 +1075,25 @@ async function handleSearch(req, res, signal) {
   }
 
   const required = requiredCompanies(question, candidates, await getRoster());
-  const dataset = await tryBuildDataset(question, candidates, required, signal);
-  if (signal.aborted || res.destroyed) return;
-  const datasetBlock = dataset
-    ? `\n\n[검증된 데이터셋 — 시스템이 아래 표와 차트를 답변 맨 앞에 자동으로 붙인다. 너는 표·차트·수치 나열을 다시 쓰지 말고, 이 데이터셋과 자료를 근거로 핵심 해석 3~6개 불릿과 주의점(미공시, 단위 환산, 가동/건설/계획 구분, 총계와 거점 값 구분)만 쓴다. 데이터셋과 다른 수치는 쓰지 않는다.]\n${dataset.table}`
-    : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${datasetBlock}`;
+  // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
+  // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
+  // any the writer produced; if it fails, the writer's own answer stands.
+  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates);
+  const cached = cacheKey ? answerCacheGet(cacheKey) : null;
+  if (cached) {
+    await recordSearchTelemetry({
+      requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
+      candidateCount: candidates.length, sourceCount: cached.sources.length, provider: 'cache',
+      isFollowup, questionFingerprint: fingerprint, streamed: streaming,
+    });
+    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, sources: cached.sources });
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, sources: cached.sources })}\n\n`);
+    return res.end();
+  }
+  const datasetPromise = tryBuildDataset(question, candidates, required, signal);
+  datasetPromise.catch(() => {});
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}`;
 
   if (!streaming) {
     let text;
@@ -1022,8 +1113,10 @@ async function handleSearch(req, res, signal) {
       return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     }
     if (signal.aborted || res.destroyed) return;
+    const dataset = await datasetPromise;
     const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset);
     if (signal.aborted || res.destroyed) return;
+    if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
     await recordSearchTelemetry({
       requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
       candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
@@ -1048,14 +1141,24 @@ async function handleSearch(req, res, signal) {
   });
   const sendEvent = (event, data) => { if (!signal.aborted && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
-  if (dataset) sendEvent('token', { delta: `${dataset.markdown}\n\n` });
+  // Tokens are held back until the dataset settles (usually already done by the time the
+  // model has written its first paragraph), so the system table/chart can lead the stream.
+  const wantsDataset = datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question);
+  let datasetSettled = !wantsDataset; // other requests stream straight through
+  let held = '';
+  const flushed = datasetPromise.then((d) => {
+    datasetSettled = true;
+    if (d) sendEvent('token', { delta: `${d.markdown}\n\n` });
+    if (held) { sendEvent('token', { delta: held }); held = ''; }
+    return d;
+  });
   let rawText;
   let ttftMs = null;
   let modelUsed = null;
   try {
     const result = await provider.callProviderWithFallbackStreaming(
       { system: SYSTEM_PROMPT, user },
-      (delta) => sendEvent('token', { delta }),
+      (delta) => { if (datasetSettled) sendEvent('token', { delta }); else held += delta; },
       { signal }
     );
     rawText = result.text;
@@ -1075,8 +1178,10 @@ async function handleSearch(req, res, signal) {
   }
 
   if (signal.aborted || res.destroyed) return;
+  const dataset = await flushed;
   const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset);
   if (signal.aborted || res.destroyed) return;
+  if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
   sendEvent('done', { answer, insufficient: false, sources });
   res.end();
   await recordSearchTelemetry({
@@ -1089,6 +1194,9 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.callHedged = callHedged;
+module.exports.answerCacheKey = answerCacheKey;
+module.exports._clearAnswerCache = () => answerCache.clear();
 module.exports.enrichChartBlocks = enrichChartBlocks;
 module.exports.requiredCompanies = requiredCompanies;
 module.exports.ensureCompanyCoverage = ensureCompanyCoverage;
