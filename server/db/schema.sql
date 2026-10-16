@@ -1180,3 +1180,20 @@ INSERT INTO scope_terms (term, mode)
 VALUES ('식용유', 'include'), ('바이오디젤', 'include'), ('renewable diesel', 'include'),
        ('hefa', 'include'), ('power-to-liquid', 'include')
 ON CONFLICT (term, mode) DO NOTHING;
+
+-- Automatic company-profile intake (lib/companyDiscovery.js): the AI draft
+-- names the companies an article is about; names not yet on the watchlist are
+-- filed here with the items that mention them and promoted to `companies`
+-- once seen in enough distinct published items.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS ai_companies JSONB;
+CREATE TABLE IF NOT EXISTS company_candidates (
+  name_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  item_ids INTEGER[] NOT NULL DEFAULT '{}',
+  mention_count INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate','promoted','ignored')),
+  company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  promoted_at TIMESTAMPTZ
+);

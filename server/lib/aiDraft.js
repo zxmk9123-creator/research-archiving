@@ -4,6 +4,7 @@ const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
 const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
 const { hasGroundedClassification, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
+const { extractCompanyNames, recordCompanyMentions } = require('./companyDiscovery');
 
 const NO_CLASSIFICATION_GATE_VERSION = 'no-classification-invariant-v1';
 const { titleSimilarity } = require('./similarity');
@@ -31,7 +32,7 @@ const SYSTEM_PROMPT = `You are a research-archiving assistant for an oils & fats
 Given a title and (if available) a short description of a collected article, respond with STRICT JSON ONLY — no markdown fences, no commentary, nothing before or after the JSON object.
 
 The JSON object must have exactly this shape:
-{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "insight": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[], "publication_decision": "PASS"|"HOLD"|"REJECT", "publication_reason": string}
+{"eligible": boolean, "eligibility_reason": string, "who": string, "what": string, "amount": string, "when": string, "where": string, "why": string, "impact": string, "summary": string, "insight": string, "key_takeaway": string, "suggested_sectors": number[], "suggested_usages": number[], "publication_decision": "PASS"|"HOLD"|"REJECT", "publication_reason": string, "companies": string[]}
 
 Rules:
 - eligible: evaluate in this order, and only then decide true/false. Do NOT use "has specific facts/figures" by itself as the test — a fact-dense article can still be ineligible, and a sparse one can still be eligible.
@@ -59,6 +60,7 @@ Rules:
   - "PASS": the material clearly satisfies all of the above — safe to auto-publish as-is.
   - "REJECT": the material clearly fails one or more criteria — irrelevant to oil/fats, no substantive content, an obvious repost/duplicate, a bare low-value page (e.g. just a price ticker), or clearly stale content presented as current.
   - "HOLD": anything that is not confidently PASS or REJECT — insufficient information, borderline quality, or genuine uncertainty. When unsure, you MUST choose "HOLD" — never guess "PASS".
+- companies: 0-5 names of the COMPANIES that are the article's business actors in oils/fats/biofuel/SAF/feedstock (producers, refiners, suppliers, traders, plant developers), exactly as written in the title/description (do not translate, abbreviate or guess; use the parent/brand name as written, e.g. "Neste", "Eni", "에코세레스"). Do NOT list governments, ministries, agencies, associations, media outlets, products, certifications or people. Empty array when none is named.
 - publication_reason: one concise Korean sentence explaining the publication_decision verdict, referencing which of the 5 criteria above drove it.
 - You are working only from the title/description given — do not claim to have read a full article.
 - Output ONLY the JSON object.`;
@@ -348,7 +350,9 @@ function parseDraftResponse(raw, taxonomy) {
   const qaReasonRaw = typeof parsed.publication_reason === 'string' ? parsed.publication_reason.trim() : '';
   const qaReason = qaReasonRaw && !hasForeignScriptBleed(qaReasonRaw) ? qaReasonRaw : UNCONFIRMED;
 
-  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages, qaDecision, qaReason };
+  const companies = extractCompanyNames(parsed.companies);
+
+  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages, qaDecision, qaReason, companies };
 }
 
 async function getTaxonomy() {
@@ -414,9 +418,10 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
          ai_error = NULL,
          ai_failure_type = NULL,
          ai_latency_ms = $10,
-         ai_generated_at = now()
+         ai_generated_at = now(),
+         ai_companies = $12::jsonb
        WHERE id = $11`,
-      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, draft.qaDecision, draft.qaReason, latencyMs, itemId]
+      [draft.summary, draft.keyTakeaway, draft.suggestedSectors, draft.suggestedUsages, draft.eligible, draft.eligibilityReason, draft.insight, draft.qaDecision, draft.qaReason, latencyMs, itemId, JSON.stringify(draft.companies || [])]
     );
     // Operational visibility: which provider actually produced this draft
     // (useful once a fallback chain means it isn't always the same one).
@@ -569,6 +574,9 @@ async function applyAiDraftIfEligible(itemId) {
     `UPDATE items SET summary = $1, insight = $2, content_category = $3, status = 'Published' WHERE id = $4`,
     [item.ai_summary, item.ai_insight, deriveContentCategory(item.type), itemId]
   );
+
+  // Auto company intake (tagging + candidate/promotion); never blocks publishing.
+  await recordCompanyMentions(item);
 
   return { archived: true };
 }
