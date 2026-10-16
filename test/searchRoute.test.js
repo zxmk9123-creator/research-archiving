@@ -94,7 +94,7 @@ test('POST /: retrieval only queries Published items and is bounded', async () =
       const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       assert.ok(selectCall);
       assert.match(selectCall.text, /i\.status = 'Published'/);
-      assert.match(selectCall.text, /LIMIT 8/);
+      assert.match(selectCall.text, /LIMIT 30/);
       assert.ok(!selectCall.text.includes('Draft'));
       assert.ok(!selectCall.text.includes('Rejected'));
     });
@@ -656,7 +656,8 @@ test('retrieveCandidates SQL: ranks by a computed per-keyword relevance score be
       // One CASE WHEN per extracted keyword (saf/장기/구매/계약 — "쉘" alone
       // is 1 char and dropped by extractKeywords' length >= 2 filter).
       const caseWhenCount = (selectCall.text.match(/CASE WHEN/g) || []).length;
-      assert.equal(caseWhenCount, 4);
+      // (each concept appears in the SELECTed relevance_score and in ORDER BY)
+      assert.equal(caseWhenCount, 4 * 2);
     });
   } finally {
     restore();
@@ -769,16 +770,40 @@ test('keywords: question-framing words (대해/구체적으로/알려줘) are no
   }
 });
 
-test('keywords: e-SAF also searches its common aliases (eSAF / power-to-liquid / e-fuel / synthetic kerosene)', async () => {
-  const params = await keywordParamsFor('e-SAF 생산 기술');
-  for (const alias of ['%esaf%', '%power-to-liquid%', '%e-fuel%', '%synthetic kerosene%']) {
-    assert.ok(params.includes(alias), `${alias} expected`);
+test('P2 concepts: spelling variants of a hyphenated term are ONE concept (single CASE per concept, any topic)', async () => {
+  for (const [q, variants] of [['e-SAF 생산 기술', ['%e-saf%', '%esaf%', '%e saf%']], ['bio-diesel 수출', ['%bio-diesel%', '%biodiesel%', '%bio diesel%']]]) {
+    const params = await keywordParamsFor(q);
+    for (const v of variants) assert.ok(params.includes(v), `${v} expected for "${q}"`);
   }
 });
 
-test('keywords: a broad term like "saf" is NOT alias-expanded', async () => {
+test('P2/P3: no hand-written semantic aliases — a term is never expanded to different words', async () => {
   const params = await keywordParamsFor('SAF 의무혼합');
-  assert.ok(!params.some((p) => /power-to-liquid|esaf|e-fuel/.test(p)));
+  assert.ok(!params.some((p) => /power-to-liquid|e-fuel|synthetic/.test(p)));
+});
+
+test('P1: request endings and about-constructions are filtered for any topic, topic words are kept', () => {
+  const { extractConcepts } = require('../server/routes/search');
+  const flat = (q) => extractConcepts(q).flat();
+  for (const q of ['팜유 수출 규제에 대해 정리해줘', '대두유 가격 전망 보여주세요', '바이오디젤 관련 자세히 알려줘']) {
+    const f = flat(q);
+    assert.ok(!f.some((t) => /줘|주세요|대해|관련|자세히/.test(t)), `framing leaked: ${f}`);
+    assert.ok(f.length > 0);
+  }
+  assert.ok(flat('팜유 수출 규제에 대해 정리해줘').includes('팜유'));
+});
+
+test('P4: candidate selection keeps Korean and non-Korean relevant rows (any topic)', () => {
+  const { selectDiverseCandidates } = require('../server/routes/search');
+  const en = Array.from({ length: 12 }, (_, i) => ({ id: i, title: `English article ${i}`, relevance_score: 5 - i * 0.1 }));
+  const ko = [{ id: 100, title: '국내 메가프로젝트 소식', relevance_score: 3 }, { id: 101, title: '국내 정책 동향', relevance_score: 2.5 }];
+  const out = selectDiverseCandidates([...en, ...ko]);
+  assert.equal(out.length, 8);
+  assert.ok(out.some((r) => r.id === 100) && out.some((r) => r.id === 101));
+  assert.deepEqual(out.map((r) => r.relevance_score), [...out.map((r) => r.relevance_score)].sort((a, b) => b - a));
+  // irrelevant Korean rows (below floor) are not forced in
+  const weak = selectDiverseCandidates([...en, { id: 200, title: '무관한 기사', relevance_score: 0.1 }]);
+  assert.ok(!weak.some((r) => r.id === 200));
 });
 
 test('keywords: a question made ONLY of framing words still searches something (no empty retrieval)', async () => {

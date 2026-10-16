@@ -92,66 +92,93 @@ function stemKorean(word) {
 // e-SAF-tagged material above generic SAF), while STILL adding the
 // hyphen-stripped parts ("saf") as fallback keywords so a broader
 // question keeps matching broader material too.
-// Question-framing words ("~에 대해 구체적으로 알려줘") say HOW the user is
-// asking, not WHAT about. They're rare in the archive's own text, so the
-// IDF weighting below scores them as highly "specific" — measured on
-// production data, "대해/구체적/구체적으로" alone out-scored the actual topic
-// (e-SAF) and filled all 8 candidate slots with unrelated articles. They are
-// dropped before retrieval (unless that would leave nothing to search).
+// ===========================================================================
+// RETRIEVAL PRINCIPLES (대원칙) — these hold for EVERY question, not for any
+// particular word. Each was learned from a real miss; each is enforced by a
+// topic-independent test in test/searchRoute.test.js.
+//
+//  P1 Topic over phrasing. Only content-bearing terms drive retrieval. How a
+//     question is asked ("~에 대해 알려줘", "tell me about") is a closed
+//     grammatical/pragmatic class and is removed — never a topic word.
+//  P2 One concept, many spellings. A term and its trivial variants (particle
+//     glued on, inflected, hyphen/space/no-space) are ONE concept.
+//  P3 Concepts, not strings. A concept scores once (its best-matching form),
+//     so listing more spellings can never inflate a score; weight is by
+//     rarity in this archive (IDF).
+//  P4 Language-fair candidates. Relevant material in either language
+//     (Korean / non-Korean) must reach the model; one language may not fill
+//     every slot while relevant material in the other is left out.
+//  P5 Partial evidence still answers. When relevant but incomplete material
+//     exists, answer what it supports and name what it doesn't cover —
+//     blanket abstention is reserved for "nothing relevant at all".
+//  P6 Never silently empty. If filtering would leave nothing to search, fall
+//     back to the unfiltered terms.
+// ===========================================================================
+
+// P1: closed classes only. (a) request/interrogative morphology that applies
+// to ANY verb ("알려줘", "정리해줘", "보여주세요"), (b) "about/regarding"
+// postpositional forms, (c) a short list of meta-question words, (d) common
+// English function/question words. Topic vocabulary is never listed here.
+const QUESTION_FRAMING_PATTERNS = [
+  /(줘|주세요|주라|달라|줄래|줄까)$/,
+  /^(대해서?|대하여|대한|관해서?|관하여|관한|관련|관련된|관련해서)$/,
+  /^(어떻게|어떤|어떠한|어떨까|무엇|뭐|뭐야|뭔가|뭔지|왜|언제|어디|누가|얼마)$/,
+];
 const QUESTION_FRAMING_TERMS = new Set([
-  '대해', '대하여', '대한', '관해', '관한', '관련', '구체적', '구체적으로', '구체', '자세히', '상세히', '상세',
-  '알려줘', '알려주세요', '알려', '알고', '설명', '설명해줘', '설명해주세요', '설명해', '무엇', '뭐야', '뭔가', '뭔지',
-  '어떻게', '어떤', '어떠한', '궁금', '질문', '내용', '정보', '개념', '정의', '의미', '있는지', '있나요', '인가요', '인지',
-  '주세요', '해줘', '해주세요', '대해서', '부탁',
-  'tell', 'about', 'explain', 'please', 'what', 'detail', 'details', 'information', 'describe',
+  '구체적', '구체적으로', '구체', '자세히', '상세히', '상세', '간단히', '쉽게', '대략', '전반', '전반적',
+  '알려', '알고', '설명', '궁금', '질문', '내용', '정보', '개념', '정의', '의미', '있는지', '있나요', '인가요', '인지', '부탁',
+  'tell', 'about', 'explain', 'please', 'what', 'how', 'why', 'when', 'where', 'who', 'which',
+  'give', 'show', 'describe', 'detail', 'details', 'information', 'overview', 'the', 'and', 'for', 'are', 'is',
+  'of', 'in', 'on', 'to', 'or', 'an', 'do', 'does', 'can', 'could', 'would', 'should', 'me', 'my', 'with', 'from',
 ]);
+function isQuestionFraming(token) {
+  return QUESTION_FRAMING_TERMS.has(token) || QUESTION_FRAMING_PATTERNS.some((re) => re.test(token));
+}
 
-// Short domain alias sets: a conceptual question about a term should also
-// reach articles that name the same thing differently (e-SAF is often
-// written eSAF / power-to-liquid / synthetic kerosene / e-fuel). Only
-// unambiguous, narrow terms are expanded — a broad one like "saf" must not
-// fan out.
-const DOMAIN_ALIASES = {
-  'e-saf': ['esaf', 'e-fuel', 'efuel', 'power-to-liquid', 'e-kerosene', 'synthetic kerosene', 'synthetic aviation fuel'],
-  uco: ['used cooking oil', '폐식용유'],
-  '폐식용유': ['uco', 'used cooking oil'],
-};
-const MAX_BASE_KEYWORDS = 16;
+// P2: trivial spelling variants of a hyphenated Latin compound.
+function spellingVariants(token) {
+  const variants = new Set([token]);
+  if (/[a-z]/.test(token) && token.includes('-')) {
+    variants.add(token.replace(/-/g, ''));
+    variants.add(token.replace(/-/g, ' '));
+  }
+  return Array.from(variants);
+}
 
-function extractKeywords(q) {
+const MAX_CONCEPTS = 16;
+
+// Returns concepts: each is an array of surface forms treated as ONE concept
+// (P2). A hyphenated compound keeps its parts as separate, more generic
+// concepts so a broader question still matches broader material.
+function extractConcepts(q) {
   const tokens = String(q || '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
-    // A Korean particle glued to a Latin/number term ("e-SAF에", "SAF를") makes
-    // one token like "saf에" that matches almost nothing — and the hyphen
-    // branch below skips Korean suffix-stripping for "e-saf에". Splitting at
-    // every Latin<->Hangul boundary yields "e-saf" + "에" / "saf" + "를".
+    // A Korean particle glued to a Latin/number term ("e-SAF에", "SAF를") would
+    // be one useless token ("saf에"); split at every Latin<->Hangul boundary.
     .replace(/([a-z0-9-])([가-힣])/g, '$1 $2')
     .replace(/([가-힣])([a-z0-9])/g, '$1 $2')
     .split(/\s+/)
-    .map((w) => w.replace(/^-+|-+$/g, '')) // strip stray leading/trailing hyphens (e.g. a bare "-" bullet)
+    .map((w) => w.replace(/^-+|-+$/g, '')) // stray leading/trailing hyphens (e.g. a bare "-" bullet)
     .filter((w) => w.replace(/-/g, '').length >= 2);
-  const withStems = new Set();
-  for (const token of tokens) {
-    withStems.add(token);
-    if (token.includes('-')) {
-      for (const part of token.split('-')) {
-        if (part.length >= 2) withStems.add(part);
+
+  const build = (usable) => {
+    const concepts = new Map();
+    const add = (forms) => { if (!concepts.has(forms[0])) concepts.set(forms[0], forms); };
+    for (const token of usable) {
+      if (token.includes('-')) {
+        add(spellingVariants(token));
+        for (const part of token.split('-')) if (part.length >= 2) add([part]);
+      } else {
+        const stem = stemKorean(token);
+        add(stem === token ? [token] : [token, stem]);
       }
-      continue; // hyphenated compounds (e.g. "e-saf") are typically borrowed
-      // technical terms, not Korean inflected words — Korean suffix-stripping
-      // doesn't apply to them.
     }
-    const stem = stemKorean(token);
-    if (stem !== token) withStems.add(stem);
-  }
-  const topical = Array.from(withStems).filter((k) => !QUESTION_FRAMING_TERMS.has(k));
-  const base = (topical.length ? topical : Array.from(withStems)).slice(0, MAX_BASE_KEYWORDS);
-  const keywords = new Set(base);
-  for (const k of base) {
-    for (const alias of DOMAIN_ALIASES[k] || []) keywords.add(alias);
-  }
-  return Array.from(keywords);
+    return Array.from(concepts.values()).slice(0, MAX_CONCEPTS);
+  };
+
+  const topical = build(tokens.filter((t) => !isQuestionFraming(t) && !isQuestionFraming(stemKorean(t))));
+  return topical.length ? topical : build(tokens); // P6
 }
 
 // A context-dependent follow-up ("그 요인을 더 자세히 설명해줘", "그럼 수출량은?")
@@ -165,7 +192,7 @@ function extractKeywords(q) {
 const MIN_OWN_RETRIEVAL_KEYWORDS = 3;
 
 function resolveRetrievalQuery(question, history) {
-  const ownKeywords = extractKeywords(question);
+  const ownKeywords = extractConcepts(question);
   if (ownKeywords.length >= MIN_OWN_RETRIEVAL_KEYWORDS || !Array.isArray(history) || !history.length) {
     return question;
   }
@@ -178,29 +205,59 @@ function resolveRetrievalQuery(question, history) {
 // How many Published items a single keyword matches, searched against the
 // exact same fields retrieveCandidates() itself searches (so the weighting
 // below reflects this corpus, not a general-language assumption).
-async function keywordDocFrequency(kw) {
-  const pat = `%${kw}%`;
+async function conceptDocFrequency(forms) {
+  const pats = forms.map((f) => `%${f}%`);
   const { rows } = await pool.query(
     `SELECT count(*)::int AS cnt FROM items i LEFT JOIN sources s ON s.id = i.source_id
      WHERE i.status = 'Published' AND (
-       i.title ILIKE $1 OR i.summary ILIKE $1 OR i.insight ILIKE $1
-       OR i.ai_summary ILIKE $1 OR i.ai_insight ILIKE $1 OR s.name ILIKE $1
-       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $1)
-       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $1)
+       i.title ILIKE ANY($1) OR i.summary ILIKE ANY($1) OR i.insight ILIKE ANY($1)
+       OR i.ai_summary ILIKE ANY($1) OR i.ai_insight ILIKE ANY($1) OR s.name ILIKE ANY($1)
+       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE ANY($1))
+       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE ANY($1))
      )`,
-    [pat]
+    [pats]
   );
   // A real COUNT(*) always returns exactly one row, but defend anyway —
   // an empty result defaults to "never seen" (docFreq 0), which gives
-  // that keyword the maximum possible weight rather than crashing
+  // that concept the maximum possible weight rather than crashing
   // retrieval entirely over one malformed count.
   return rows[0]?.cnt ?? 0;
 }
 
+// P4: SQL returns a wider, relevance-ordered pool; this picks the final
+// MAX_CANDIDATES so neither language can monopolize the slots. Each
+// language present among sufficiently relevant rows (score >= 35% of the
+// best) gets up to MIN_PER_LANGUAGE reserved slots; the rest are filled by
+// pure rank. Order stays by relevance. A row's language is judged from its
+// title (Hangul share of letters).
+const CANDIDATE_POOL = 30;
+const MIN_PER_LANGUAGE = 3;
+const RELEVANCE_FLOOR_RATIO = 0.35;
+function languageOf(row) {
+  const letters = String(row.title || '').match(/\p{L}/gu) || [];
+  const hangul = String(row.title || '').match(/[가-힣]/g) || [];
+  return letters.length && hangul.length / letters.length >= 0.3 ? 'ko' : 'other';
+}
+function selectDiverseCandidates(rows, max = MAX_CANDIDATES) {
+  if (rows.length <= max) return rows;
+  const top = Number(rows[0].relevance_score) || 0;
+  const eligible = rows.filter((r) => (Number(r.relevance_score) || 0) >= top * RELEVANCE_FLOOR_RATIO);
+  const picked = new Set();
+  const byLanguage = new Map();
+  for (const r of eligible) {
+    const lang = languageOf(r);
+    if (!byLanguage.has(lang)) byLanguage.set(lang, []);
+    byLanguage.get(lang).push(r);
+  }
+  for (const list of byLanguage.values()) list.slice(0, MIN_PER_LANGUAGE).forEach((r) => picked.add(r));
+  for (const r of rows) { if (picked.size >= max) break; picked.add(r); }
+  return rows.filter((r) => picked.has(r)).slice(0, max);
+}
+
 async function retrieveCandidates(question, history) {
   const retrievalQuery = resolveRetrievalQuery(question, history);
-  const keywords = extractKeywords(retrievalQuery);
-  if (!keywords.length) return [];
+  const concepts = extractConcepts(retrievalQuery);
+  if (!concepts.length) return [];
 
   // Production incident: a question naming a specific entity (e.g. "PT
   // Danantara Sumberdaya Indonesia(DSI)") plus a generic framing word
@@ -218,17 +275,22 @@ async function retrieveCandidates(question, history) {
   // more than one most of the corpus contains (a country name, a common
   // corporate prefix, an ordinary connector word), without needing a
   // hand-maintained stopword list for either language.
-  const docFreqs = await Promise.all(keywords.map(keywordDocFrequency));
+  const docFreqs = await Promise.all(concepts.map(conceptDocFrequency));
   const weights = docFreqs.map((cnt) => 1 / Math.log2(cnt + 2));
 
   const params = [];
-  const keywordClauses = keywords.map((kw) => {
-    params.push(`%${kw}%`);
-    const idx = params.length;
-    return `(i.title ILIKE $${idx} OR i.summary ILIKE $${idx} OR i.insight ILIKE $${idx}
+  // One clause per CONCEPT (P2/P3): a concept's forms are OR'd inside a single
+  // clause, so its weight is added at most once however many spellings match.
+  const keywordClauses = concepts.map((forms) => {
+    const idxs = forms.map((form) => {
+      params.push(`%${form}%`);
+      return params.length;
+    });
+    const perForm = (idx) => `(i.title ILIKE $${idx} OR i.summary ILIKE $${idx} OR i.insight ILIKE $${idx}
       OR i.ai_summary ILIKE $${idx} OR i.ai_insight ILIKE $${idx} OR s.name ILIKE $${idx}
       OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $${idx})
       OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $${idx}))`;
+    return `(${idxs.map(perForm).join(' OR ')})`;
   });
   // relevance_score is now a weighted sum (keyword specificity), not a
   // flat count — recency still only breaks ties among equally relevant
@@ -236,14 +298,15 @@ async function retrieveCandidates(question, history) {
   const relevanceExpr = keywordClauses.map((clause, i) => `(CASE WHEN ${clause} THEN ${weights[i]} ELSE 0 END)`).join(' + ');
   // status = 'Published' only — never Draft/Rejected/unpublished material.
   const { rows } = await pool.query(
-    `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
+    `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name,
+            (${relevanceExpr}) AS relevance_score
      FROM items i LEFT JOIN sources s ON s.id = i.source_id
      WHERE i.status = 'Published' AND (${keywordClauses.join(' OR ')})
      ORDER BY (${relevanceExpr}) DESC, i.published_at DESC NULLS LAST
-     LIMIT ${MAX_CANDIDATES}`,
+     LIMIT ${CANDIDATE_POOL}`,
     params
   );
-  return rows;
+  return selectDiverseCandidates(rows);
 }
 
 // Per-claim traceability: the model must mark, after every sentence that
@@ -265,7 +328,8 @@ Formatting:
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
-- If the supplied materials do not contain enough information to answer, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
+- If the supplied materials contain NOTHING relevant to the question, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
+- If the materials are relevant but only PARTIALLY cover the question (for example a concept/definition question where the materials describe projects, policies or cases rather than a formal definition), do NOT answer with only an insufficiency notice: present what the materials do support, grouped sensibly, then state in one sentence what they do not cover (e.g. "정의 자체를 다룬 자료는 없고, 아래는 관련 사례입니다"). Never fill the uncovered part from outside knowledge. Use materials in every language supplied — Korean and non-Korean materials are equally valid evidence, and domestic (Korean) cases belong in the answer when supplied.
 - Before connecting the user's question to the materials, separate the question into its 대상(subject/target), 효과(the claimed effect), and 기간(time period) — do not match on a blurred combination of these. Treat the material's wording as the SAME claim as the question only when (a) the material states that exact effect directly, or (b) the material's wording is a genuinely equivalent expression about the SAME subject/target (e.g. "피해" and "마진 압박" on the same company are the same claim). Never connect across a different subject or a wider scope than the material actually supports — a single company's cost/margin pressure ("한 기업의 비용/마진 압박") is NOT evidence of market-wide harm ("시장 전체 피해"); state the claim at the scope the material actually covers, never broadened.
 - Every factual claim must be grounded in the supplied materials and marked with its [N] citation — never stated as fact without one.
 - Proper nouns (company names, project/deal names, place names) must be copied character-for-character from the supplied materials, never retyped from memory or paraphrased. Never split a single word across two scripts (e.g. mixing a Latin-alphabet fragment into the middle of a Korean word like "포스코인터내셔널") — if a term appears in the materials in English, keep it entirely in English; if in Korean, keep it entirely in Korean, exactly as spelled there.
@@ -660,7 +724,8 @@ async function handleSearch(req, res, signal) {
 }
 
 module.exports = router;
-module.exports.extractKeywords = extractKeywords;
+module.exports.extractConcepts = extractConcepts;
+module.exports.selectDiverseCandidates = selectDiverseCandidates;
 module.exports.resolveRetrievalQuery = resolveRetrievalQuery;
 module.exports.buildMaterialsBlock = buildMaterialsBlock;
 module.exports.buildHistoryBlock = buildHistoryBlock;
