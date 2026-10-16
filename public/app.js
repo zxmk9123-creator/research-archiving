@@ -929,7 +929,7 @@ function renderChartHtml(jsonText) {
   // Single-series bar whose labels are "Entity(detail)" with repeating entities
   // (or explicit "groups"): merge each entity into ONE cluster, with the detail
   // (현재/2030/시나리오) as the series — same detail = same colour everywhere.
-  if (['bar', 'hbar'].includes(type) && series.length === 1) {
+  if (['bar', 'hbar'].includes(type) && series.length === 1 && c.combine !== 'sum') {
     const split = labels.map((l, i) => {
       const m = l.match(/^(.*?)\s*[(（]([^)）]*)[)）]?\s*$/);
       const entity = String((Array.isArray(c.groups) && c.groups[i]) || (m && m[1]) || l).trim();
@@ -949,6 +949,46 @@ function renderChartHtml(jsonText) {
   let vbH = 260;
   const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 ${vbH}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
+
+  // combine:"sum" + groups: parts of ONE entity that ADD UP (a company's plants,
+  // regions, product lines) become a single stacked row per entity, each part
+  // in its own colour; hovering a part shows its detail and the entity total.
+  if (c.combine === 'sum' && Array.isArray(c.groups) && series.length === 1 && labels.length >= 2) {
+    const notes = Array.isArray(c.notes) ? c.notes.map((x) => String(x || '')) : [];
+    const parts = labels.map((l, i) => ({ entity: String(c.groups[i] || l).trim(), label: l, v: series[0].data[i], note: notes[i] || '' }))
+      .filter((p) => Number.isFinite(p.v) && p.v >= 0);
+    const byEntity = new Map();
+    parts.forEach((p) => { if (!byEntity.has(p.entity)) byEntity.set(p.entity, []); byEntity.get(p.entity).push(p); });
+    const rows = Array.from(byEntity, ([entity, ps]) => ({ entity, ps, total: ps.reduce((a, p) => a + p.v, 0) }))
+      .sort((a, b) => b.total - a.total).slice(0, 10);
+    if (rows.length >= 2) {
+      const detailOf = (p) => (p.label.replace(p.entity, '').replace(/^[\s·\-–:(（]+|[\s)）]+$/g, '') || p.label);
+      const W = 560, R = 52, T = 14, rowH = 30, B = 24;
+      const px = (t) => Array.from(t).reduce((a, ch) => a + (/[가-힣]/.test(ch) ? 11 : 6.2), 0);
+      const L = Math.min(190, Math.max(80, Math.ceil(Math.max(...rows.map((r) => px(trunc(r.entity, 24))))) + 14));
+      const H = T + B + rows.length * rowH;
+      vbH = H;
+      const sc = niceScale(0, Math.max(...rows.map((r) => r.total)));
+      const x = (v) => L + (W - L - R) * (v / (sc.hi || 1));
+      let g = '';
+      for (const v of sc.ticks) g += `<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}" stroke="currentColor" opacity="${v === 0 ? '.35' : '.12'}"/><text x="${x(v)}" y="${H - B + 14}" font-size="11" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>`;
+      rows.forEach((r, ri) => {
+        const y = T + ri * rowH + 5;
+        g += `<text x="${L - 6}" y="${y + 13}" font-size="11" text-anchor="end" fill="currentColor">${escapeHtml(trunc(r.entity, 24))}</text>`;
+        let acc = 0;
+        r.ps.forEach((p, pi) => {
+          const x0 = x(acc), w = Math.max(x(acc + p.v) - x0, 1);
+          const tip = `${r.entity} · ${detailOf(p)}: ${fmt(p.v)}${c.unit ? ` ${c.unit}` : ''}${p.note ? `\n${p.note}` : ''}${r.ps.length > 1 ? `\n${r.entity} 합계: ${fmt(r.total)}${c.unit ? ` ${c.unit}` : ''}` : ''}`;
+          g += `<rect x="${x0}" y="${y}" width="${w}" height="18" fill="${colors[pi % colors.length]}" stroke="var(--surface, #fff)" stroke-width="1"><title>${escapeHtml(tip)}</title></rect>`;
+          acc += p.v;
+        });
+        g += `<text x="${x(r.total) + 5}" y="${y + 13}" font-size="11" fill="currentColor">${compactNumber(r.total)}</text>`;
+      });
+      const maxParts = Math.max(...rows.map((r) => r.ps.length));
+      const hint = maxParts > 1 ? '<div class="ai-chart-legend"><span>같은 기업의 구성 요소는 한 막대 안에서 색으로 구분 · 마우스를 올리면 상세 표시</span></div>' : '';
+      return wrap(g, hint);
+    }
+  }
 
   if (type === 'scatter') {
     if (series.length < 2) return '';
