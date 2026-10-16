@@ -1321,7 +1321,7 @@ async function handleSearch(req, res, signal) {
 
   let candidates;
   try {
-    candidates = await retrieveCandidates(question, req.body.history, { light: quick });
+    candidates = await retrieveCandidates(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)), req.body.history, { light: quick });
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
@@ -1341,6 +1341,15 @@ async function handleSearch(req, res, signal) {
           if (allowed.some((c) => has(c, t))) return true;
           return !outside.some((c) => has(c, String(m.title || '').toLowerCase()));
         });
+        // the in-scope companies' own annual-report items are the best evidence: always offered to the writer
+        try {
+          const have = new Set(candidates.map((m) => m.id));
+          const { rows: annualItems } = await pool.query(
+            `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, 'Company annual report' AS source_name, 0 AS relevance_score
+               FROM items i WHERE i.status = 'Published' AND i.source_url LIKE '%#annual-report-facts' ORDER BY i.published_at DESC NULLS LAST LIMIT 20`
+          );
+          for (const m of annualItems) if (!have.has(m.id) && allowed.some((c) => c.names.some((n) => String(m.title).toLowerCase().startsWith(n)))) candidates.push(m);
+        } catch (_) { /* best-effort */ }
       }
     }
     if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);

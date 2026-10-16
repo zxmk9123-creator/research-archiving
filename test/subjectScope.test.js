@@ -25,3 +25,18 @@ test('out-of-scope companies are dropped from table rows and bullets', () => {
   assert.ok(out.includes('| Wilmar |') && out.includes('- Wilmar는') && out.includes('본문에서 Neste'));
   assert.ok(!out.includes('HVO') && !out.includes('GS칼텍스'));
 });
+
+test('in-scope wins a name overlap: auto-discovered duplicates of a palm company stay in scope', () => {
+  const roster = [
+    { name: 'Wilmar', names: ['wilmar', '윌마', 'wilmar international'], segment: 'palm' },
+    { name: 'Wilmar International Limited', names: ['wilmar international limited', 'wilmar'], segment: null },
+    { name: 'Kuala Lumpur Kepong Bhd', names: ['kuala lumpur kepong bhd', 'kuala'], segment: null },
+    { name: 'KLK', names: ['klk', 'kuala lumpur kepong'], segment: 'palm' },
+    { name: 'Neste', names: ['neste'], segment: null },
+  ];
+  const { allowed, outside } = ss.splitRoster(roster, { segment: 'palm' });
+  assert.deepEqual(allowed.map((c) => c.name).sort(), ['KLK', 'Kuala Lumpur Kepong Bhd', 'Wilmar', 'Wilmar International Limited']);
+  assert.deepEqual(outside.map((c) => c.name), ['Neste']);
+  assert.match(ss.retrievalHint('팜 생산업체 리스트업', { segment: 'palm' }), /팜유 palm oil/);
+  assert.equal(ss.retrievalHint('팜유 생산업체', { segment: 'palm' }), '팜유 생산업체');
+});

@@ -13,9 +13,15 @@ function forQuestion(question) {
   return null;
 }
 
+// A roster row that names the same company as an in-scope one (e.g. an auto-discovered "Wilmar International
+// Limited" next to the tagged "Wilmar") is in scope too: in-scope wins any name overlap.
+function sameCompany(a, b) {
+  return a.names.some((x) => x.length >= 3 && b.names.some((y) => y.length >= 3 && (x === y || x.includes(y) || y.includes(x))));
+}
 function splitRoster(roster, scope) {
-  const allowed = roster.filter((c) => c.segment === scope.segment);
-  return { allowed, outside: roster.filter((c) => c.segment !== scope.segment) };
+  const tagged = roster.filter((c) => c.segment === scope.segment);
+  const allowed = roster.filter((c) => c.segment === scope.segment || tagged.some((t) => sameCompany(c, t)));
+  return { allowed, outside: roster.filter((c) => !allowed.includes(c)) };
 }
 
 const nameMatches = (c, text) => c.names.some((n) => n.length >= 3 && text.startsWith(n));
@@ -31,4 +37,9 @@ function dropOutOfScopeLines(text, outside) {
   }).join('\n');
 }
 
-module.exports = { forQuestion, splitRoster, dropOutOfScopeLines };
+// Extra retrieval terms so a short phrasing ('팜 생산업체') still reaches the subject's materials.
+function retrievalHint(question, scope) {
+  return scope && !/(팜유|palm oil)/i.test(String(question || '')) ? `${question} 팜유 palm oil` : question;
+}
+
+module.exports = { retrievalHint, forQuestion, splitRoster, dropOutOfScopeLines };
