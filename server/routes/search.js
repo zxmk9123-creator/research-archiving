@@ -1064,7 +1064,9 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
   const rowMap = tableCheck.tableRowQuantities(text);
   return text.replace(/```chart[^\n]*\n([\s\S]*?)```/g, (whole, body) => {
     try {
-      const guardedChart = numberCheck.guardChartNumbers(JSON.parse(body), candidates, materialText);
+      const parsedChart = JSON.parse(body);
+      if (parsedChart.auto === 'dataset') return whole; // built in code from already-verified records: never re-guessed against prose
+      const guardedChart = numberCheck.guardChartNumbers(parsedChart, candidates, materialText);
       if (guardedChart.fixed || guardedChart.dropped) console.log(`ai-search chart_number_guard fixed=${guardedChart.fixed} dropped=${guardedChart.dropped}`);
       const compliant = requestCompliance.applyChartCompliance(guardedChart.chart, requestCompliance.parseRequest(question));
       if (compliant.changed.length) console.log(`ai-search request_compliance chart_${compliant.changed.join('+')}`);
@@ -1084,9 +1086,9 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
 // Quantitative visualization requests: build the verified dataset (table + chart)
 // in code (see lib/datasetPipeline.js). Null on any failure -> normal generation.
 const DATASET_TIMEOUT_MS = 75000;
-async function tryBuildDataset(question, candidates, required, signal) {
+async function tryBuildDataset(question, candidates, required, signal, trace = []) {
   const req = requestCompliance.parseRequest(question);
-  if (!datasetPipeline.isDatasetRequest(req, question)) return null;
+  if (!datasetPipeline.isDatasetRequest(req, question)) { trace.push('not_dataset_request'); return null; }
   try {
     const density = datasetPipeline.productDensity(`${question} ${candidates.map(materialText).join(' ').slice(0, 40000)}`);
     // 1) facts stored when the items were published (item_facts): no AI call at all
@@ -1127,6 +1129,7 @@ async function tryBuildDataset(question, candidates, required, signal) {
     try {
       const annual = await annualRecords.loadAnnualRecords(question, { candidates, baseIndex: candidates.length + extraCandidates.length });
       const annualFit = datasetPipeline.recordsForQuestion(annual.records, question, density);
+      trace.push(`annual family=${annual.family} loaded=${annual.records.length} fit=${annualFit.length} entities=${annualFit.map((r) => r.entity).join(',')}`);
       // enough audited figures of ONE comparable kind: the dataset is built from them alone — news-derived
       // figures of other meanings (capacity targets, deals) must not be mixed into the same column
       if (annualFit.length >= 3) {
@@ -1166,7 +1169,9 @@ async function tryBuildDataset(question, candidates, required, signal) {
         records = records.filter((r) => !outside.some((c) => c.names.some((n) => n.length >= 3 && String(r.entity).toLowerCase().startsWith(n))));
       }
     } catch (_) { /* keep names as extracted */ }
+    trace.push(`before_build records=${records.length} entities=${[...new Set(records.map((r) => r.entity))].join(',')}`);
     const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
+    trace.push(dataset ? 'built' : 'build_returned_null');
     if (dataset) {
       dataset.extraCandidates = extraCandidates;
       console.log(`ai-search dataset built records=${dataset.records} extra_articles=${extraCandidates.length} extracted_live=${pending.length ? 'yes' : 'no'}`);
@@ -1174,6 +1179,7 @@ async function tryBuildDataset(question, candidates, required, signal) {
     return dataset;
   } catch (err) {
     console.error('ai-search dataset pipeline failed:', err.message);
+    trace.push(`error: ${err.message}`);
     return null;
   }
 }
@@ -1396,7 +1402,8 @@ async function handleSearch(req, res, signal) {
     });
     if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
   }
-  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal);
+  const datasetTrace = [];
+  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace);
   datasetPromise.catch(() => {});
   const scopeBlock = quick
     ? '\n\n[범위: 핵심 요약 모드 — 사용자가 빠른 요약을 선택했다. 상위 10개 안팎의 주요 대상만 간결하게 정리하고 나머지는 한 줄로 언급한다.]'
@@ -1439,7 +1446,7 @@ async function handleSearch(req, res, signal) {
       candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
       isFollowup, questionFingerprint: fingerprint, streamed: false,
     });
-    return res.json({ answer, insufficient: false, sources });
+    return res.json({ answer, insufficient: false, sources, ...(req.body.debug === true ? { trace: datasetTrace } : {}) });
   }
 
   // --- Streaming path ---

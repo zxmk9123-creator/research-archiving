@@ -1336,3 +1336,10 @@ test('workload: a dataset request with stored facts (few live extractions) shows
   assert.equal(wp.assessWorkload({ ...base, pendingExtractions: 25 }).heavy, true);
   assert.equal(wp.assessWorkload({ ...base, pendingExtractions: null }).heavy, true);
 });
+
+test('enrichChartBlocks leaves a code-built dataset chart untouched', async () => {
+  const chart = { type: 'hbar', auto: 'dataset', unit: '톤', labels: ['KLK 전사'], groups: ['KLK'], series: [{ name: 'x', data: [1362787] }], notes: ['원문 1,362,787 mt'] };
+  const text = `\`\`\`chart\n${JSON.stringify(chart)}\n\`\`\``;
+  const out = await searchRouter.enrichChartBlocks(text, [{ title: 'KLK', summary: 'KLK produced 1,362,787 mt CPO' }], '');
+  assert.equal(out, text);
+});

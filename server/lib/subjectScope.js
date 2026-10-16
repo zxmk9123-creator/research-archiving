@@ -3,7 +3,7 @@
 // buy palm feedstock, SAF developers). When the question is a palm producer/refiner listing, only
 // roster companies tagged segment='palm' are in scope: out-of-scope companies are removed from the
 // candidate materials, the required list, the dataset and table/bullet rows of the answer.
-const PALM = /(팜유|팜\s*오일|palm)/i;
+const PALM = /(팜|palm)/i; // 팜유, 팜오일, 팜 농장, 팜 생산업체 ...
 const PRODUCER_CUE = /(생산\s*업체|생산자|생산\s*기업|생산사|정제\s*업체|정제사|리파이너|refiner|플랜테이션|plantation|농장|producer|mills?(?![a-z])|업체|기업|회사|숏리스트|shortlist)/i;
 const USER_CUE = /(수입|구매|사용|소비|바이오디젤|biodiesel|SAF|재생|HVO|연료|fuel)/i;
 

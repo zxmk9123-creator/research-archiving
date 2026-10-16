@@ -5,6 +5,9 @@ const ss = require('../server/lib/subjectScope');
 test('forQuestion: palm producer/refiner listing only', () => {
   assert.ok(ss.forQuestion('팜유 생산업체 숏리스트 작성해줘'));
   assert.ok(ss.forQuestion('팜유 주요 리파이너리 업체들'));
+  assert.ok(ss.forQuestion('팜 생산업체 리스트업해줘'));
+  assert.ok(ss.forQuestion('팜 농장 업체 목록'));
+  assert.ok(ss.forQuestion('palm oil producers shortlist'));
   assert.equal(ss.forQuestion('팜유 수출 정책'), null);
   assert.equal(ss.forQuestion('팜유를 쓰는 바이오디젤 업체'), null);
   assert.equal(ss.forQuestion('SAF 업체 CAPA'), null);
