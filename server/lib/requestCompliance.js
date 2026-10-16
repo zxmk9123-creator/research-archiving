@@ -66,9 +66,13 @@ function applyChartCompliance(chart, req) {
 const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 const isSep = (line) => /^[\s|:\-]+$/.test(line.trim()) && /-{2,}/.test(line);
 
-// Builds a chart block from the first table that has a numeric column of one
-// quantity class. Rows with a range use the upper bound; rows with no figure
-// are skipped (they stay in the table).
+// Subtotal/total rows would double-count their own parts in a chart.
+const TOTAL_ROW = /(합계|총계|총\s*생산|소계|전체\s*합|^총$|subtotal|grand total)/i;
+
+// Builds a chart block from the first table that has numeric columns of one
+// quantity class (up to 3 columns become series). Rows with a range use the upper
+// bound; rows with no figure in ANY chosen column are skipped (they stay in the
+// table); total/subtotal rows are skipped.
 function chartFromTable(text, req) {
   const lines = String(text || '').split('\n');
   for (let i = 0; i + 1 < lines.length; i++) {
@@ -77,26 +81,54 @@ function chartFromTable(text, req) {
     const rows = [];
     while (j < lines.length && /^\s*\|/.test(lines[j])) { rows.push(splitRow(lines[j])); j++; }
     const header = splitRow(lines[i]);
+    const cols = [];
     for (let c = 1; c < header.length; c++) {
       const cells = rows.map((r) => (r[c] ? extractQuantities(r[c]) : []));
       const classes = new Set(cells.flat().map((q) => q.cls));
-      if (classes.size !== 1 || cells.filter((q) => q.length).length < 3) continue;
-      const cls = [...classes][0];
-      const picked = rows.map((r, ri) => (cells[ri].length ? { label: r[0].replace(/[*_`]/g, '').trim(), value: Math.max(...cells[ri].map((q) => q.value)) } : null)).filter(Boolean).slice(0, 30);
-      const toTons = req.unitTons && cls === 'mass';
-      const scaleDiv = toTons ? 1 : cls === 'mass' ? 1e4 : 1;
-      const unit = toTons ? '톤' : cls === 'mass' ? '만 톤' : ({ gal: '갤런', bbl: '배럴', bpd: 'b/d', liter: '리터', usd: '달러', eur: '유로', krw: '원' })[cls];
-      const chart = {
-        type: req.chartType || (picked.length > 6 ? 'hbar' : 'bar'),
-        title: `${header[c].replace(/\*+/g, '')} (표 기준)`,
-        unit,
-        labels: picked.map((p) => p.label),
-        series: [{ name: header[c].replace(/\*+/g, ''), data: picked.map((p) => Math.round((p.value / scaleDiv) * 1000) / 1000) }],
-      };
-      return { chart, insertAfter: j };
+      if (classes.size === 1 && cells.filter((q) => q.length).length >= 2) cols.push({ c, cls: [...classes][0], cells });
     }
+    if (!cols.length) continue;
+    const cls = cols[0].cls;
+    const use = cols.filter((x) => x.cls === cls).slice(0, 3);
+    const keep = rows.map((r, ri) => ({ r, ri })).filter(({ r, ri }) => !TOTAL_ROW.test(r[0].replace(/[*_`]/g, '').trim()) && use.some((u) => u.cells[ri].length)).slice(0, 30);
+    if (keep.length < 3) continue;
+    const toTons = req.unitTons && cls === 'mass';
+    const scaleDiv = toTons ? 1 : cls === 'mass' ? 1e4 : 1;
+    const unit = toTons ? '톤' : cls === 'mass' ? '만 톤' : ({ gal: '갤런', bbl: '배럴', bpd: 'b/d', liter: '리터', usd: '달러', eur: '유로', krw: '원' })[cls];
+    const chart = {
+      type: req.chartType || (keep.length > 6 ? 'hbar' : 'bar'),
+      title: `${header[use[0].c].replace(/\*+/g, '')} (표 기준)`,
+      unit,
+      labels: keep.map(({ r }) => r[0].replace(/[*_`]/g, '').trim()),
+      series: use.map((u) => ({
+        name: header[u.c].replace(/\*+/g, ''),
+        data: keep.map(({ ri }) => (u.cells[ri].length ? Math.round((Math.max(...u.cells[ri].map((q) => q.value)) / scaleDiv) * 1000) / 1000 : null)),
+      })),
+    };
+    return { chart, insertAfter: j };
   }
   return null;
+}
+
+// Completeness requests: when the model's chart shows fewer items than the table
+// lists (a top-N cut, or a chart that mixes totals with parts), the chart is rebuilt
+// from the table so every row is shown.
+function enforceCompleteChart(text, req) {
+  if (!req.completeness || !req.wantsChart) return { text, rebuilt: false };
+  const built = chartFromTable(text, req);
+  if (!built) return { text, rebuilt: false };
+  const m = String(text).match(/```chart[^\n]*\n([\s\S]*?)```/);
+  let existing = null;
+  if (m) { try { existing = JSON.parse(m[1]); } catch (_) { existing = null; } }
+  const existingN = existing && Array.isArray(existing.labels) ? existing.labels.length : 0;
+  const hasTotalBar = existing && existing.labels.some((l) => TOTAL_ROW.test(String(l)));
+  if (existing && existingN >= built.chart.labels.length && !hasTotalBar) return { text, rebuilt: false };
+  if (existing && existing.title) built.chart.title = String(existing.title).replace(/[\s\-–—,]*상위\s*\d+\s*개?[^\s,)]*/g, '').trim() || built.chart.title;
+  const block = `\`\`\`chart\n${JSON.stringify(built.chart)}\n\`\`\``;
+  if (m) return { text: String(text).replace(m[0], block), rebuilt: true };
+  const lines = String(text).split('\n');
+  lines.splice(built.insertAfter, 0, '', block, '');
+  return { text: lines.join('\n'), rebuilt: true };
 }
 
 function ensureChartPresent(text, req) {
@@ -108,4 +140,4 @@ function ensureChartPresent(text, req) {
   return { text: lines.join('\n'), built: true };
 }
 
-module.exports = { parseRequest, applyChartCompliance, chartFromTable, ensureChartPresent, COMPLETENESS_RE };
+module.exports = { enforceCompleteChart, parseRequest, applyChartCompliance, chartFromTable, ensureChartPresent, COMPLETENESS_RE };

@@ -870,7 +870,9 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   // Explicit user requests are enforced in code (chart kind, unit, a chart when one
   // was asked for) — see lib/requestCompliance.js.
   const req = requestCompliance.parseRequest(question);
-  const ensured = requestCompliance.ensureChartPresent(tabled.text, req);
+  const completed = requestCompliance.enforceCompleteChart(tabled.text, req);
+  if (completed.rebuilt) console.log('ai-search request_compliance chart_rebuilt_for_completeness');
+  const ensured = requestCompliance.ensureChartPresent(completed.text, req);
   if (ensured.built) console.log('ai-search request_compliance chart_built_from_table');
   const text = ensured.text;
   // Citation links are built from the DB rows we actually sent, never from

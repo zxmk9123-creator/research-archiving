@@ -60,3 +60,25 @@ test('plant/facility and completeness questions are collective: company coverage
   assert.equal(searchRouter.requiredCompanies('SAF Capa를 누락없이 알려줘', cands, roster).length, 1);
   assert.equal(searchRouter.requiredCompanies('팜유 수출 정책', cands, roster).length, 0);
 });
+
+test('completeness: a chart that shows fewer items than the table (or mixes in a total row) is rebuilt from the table', () => {
+  const table = ['| 플랜트 | 현재 | 계획 |', '| --- | --- | --- |', '| Neste 로테르담 | 50만 톤 | 120만 톤 |', '| Neste 싱가포르 | 100만 톤 | - |', '| Neste 총 생산능력 | 220만 톤 | - |', '| Eni Gela | 40만 톤 | - |', '| Total | 23만 톤 | 50만 톤 |'].join('\n');
+  const text = `${table}\n\n\`\`\`chart\n${JSON.stringify({ type: 'hbar', title: '글로벌 SAF 생산능력 – 상위 10개', unit: '톤', labels: ['Neste 총 생산능력', 'Eni Gela'], series: [{ name: 's', data: [2200000, 400000] }] })}\n\`\`\``;
+  const req = rc.parseRequest('SAF 플랜트 Capa를 누락없이 톤 단위로 가로 막대그래프로');
+  const r = rc.enforceCompleteChart(text, req);
+  assert.equal(r.rebuilt, true);
+  const chart = JSON.parse(r.text.match(/```chart\n(.*)\n```/)[1]);
+  assert.deepEqual(chart.labels, ['Neste 로테르담', 'Neste 싱가포르', 'Eni Gela', 'Total']);
+  assert.deepEqual(chart.series.map((s) => s.name), ['현재', '계획']);
+  assert.deepEqual(chart.series[0].data, [500000, 1000000, 400000, 230000]);
+  assert.deepEqual(chart.series[1].data, [1200000, null, null, 500000]);
+  assert.ok(!/상위/.test(chart.title));
+  // not a completeness request, or the chart already covers every row: untouched
+  assert.equal(rc.enforceCompleteChart(text, rc.parseRequest('그래프로 보여줘')).rebuilt, false);
+});
+
+test('number guard: a line that states conversion factors is method text and is never rewritten', () => {
+  const mt = (m) => m.summary;
+  const r = nc.guardAnswerNumbers('환산 기준: 100만 갤런 = 3,028톤, 10,000배럴 = 1,272톤 [1]', [{ summary: 'plant 5 Mt' }], () => [1], mt);
+  assert.equal(r.text, '환산 기준: 100만 갤런 = 3,028톤, 10,000배럴 = 1,272톤 [1]');
+});
