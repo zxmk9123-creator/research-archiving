@@ -59,9 +59,9 @@ function buildQueries(company) {
 async function ensureSetup(list = COMPANIES) {
   for (const c of list) {
     await pool.query(
-      `INSERT INTO companies (name, aliases, watched) VALUES ($1, $2, true)
-       ON CONFLICT (name) DO UPDATE SET aliases = (SELECT ARRAY(SELECT DISTINCT unnest(companies.aliases || EXCLUDED.aliases))), watched = true`,
-      [c.name, c.aliases]
+      `INSERT INTO companies (name, aliases, watched, segment) VALUES ($1, $2, true, $3)
+       ON CONFLICT (name) DO UPDATE SET aliases = (SELECT ARRAY(SELECT DISTINCT unnest(companies.aliases || EXCLUDED.aliases))), watched = true, segment = COALESCE(EXCLUDED.segment, companies.segment)`,
+      [c.name, c.aliases, c.palm ? 'palm' : null]
     );
   }
   const name = 'Company Profile Collection (one-off)';

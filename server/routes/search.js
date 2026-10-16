@@ -6,6 +6,7 @@ const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
 const freshness = require('../lib/freshness');
+const subjectScope = require('../lib/subjectScope');
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
@@ -928,9 +929,10 @@ async function verifyCitations(text, candidates, signal) {
 // Roster = the watchlist companies with every spelling we match them by.
 async function getRoster() {
   try {
-    const { rows } = await pool.query('SELECT name, aliases FROM companies WHERE watched = true');
+    const { rows } = await pool.query('SELECT name, aliases, segment FROM companies WHERE watched = true');
     return rows.map((r) => ({
       name: r.name,
+      segment: r.segment || null,
       rawNames: [r.name, ...(r.aliases || [])].map((n) => String(n || '').trim()).filter(Boolean),
       names: Array.from(new Set([r.name, String(r.name).split(/[\s.]+/)[0], ...(r.aliases || [])]
         .map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))),
@@ -1140,7 +1142,15 @@ async function tryBuildDataset(question, candidates, required, signal) {
         if (signal) signal.removeEventListener('abort', onAbort);
       }
     }
-    try { records = datasetPipeline.canonicalizeEntities(records, await getRoster()); } catch (_) { /* keep names as extracted */ }
+    try {
+      const rosterDs = await getRoster();
+      records = datasetPipeline.canonicalizeEntities(records, rosterDs);
+      const scopeDs = subjectScope.forQuestion(question);
+      if (scopeDs) {
+        const outside = subjectScope.splitRoster(rosterDs, scopeDs).outside;
+        records = records.filter((r) => !outside.some((c) => c.names.some((n) => n.length >= 3 && String(r.entity).toLowerCase().startsWith(n))));
+      }
+    } catch (_) { /* keep names as extracted */ }
     const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
     if (dataset) {
       dataset.extraCandidates = extraCandidates;
@@ -1192,7 +1202,10 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     rawBody = await completeTruncatedAnswer(rawBody.replace(TRUNCATION_NOTICE_RE, '').trimEnd(), candidates, signal);
   }
   let modelText = stripStrayScripts(normalizeCitationMarkers(rawBody), candidates);
-  modelText = canonicalizeProperNouns(modelText, candidates.map(materialText), await getRoster());
+  const rosterForScope = await getRoster();
+  modelText = canonicalizeProperNouns(modelText, candidates.map(materialText), rosterForScope);
+  const scopeNow = subjectScope.forQuestion(question);
+  if (scopeNow) modelText = subjectScope.dropOutOfScopeLines(modelText, subjectScope.splitRoster(rosterForScope, scopeNow).outside);
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
     // (and its own unit-conversion remarks: the dataset states the basis itself)
@@ -1293,6 +1306,18 @@ async function handleSearch(req, res, signal) {
         if (fresh.length !== candidates.length) console.log(`ai-search freshness dropped=${candidates.length - fresh.length} kept=${fresh.length}`);
         candidates = fresh; // an empty remainder is reported as insufficient evidence, never filled with old data
       }
+      // SUBJECT SCOPE: a palm producer/refiner listing keeps only palm-segment companies; materials that
+      // are about an out-of-scope roster company (title) and about no in-scope one are removed.
+      const scopeQ = subjectScope.forQuestion(question);
+      if (scopeQ) {
+        const { allowed, outside } = subjectScope.splitRoster(rosterForFresh, scopeQ);
+        const has = (c, t) => c.names.some((n) => t.includes(n));
+        candidates = candidates.filter((m) => {
+          const t = materialText(m).toLowerCase();
+          if (allowed.some((c) => has(c, t))) return true;
+          return !outside.some((c) => has(c, String(m.title || '').toLowerCase()));
+        });
+      }
     }
     if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);
     if (signal.aborted || res.destroyed) return;
@@ -1317,7 +1342,12 @@ async function handleSearch(req, res, signal) {
 
   const roster = await getRoster();
   const intent = classifyIntent(question, roster);
-  const required = quick ? [] : requiredCompanies(question, candidates, roster);
+  const subjectQ = subjectScope.forQuestion(question);
+  const subjectSplit = subjectQ ? subjectScope.splitRoster(roster, subjectQ) : null;
+  const required = quick ? [] : requiredCompanies(question, candidates, subjectSplit ? subjectSplit.allowed : roster);
+  const subjectBlock = subjectSplit
+    ? `\n\n[대상 업체 한정 — ${subjectQ.label}] 표·차트·목록의 항목으로 쓸 수 있는 업체는 이 질문의 주제(${subjectQ.label})에 해당하는 업체뿐이다${subjectSplit.allowed.length ? `(관리 대상: ${subjectSplit.allowed.map((c) => c.name).join(', ')} 및 자료가 이 주제의 생산·정제 업체임을 직접 밝힌 업체)` : ''}. 팜유를 원료로 쓰는 바이오연료·재생디젤·SAF·정유 업체, 그리고 주제와 무관한 업체는 항목으로 올리지 않는다. 해당 업체의 자료가 없으면 "미확보"로 밝힌다.`
+    : '';
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
@@ -1358,7 +1388,7 @@ async function handleSearch(req, res, signal) {
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${profileBlock}${scopeBlock}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}`;
 
   if (!streaming) {
     let text;
