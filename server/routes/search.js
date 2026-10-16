@@ -41,7 +41,7 @@ async function recordSearchTelemetry(fields) {
 }
 
 // Bounded candidate set — never send the whole table to the LLM.
-const MAX_CANDIDATES = 8;
+const MAX_CANDIDATES = 16;
 // Minimal conversation context: the last few turns, not persisted anywhere
 // (the client holds them in memory only, see renderHome()'s aiSearchHistory).
 const MAX_HISTORY_TURNS = 3;
@@ -68,12 +68,14 @@ const KOREAN_STRIPPABLE_SUFFIXES = [
 ].sort((a, b) => b.length - a.length); // longest suffix checked first
 
 function stemKorean(word) {
-  for (const suffix of KOREAN_STRIPPABLE_SUFFIXES) {
-    if (word.length - suffix.length >= 2 && word.endsWith(suffix)) {
-      return word.slice(0, -suffix.length);
-    }
+  // Up to two passes: plural + particle stack ("식용유지들의" -> "식용유지들" -> "식용유지").
+  let stem = word;
+  for (let pass = 0; pass < 2; pass++) {
+    const suffix = KOREAN_STRIPPABLE_SUFFIXES.find((x) => stem.length - x.length >= 2 && stem.endsWith(x));
+    if (!suffix) break;
+    stem = stem.slice(0, -suffix.length);
   }
-  return word;
+  return stem;
 }
 
 // Root cause of a real miss: "국내 e-SAF 생산 현황" never surfaced e-SAF
@@ -126,6 +128,10 @@ const QUESTION_FRAMING_PATTERNS = [
 ];
 const QUESTION_FRAMING_TERMS = new Set([
   '구체적', '구체적으로', '구체', '자세히', '상세히', '상세', '간단히', '쉽게', '대략', '전반', '전반적',
+  // request-for-output words (any topic): asking for a chart/table/analysis is
+  // not itself a topic and used to pull in unrelated "analysis" articles
+  '그래프', '차트', '도표', '시각화', '그림', '그려', '그리', '만들', '작성', '비교', '비교분석', '분석', '표로', '정리',
+  'chart', 'graph', 'plot', 'table', 'visualize', 'visualization', 'compare', 'comparison', 'analysis',
   '알려', '알고', '설명', '궁금', '질문', '내용', '정보', '개념', '정의', '의미', '있는지', '있나요', '인가요', '인지', '부탁',
   'tell', 'about', 'explain', 'please', 'what', 'how', 'why', 'when', 'where', 'who', 'which',
   'give', 'show', 'describe', 'detail', 'details', 'information', 'overview', 'the', 'and', 'for', 'are', 'is',
@@ -230,8 +236,8 @@ async function conceptDocFrequency(forms) {
 // best) gets up to MIN_PER_LANGUAGE reserved slots; the rest are filled by
 // pure rank. Order stays by relevance. A row's language is judged from its
 // title (Hangul share of letters).
-const CANDIDATE_POOL = 30;
-const MIN_PER_LANGUAGE = 3;
+const CANDIDATE_POOL = 60;
+const MIN_PER_LANGUAGE = 5;
 const RELEVANCE_FLOOR_RATIO = 0.35;
 function languageOf(row) {
   const letters = String(row.title || '').match(/\p{L}/gu) || [];
@@ -252,6 +258,40 @@ function selectDiverseCandidates(rows, max = MAX_CANDIDATES) {
   for (const list of byLanguage.values()) list.slice(0, MIN_PER_LANGUAGE).forEach((r) => picked.add(r));
   for (const r of rows) { if (picked.size >= max) break; picked.add(r); }
   return rows.filter((r) => picked.has(r)).slice(0, max);
+}
+
+// P7 Coverage of named groups. A question about a GROUP ("식용유지들의 생산량")
+// is really about its members (팜유, 대두유, ...). The sector taxonomy already
+// encodes that hierarchy, so a concept that names a parent sector is expanded
+// to its child sectors, and each member gets its own small retrieval slot —
+// otherwise one member's articles fill the whole candidate list and the answer
+// (and any chart) covers a single target.
+const MAX_TARGETS = 8;
+const PER_TARGET = 3;
+async function taxonomyTargets(concepts) {
+  const forms = Array.from(new Set(concepts.flat().map((f) => f.toLowerCase())));
+  if (!forms.length) return [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.name FROM sectors p JOIN sectors c ON c.parent_id = p.id
+       WHERE lower(p.name) = ANY($1) ORDER BY c.id LIMIT ${MAX_TARGETS}`,
+      [forms]
+    );
+    return rows.map((r) => r.name).filter(Boolean);
+  } catch (_) {
+    return []; // expansion is an enhancement; never fail retrieval over it
+  }
+}
+async function retrieveForTarget(target, otherForms) {
+  const { rows } = await pool.query(
+    `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name, 0 AS relevance_score
+     FROM items i LEFT JOIN sources s ON s.id = i.source_id
+     WHERE i.status = 'Published' AND (i.title ILIKE $1 OR i.summary ILIKE $1 OR i.insight ILIKE $1 OR i.ai_summary ILIKE $1 OR i.ai_insight ILIKE $1)
+     ORDER BY ((i.title ILIKE $1)::int + (CASE WHEN (i.summary ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.title ILIKE ANY($2)) THEN 2 ELSE 0 END)) DESC, i.published_at DESC NULLS LAST
+     LIMIT ${PER_TARGET}`,
+    [`%${target}%`, otherForms.length ? otherForms.map((f) => `%${f}%`) : ['%%']]
+  );
+  return rows;
 }
 
 async function retrieveCandidates(question, history) {
@@ -306,7 +346,19 @@ async function retrieveCandidates(question, history) {
      LIMIT ${CANDIDATE_POOL}`,
     params
   );
-  return selectDiverseCandidates(rows);
+  const base = selectDiverseCandidates(rows);
+  const targets = await taxonomyTargets(concepts);
+  if (!targets.length) return base;
+  const targetSet = new Set(targets.map((t) => t.toLowerCase()));
+  const otherForms = concepts.filter((forms) => !forms.some((f) => targetSet.has(f.toLowerCase()))).flat();
+  const seen = new Set(base.map((r) => r.id));
+  const extras = [];
+  for (const t of targets) {
+    try {
+      for (const r of await retrieveForTarget(t, otherForms)) if (!seen.has(r.id)) { seen.add(r.id); extras.push(r); }
+    } catch (_) { /* best-effort */ }
+  }
+  return base.concat(extras);
 }
 
 // Per-claim traceability: the model must mark, after every sentence that
@@ -328,6 +380,8 @@ Formatting:
 - If the answer has multiple top-level numbered sections (e.g. "1. 공급 측면...", "2. 관세·비용 요인..."), number them sequentially through the ENTIRE answer — never restart at "1." for a later section. A plain "-" paragraph inserted between numbered sections does not reset the count; the next numbered section continues from where the numbering left off (e.g. after "2.", the next section is "3.", not "1." again).
 - Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Place [N] AFTER the sentence's closing punctuation, never before it — write "...정책이 변경되었다. [1]", never "...정책이 변경되었다 [1]." Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
+- Thoroughness protocol (quality over brevity; spend the extra effort): before writing, silently read EVERY supplied 자료 one by one and note each fact, figure (with its unit, year and scope), entity, date and claim it contains that bears on the question. Then answer from the union of all of them, not from the first few: every 자료 that contains something relevant must be used and cited at least once; do not stop after the most obvious two or three, and do not summarize several materials into one vague sentence when they give distinct figures or cases. When materials disagree (different numbers, years, definitions), show both with their [N] and say they differ instead of picking one silently. Give concrete specifics (names, numbers, dates, places) over generalities, and when the materials cover only some of what was asked (e.g. only some of the requested commodities, companies or years), state exactly which parts are covered and which are not.
+- Comparison and data requests across several targets (commodities, companies, countries, years): first assemble, from ALL materials, a complete set of every available data point per target and period; present it as a Markdown table (rows = targets, columns = periods or measures, "-" for no data, a [N] in or right after each row); then, if a chart is useful or was requested, build it from exactly that set, covering every target that has any usable number — never reduce the comparison to one target because it has the most data. If the supplied materials hold fewer than 3 data points for a requested target, still list it in the table with what exists.
 - Visualization process (follow in order whenever you produce a table or chart):
   1. Prepare the data: gather only figures stated in the materials; put them in one consistent unit and one consistent period basis (state any conversion in one sentence, and never convert with outside numbers); use null for a missing value; drop items with no usable number and say so.
   2. Choose the chart by the question: bar/hbar = compare a quantity across categories (e.g. sales or capacity by company; sort rankings in descending order); line = change over time (prices, production by year); scatter = the relationship between two numeric variables across items (e.g. capacity vs investment per plant) — needs at least 5 points, otherwise use a table or bar; stacked/pie/donut/area as described below. If no chart type fits the data honestly, use a table or plain text instead.
@@ -354,8 +408,8 @@ Rules:
 // model's own answer ends up being. 320/240 chars keep each field at
 // roughly 2-3 sentences, enough for the model to cite accurately without
 // the full original text.
-const MAX_SUMMARY_CHARS = 320;
-const MAX_INSIGHT_CHARS = 240;
+const MAX_SUMMARY_CHARS = 700;
+const MAX_INSIGHT_CHARS = 450;
 function truncateField(text, maxChars) {
   const str = String(text || '');
   return str.length > maxChars ? `${str.slice(0, maxChars)}…` : str;
@@ -376,7 +430,7 @@ function buildHistoryBlock(history) {
   const turns = history.slice(-MAX_HISTORY_TURNS * 2);
   const lines = turns
     .filter((t) => t && typeof t.content === 'string')
-    .map((t) => `${t.role === 'assistant' ? '이전 답변' : '이전 질문'}: ${t.content.slice(0, 500)}`);
+    .map((t) => `${t.role === 'assistant' ? '이전 답변' : '이전 질문'}: ${t.content.slice(0, 900)}`);
   return lines.length ? `[이전 대화]\n${lines.join('\n')}\n\n` : '';
 }
 

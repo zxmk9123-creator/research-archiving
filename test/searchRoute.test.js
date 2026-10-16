@@ -94,7 +94,7 @@ test('POST /: retrieval only queries Published items and is bounded', async () =
       const selectCall = calls.find((c) => c.text.includes('ORDER BY ('));
       assert.ok(selectCall);
       assert.match(selectCall.text, /i\.status = 'Published'/);
-      assert.match(selectCall.text, /LIMIT 30/);
+      assert.match(selectCall.text, /LIMIT 60/);
       assert.ok(!selectCall.text.includes('Draft'));
       assert.ok(!selectCall.text.includes('Rejected'));
     });
@@ -519,8 +519,8 @@ test('buildMaterialsBlock labels retrieved materials without bracket-style numbe
 });
 
 test('buildMaterialsBlock: truncates an unusually long summary/insight so prompt size stays bounded', () => {
-  const longSummary = '가'.repeat(500);
-  const longInsight = '나'.repeat(500);
+  const longSummary = '가'.repeat(1000);
+  const longInsight = '나'.repeat(1000);
   const block = searchRouter.buildMaterialsBlock([
     { title: 't', source_name: 's', published_at: null, summary: longSummary, insight: longInsight, ai_summary: null, ai_insight: null },
   ]);
@@ -795,10 +795,10 @@ test('P1: request endings and about-constructions are filtered for any topic, to
 
 test('P4: candidate selection keeps Korean and non-Korean relevant rows (any topic)', () => {
   const { selectDiverseCandidates } = require('../server/routes/search');
-  const en = Array.from({ length: 12 }, (_, i) => ({ id: i, title: `English article ${i}`, relevance_score: 5 - i * 0.1 }));
+  const en = Array.from({ length: 24 }, (_, i) => ({ id: i, title: `English article ${i}`, relevance_score: 5 - i * 0.1 }));
   const ko = [{ id: 100, title: '국내 메가프로젝트 소식', relevance_score: 3 }, { id: 101, title: '국내 정책 동향', relevance_score: 2.5 }];
   const out = selectDiverseCandidates([...en, ...ko]);
-  assert.equal(out.length, 8);
+  assert.equal(out.length, 16);
   assert.ok(out.some((r) => r.id === 100) && out.some((r) => r.id === 101));
   assert.deepEqual(out.map((r) => r.relevance_score), [...out.map((r) => r.relevance_score)].sort((a, b) => b - a));
   // irrelevant Korean rows (below floor) are not forced in
@@ -832,4 +832,29 @@ test('retrieveCandidates SQL: the relevance expression reuses the same bound par
   } finally {
     restore();
   }
+});
+
+test('P7: a parent-sector term is expanded to its member sectors, each retrieved separately (any group)', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM sectors p JOIN sectors c', () => ({ rows: [{ name: '팜유' }, { name: '대두유' }] })],
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '식용유지 생산량을 그래프로 비교분석해줘' }) });
+    });
+    const perTarget = calls.filter((c) => c.text.includes('LIMIT 3'));
+    assert.deepEqual(perTarget.map((c) => c.params[0]), ['%팜유%', '%대두유%']);
+    // visualization/analysis request words are framing, not topic keywords
+    const main = calls.find((c) => c.text.includes('LIMIT 60'));
+    for (const w of ['%그래프%', '%비교분석%', '%비교%', '%분석%']) assert.ok(!main.params.includes(w), w);
+  } finally {
+    restore();
+  }
+});
+
+test('SYSTEM_PROMPT: carries the thoroughness and multi-target data-assembly protocols', () => {
+  const src = require('fs').readFileSync(require.resolve('../server/routes/search.js'), 'utf8');
+  assert.match(src, /Thoroughness protocol/);
+  assert.match(src, /Comparison and data requests across several targets/);
 });
