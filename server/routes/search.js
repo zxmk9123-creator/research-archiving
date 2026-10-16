@@ -1132,6 +1132,7 @@ async function tryBuildDataset(question, candidates, required, signal) {
         if (signal) signal.removeEventListener('abort', onAbort);
       }
     }
+    try { records = datasetPipeline.canonicalizeEntities(records, await getRoster()); } catch (_) { /* keep names as extracted */ }
     const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
     if (dataset) {
       dataset.extraCandidates = extraCandidates;

@@ -67,6 +67,23 @@ function recordsForQuestion(records, question, density = null) {
     .map((r) => ({ ...r, tons: r.group === 'mass' ? r.amount : r.group === 'volume' && density ? (r.amount * density) / 1000 : null }));
 }
 
+// One company, one row: names that differ only by case, spacing, punctuation or a corporate
+// suffix are the same entity; roster aliases (e.g. 에코세레스 / EcoCeres) map to the roster name
+// (a Hangul/Latin pair can only be matched through the roster). Fields of the first record win.
+const CORP_SUFFIX = /(?:\b(?:inc|corp|corporation|co|ltd|llc|plc|gmbh|sa|ag|bv|oyj|asa)\b\.?|주식회사|\(주\)|㈜|유한회사)/gi;
+const nameKey = (s) => String(s || '').toLowerCase().replace(CORP_SUFFIX, '').replace(/[^a-z0-9가-힣]/g, '');
+function canonicalizeEntities(records, roster = []) {
+  const byKey = new Map();
+  for (const c of roster) for (const n of c.rawNames || [c.name]) { const k = nameKey(n); if (k.length >= 2 && !byKey.has(k)) byKey.set(k, c.name); }
+  const first = new Map();
+  return records.map((r) => {
+    const k = nameKey(r.entity);
+    if (!k) return r;
+    const name = byKey.get(k) || (first.has(k) ? first.get(k) : (first.set(k, r.entity), r.entity));
+    return name === r.entity ? r : { ...r, entity: name };
+  });
+}
+
 function isDatasetRequest(req, question) {
   return Boolean(req && (req.wantsChart || req.wantsTable) && METRIC_WORDS.test(String(question || '')));
 }
@@ -289,4 +306,4 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   return { table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };
+module.exports = { canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

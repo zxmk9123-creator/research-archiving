@@ -145,3 +145,10 @@ test('institutions (IATA) are not charted as companies; type/country carried thr
   const out = dp.recordsForQuestion(recs, 'SAF 생산능력 표로 정리', null);
   assert.deepEqual(out.map((r) => r.entity), ['Neste']);
 });
+
+test('canonicalizeEntities merges Hangul/Latin roster aliases and suffix variants', () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const roster = [{ name: 'EcoCeres', rawNames: ['EcoCeres', '에코세레스'] }];
+  const out = dp.canonicalizeEntities([{ entity: '에코세레스' }, { entity: 'ecoceres' }, { entity: 'Neste Oyj' }, { entity: 'NESTE' }], roster);
+  assert.deepEqual(out.map((r) => r.entity), ['EcoCeres', 'EcoCeres', 'Neste Oyj', 'Neste Oyj']);
+});
