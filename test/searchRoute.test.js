@@ -1071,10 +1071,10 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
       const card = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
       assert.equal(card.needsConfirmation, true);
       assert.equal(providerCalls, 0);
-      assert.deepEqual(card.plan.options.map((o) => o.id), ['full', 'quick']);
-      assert.equal(card.plan.recommended, 'full');
+      assert.deepEqual(card.plan.options.map((o) => o.id), ['quick', 'full']);
+      assert.equal(card.plan.recommended, 'quick'); // the lighter, faster scope is recommended
       for (const o of card.plan.options) assert.ok(o.tokens > 0 && o.aiCalls && o.seconds && o.tokensText);
-      assert.ok(card.plan.options[1].tokens < card.plan.options[0].tokens || card.plan.options[1].aiCalls === '1회');
+      assert.ok(card.plan.options[0].tokens < card.plan.options[1].tokens || card.plan.options[0].aiCalls === '1회');
       // confirmed: the work runs
       const done = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘', scope: { confirmed: true, mode: 'full' } });
       assert.ok(done.answer);

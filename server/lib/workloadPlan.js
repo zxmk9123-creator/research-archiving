@@ -39,7 +39,7 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
   const quick = {
     id: 'quick',
     label: '핵심 요약 (빠름)',
-    detail: `상위 ${Math.min(QUICK_CANDIDATES, candidates.length)}건 중심으로 주요 대상만 간결하게 정리합니다. 일부 업체·거점은 빠질 수 있습니다.`,
+    detail: `상위 ${Math.min(QUICK_CANDIDATES, candidates.length)}건 중심으로 주요 대상을 간결하게 정리합니다. 빠르고 가볍게 먼저 확인하고, 필요하면 전체로 다시 요청할 수 있습니다.`,
     aiCalls: '1회',
     tokens: round100(quickIn + 2200),
     seconds: '약 15~35초',
@@ -66,8 +66,9 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
       steps: dataset
         ? ['관련 자료 검색', '업체·거점별 수치 추출 (AI)', '원문 대조 검증 · 톤 환산', '표·차트 생성', '해석 작성 (AI)']
         : ['관련 자료 검색', '대상별 자료 확인', '답변 작성 (AI)', '수치·출처 검증'],
-      options: [full, quick],
-      recommended: 'full',
+      // the lighter, faster scope is the recommended default; the full run is one click away
+      options: [quick, full],
+      recommended: 'quick',
       notes: ['같은 질문은 15분간 저장되어 다시 물어도 즉시 표시됩니다.'],
     },
   };
