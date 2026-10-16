@@ -876,3 +876,21 @@ test('citation verification guard: a flagged claim keeps its footnote when it sh
   assert.equal(searchRouter.claimOverlapsMaterials('로테르담 2027년 1.2 Mt 증설 [1]', [1], cands), true);
   assert.equal(searchRouter.claimOverlapsMaterials('팜유 가격이 상승했다 [1]', [1], cands), false);
 });
+
+test('P8: each specific subject of a multi-subject question gets its own retrieval slot (any entities)', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT count(*)', () => ({ rows: [{ cnt: 20 }] })],
+    ['FROM sectors p JOIN sectors c', () => ({ rows: [] })],
+    ['LIMIT 3', () => ({ rows: [] })],
+    ['FROM items i', () => ({ rows: [] })],
+  ]);
+  try {
+    await withServer(async (base) => {
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'Neste, Eni, Chevron의 생산능력 비교' }) });
+    });
+    const perSubject = calls.filter((c) => c.text.includes('LIMIT 3')).map((c) => c.params[0]);
+    for (const w of ['%neste%', '%eni%', '%chevron%']) assert.ok(perSubject.includes(w), `${w} needs its own slot`);
+  } finally {
+    restore();
+  }
+});

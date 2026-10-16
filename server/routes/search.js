@@ -268,6 +268,10 @@ function selectDiverseCandidates(rows, max = MAX_CANDIDATES) {
 // (and any chart) covers a single target.
 const MAX_TARGETS = 8;
 const PER_TARGET = 3;
+// Hard ceiling on what reaches the model after all coverage additions (prompt size/latency bound).
+const MAX_TOTAL_CANDIDATES = 28;
+// A concept present in at most this many Published items is a "specific" subject (an entity), not a topic word.
+const SPECIFIC_DOCFREQ = 250;
 async function taxonomyTargets(concepts) {
   const forms = Array.from(new Set(concepts.flat().map((f) => f.toLowerCase())));
   if (!forms.length) return [];
@@ -347,18 +351,42 @@ async function retrieveCandidates(question, history) {
     params
   );
   const base = selectDiverseCandidates(rows);
+  // P8 Every specific subject gets a seat. In a multi-subject question
+  // ("Neste, Eni, Chevron의 ... 비교") the top-ranked rows can all belong to
+  // one subject. For each rare (specific) concept that fewer than PER_TARGET
+  // candidates mention, pull its own best rows — the same coverage guarantee
+  // as P7, but driven by the question's own terms, no taxonomy needed.
+  const textOf = (r) => `${r.title} ${r.summary || ''} ${r.ai_summary || ''} ${r.insight || ''} ${r.ai_insight || ''}`.toLowerCase();
+  const seenIds = new Set(base.map((r) => r.id));
+  const coverage = [];
+  const specific = concepts
+    .map((forms, i) => ({ forms, df: docFreqs[i] }))
+    .filter((c) => c.df > 0 && c.df <= SPECIFIC_DOCFREQ && c.forms[0].length >= 3)
+    .sort((a, b) => a.df - b.df)
+    .slice(0, MAX_TARGETS);
+  if (specific.length >= 2) {
+    for (const c of specific) {
+      const have = base.filter((r) => c.forms.some((f) => textOf(r).includes(f.toLowerCase()))).length;
+      if (have >= PER_TARGET) continue;
+      const others = concepts.filter((f) => f !== c.forms).flat();
+      try {
+        for (const r of await retrieveForTarget(c.forms[0], others)) if (!seenIds.has(r.id)) { seenIds.add(r.id); coverage.push(r); }
+      } catch (_) { /* best-effort */ }
+    }
+  }
+  const baseCovered = base.concat(coverage);
   const targets = await taxonomyTargets(concepts);
-  if (!targets.length) return base;
+  if (!targets.length) return baseCovered.slice(0, MAX_TOTAL_CANDIDATES);
   const targetSet = new Set(targets.map((t) => t.toLowerCase()));
   const otherForms = concepts.filter((forms) => !forms.some((f) => targetSet.has(f.toLowerCase()))).flat();
-  const seen = new Set(base.map((r) => r.id));
+  const seen = new Set(baseCovered.map((r) => r.id));
   const extras = [];
   for (const t of targets) {
     try {
       for (const r of await retrieveForTarget(t, otherForms)) if (!seen.has(r.id)) { seen.add(r.id); extras.push(r); }
     } catch (_) { /* best-effort */ }
   }
-  return base.concat(extras);
+  return baseCovered.concat(extras).slice(0, MAX_TOTAL_CANDIDATES);
 }
 
 // Per-claim traceability: the model must mark, after every sentence that
