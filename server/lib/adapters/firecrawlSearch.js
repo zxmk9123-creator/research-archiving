@@ -17,7 +17,14 @@ const MAX_RESULTS = 10;
 function getConfiguredKeys() {
   const multi = (process.env.FIRECRAWL_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
   const single = (process.env.FIRECRAWL_API_KEY || '').trim();
-  const all = single ? [single, ...multi] : multi;
+  // Numbered keys (FIRECRAWL_API_KEY_2, _3, ...) let a new key be ADDED as its
+  // own variable without having to read back and rewrite the plural list.
+  const numbered = Object.keys(process.env)
+    .filter((k) => /^FIRECRAWL_API_KEY_\d+$/.test(k))
+    .sort((a, b) => Number(a.split('_').pop()) - Number(b.split('_').pop()))
+    .map((k) => (process.env[k] || '').trim())
+    .filter(Boolean);
+  const all = [...(single ? [single] : []), ...numbered, ...multi];
   return [...new Set(all)];
 }
 
@@ -59,4 +66,4 @@ async function searchWeb(query, options = {}) {
   throw lastError || new Error('search failed: all configured Firecrawl API keys failed');
 }
 
-module.exports = { searchWeb, MAX_RESULTS };
+module.exports = { searchWeb, MAX_RESULTS, _getConfiguredKeysForTests: getConfiguredKeys };

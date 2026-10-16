@@ -107,3 +107,18 @@ test('searchWeb: FIRECRAWL_API_KEY is merged into the rotation alongside FIRECRA
     delete process.env.FIRECRAWL_API_KEYS;
   }
 }));
+
+test('firecrawl keys: numbered FIRECRAWL_API_KEY_n variables are merged and deduped with singular/plural', () => {
+  const saved = { a: process.env.FIRECRAWL_API_KEY, b: process.env.FIRECRAWL_API_KEYS, c: process.env.FIRECRAWL_API_KEY_2 };
+  try {
+    process.env.FIRECRAWL_API_KEY = 'k-new';
+    process.env.FIRECRAWL_API_KEYS = 'k-p1, k-new';
+    process.env.FIRECRAWL_API_KEY_2 = 'k-old';
+    const keys = require('../server/lib/adapters/firecrawlSearch')._getConfiguredKeysForTests();
+    assert.deepEqual(keys, ['k-new', 'k-old', 'k-p1']);
+  } finally {
+    for (const [k, v] of [['FIRECRAWL_API_KEY', saved.a], ['FIRECRAWL_API_KEYS', saved.b], ['FIRECRAWL_API_KEY_2', saved.c]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
