@@ -1,10 +1,12 @@
 const express = require('express');
 const crypto = require('crypto');
 const numberCheck = require('../lib/numberCheck');
+const { titleSimilarity } = require('../lib/similarity');
 const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
 const workloadPlan = require('../lib/workloadPlan');
+const { classifyIntent } = require('../lib/intent');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -312,9 +314,8 @@ async function retrieveForTarget(target, otherForms) {
 // question speaks of companies in general, every watchlist company (the
 // `companies` table, with aliases) gets its own slots, ranked by overlap with
 // the question's other terms.
-const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|플랜트|설비|시설|거점|공장|사업장|프로젝트|compan|major|producer|supplier|refiner|player|operator|plant|facilit|biorefiner|site)/i;
-// A completeness request ("누락 없이", "전체", "모든") is treated as a collective question too.
-const isCollectiveQuestion = (q) => COLLECTIVE_ENTITY_RE.test(String(q || '')) || requestCompliance.COMPLETENESS_RE.test(String(q || ''));
+// (Intent — entity / peers / collective / general — is decided by lib/intent.js from what the
+// question NAMES; a generic noun such as "업체" no longer starts a roster sweep.)
 const MAX_WATCHLIST = 40;
 const PER_COMPANY = 2; // roster sweep: fewer rows per company so a long roster stays within the prompt budget
 async function retrieveForWatchlist(otherForms) {
@@ -350,6 +351,14 @@ async function retrieveForWatchlist(otherForms) {
     } catch (_) { /* best-effort per company */ }
   }
   return out;
+}
+
+// Syndicated copies of one story ("Neste starts SAF production in Rotterdam" x3) crowd
+// out distinct evidence; keep the best-ranked of each near-identical title group.
+function dropNearDuplicates(rows, threshold = 0.7) {
+  const kept = [];
+  for (const r of rows) if (!kept.some((k) => titleSimilarity(k.title, r.title) >= threshold)) kept.push(r);
+  return kept;
 }
 
 async function retrieveCandidates(question, history, { light = false } = {}) {
@@ -404,7 +413,7 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
      LIMIT ${CANDIDATE_POOL}`,
     params
   );
-  const base = selectDiverseCandidates(rows);
+  const base = selectDiverseCandidates(dropNearDuplicates(rows));
   // P8 Every specific subject gets a seat. In a multi-subject question
   // ("Neste, Eni, Chevron의 ... 비교") the top-ranked rows can all belong to
   // one subject. For each rare (specific) concept that fewer than PER_TARGET
@@ -430,7 +439,8 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
   }
   let baseCovered = base.concat(coverage);
   let ceiling = MAX_TOTAL_CANDIDATES;
-  if (!light && isCollectiveQuestion(retrievalQuery)) {
+  const intent = classifyIntent(retrievalQuery, await getRoster());
+  if (!light && intent.type === 'collective') {
     const nonGeneric = concepts.filter((forms, i) => docFreqs[i] > 0 && docFreqs[i] <= SPECIFIC_DOCFREQ * 8).flat();
     const known = new Set(baseCovered.map((r) => r.id));
     const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
@@ -470,7 +480,7 @@ Formatting:
 - If the answer has multiple top-level numbered sections (e.g. "1. 공급 측면...", "2. 관세·비용 요인..."), number them sequentially through the ENTIRE answer — never restart at "1." for a later section. A plain "-" paragraph inserted between numbered sections does not reset the count; the next numbered section continues from where the numbering left off (e.g. after "2.", the next section is "3.", not "1." again).
 - Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Place [N] AFTER the sentence's closing punctuation, never before it — write "...정책이 변경되었다. [1]", never "...정책이 변경되었다 [1]." Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
-- Thoroughness protocol (quality over brevity; spend the extra effort): before writing, silently read EVERY supplied 자료 one by one and note each fact, figure (with its unit, year and scope), entity, date and claim it contains that bears on the question. Then answer from the union of all of them, not from the first few: every 자료 that contains something relevant must be used and cited at least once; do not stop after the most obvious two or three, and do not summarize several materials into one vague sentence when they give distinct figures or cases. When materials disagree (different numbers, years, definitions), show both with their [N] and say they differ instead of picking one silently. Give concrete specifics (names, numbers, dates, places) over generalities, and when the materials cover only some of what was asked (e.g. only some of the requested commodities, companies or years), state exactly which parts are covered and which are not.
+- Thoroughness protocol (quality over brevity; spend the extra effort): before writing, silently read EVERY supplied 자료 one by one and note each fact, figure (with its unit, year and scope), entity, date and claim it contains that bears on the question. Then answer from the union of all of them, not from the first few: for comparison, ranking and data questions every 자료 that contains something relevant must be used and cited at least once, and several materials must not be blurred into one vague sentence when they give distinct figures or cases. EXCEPTION — a single-subject overview ("X에 대해 알려줘", "X 개요", "X 업체 정리"): never walk through the materials one by one and never cite every 자료; write a structured profile, merge duplicates and cite only the 1-3 best 자료 per statement. When materials disagree (different numbers, years, definitions), show both with their [N] and say they differ instead of picking one silently. Give concrete specifics (names, numbers, dates, places) over generalities, and when the materials cover only some of what was asked (e.g. only some of the requested commodities, companies or years), state exactly which parts are covered and which are not.
 - Comparison and data requests across several targets (commodities, companies, countries, years): first assemble, from ALL materials, a complete set of every available data point per target and period; present it as a Markdown table (rows = targets, columns = periods or measures, "-" for no data, a [N] in or right after each row); then, if a chart is useful or was requested, build it from exactly that set, covering every target that has any usable number — never reduce the comparison to one target because it has the most data. If the supplied materials hold fewer than 3 data points for a requested target, still list it in the table with what exists.
 - Layout discipline for data answers (the answer is read in a narrow panel; a wall of text or a cramped chart is a failure): (1) open with ONE or TWO sentences stating the main conclusion; (2) then the chart or table — never repeat the same data point-by-point as a long bullet list as well: when a chart or table carries the numbers, the text must not re-list them (at most 3-5 bullets for what the chart cannot show, e.g. caveats, definitions, key differences); (3) a chart shows AT MOST 10 bars/points — rank by value and keep the top 10 (say "상위 10개" in the title), put the remainder only in the table (EXCEPTION: when the user asks for completeness — 누락 없이/전체/모든/전수 — show every item, up to 30 bars, no top-N); (4) category labels are short (<= 14 characters, "회사 거점" like "Neste 로테르담"; no parentheses with explanations, no units inside labels); (5) one chart = one unit and one kind of measure; if the data mix units (톤, 억 갤런, b/d, m³), convert ONLY when the materials give the conversion, otherwise make separate charts per unit or show the mixed values in a table; (6) the table holds the full detail (all targets, all periods, notes like "계획"/"가동"/"미공시"), the chart holds only the comparable core; (7) finish with 2-4 short insight bullets, each with [N].
 - Visualization process (follow in order whenever you produce a table or chart):
@@ -856,9 +866,11 @@ async function getRoster() {
 //    deterministically from its own material, with a [N] footnote — so the
 //    answer can never silently omit a company that the archive covers.
 function requiredCompanies(question, candidates, roster) {
-  if (!isCollectiveQuestion(question)) return [];
+  const intent = classifyIntent(question, roster);
+  if (intent.type !== 'collective' && intent.type !== 'peers') return [];
+  const scoped = intent.type === 'peers' ? intent.focus : roster; // peers: exactly the companies the user named
   const texts = candidates.map((m) => `${m.title} ${m.summary || ''} ${m.ai_summary || ''} ${m.insight || ''} ${m.ai_insight || ''}`.toLowerCase());
-  return roster
+  return scoped
     .map((c) => ({ ...c, indices: texts.map((t, i) => (c.names.some((n) => t.includes(n)) ? i + 1 : null)).filter(Boolean) }))
     .filter((c) => c.indices.length);
 }
@@ -871,10 +883,14 @@ function ensureCompanyCoverage(text, required, candidates) {
   const missing = required.filter((c) => !c.names.some((n) => low.includes(n)));
   if (!missing.length) return text;
   const bullets = missing.map((c) => {
-    const m = candidates[c.indices[0] - 1];
-    const raw = String(m.ai_summary || m.summary || m.title || '').replace(/\s+/g, ' ').trim();
-    const snippet = raw.length > 150 ? `${raw.slice(0, 150)}…` : raw;
-    return `- **${c.name}**: ${snippet} [${c.indices[0]}]`;
+    // the material that names the company in its TITLE first, then the sentence around the name
+    const idx = c.indices.find((i) => c.names.some((n) => String(candidates[i - 1].title || '').toLowerCase().includes(n))) || c.indices[0];
+    const m = candidates[idx - 1];
+    const body = String(m.ai_summary || m.summary || m.title || '').replace(/\s+/g, ' ').trim();
+    const sentences = body.split(/(?<=[.。!?다요])\s+/);
+    const hit = sentences.find((sn) => c.names.some((n) => sn.toLowerCase().includes(n))) || sentences[0] || body;
+    const snippet = hit.length > 150 ? `${hit.slice(0, 150)}…` : hit;
+    return `- **${c.name}**: ${snippet} [${idx}]`;
   });
   return `${String(text).trimEnd()}\n\n# 추가 확인된 업체 (자료 기준)\n본문에서 다루지 못했으나 자료가 확인된 업체입니다.\n${bullets.join('\n')}`;
 }
@@ -1082,7 +1098,9 @@ async function handleSearch(req, res, signal) {
     return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
   }
 
-  const required = quick ? [] : requiredCompanies(question, candidates, await getRoster());
+  const roster = await getRoster();
+  const intent = classifyIntent(question, roster);
+  const required = quick ? [] : requiredCompanies(question, candidates, roster);
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
@@ -1117,7 +1135,12 @@ async function handleSearch(req, res, signal) {
     : wantsDatasetBlock
       ? '\n\n[이 질문의 표와 차트는 시스템이 검증된 데이터로 생성해 답변 맨 앞에 붙인다. 표·차트·수치 나열은 쓰지 말고, 자료에 근거한 핵심 해석 3~6개 불릿과 주의점(미공시, 단위 환산, 가동/건설/계획 구분, 총계와 거점 값 구분)만 간결하게 쓴다.]'
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${scopeBlock}`;
+  const profileBlock = intent.type === 'entity'
+    ? `\n\n[질의 유형: 기업 프로파일 — ${intent.focus[0].name}] 이 질문은 한 기업에 대한 개요 요청이다. 자료를 하나씩 훑지 말고 주제별로 종합해 아래 구조로 쓴다(자료에 있는 항목만, 없으면 "미확보"로 한 줄): (1) # 개요 — 어떤 회사인지(정체성·본사·주력 사업·규모) 2~3문장 (2) # 생산·사업 거점 — 거점별 제품과 CAPA·상태(가동/건설/계획)를 표로, 수치는 자료 표기 그대로 (3) # 전략과 투자 (4) # 최근 동향 — 최신순 3~5개 (5) # 확인되지 않은 항목. 중복·유사 자료는 합치고, 문장마다 가장 관련 높은 자료 1~3개만 인용하며, 모든 자료를 나열하거나 인용할 필요는 없다. 전체 분량은 한국어 700단어 안팎으로 제한한다.`
+    : intent.type === 'peers'
+      ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
+      : '';
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${profileBlock}${scopeBlock}`;
 
   if (!streaming) {
     let text;
@@ -1217,6 +1240,7 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.dropNearDuplicates = dropNearDuplicates;
 module.exports.callHedged = callHedged;
 module.exports.answerCacheKey = answerCacheKey;
 module.exports._clearAnswerCache = () => answerCache.clear();

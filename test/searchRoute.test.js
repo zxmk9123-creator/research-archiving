@@ -1119,3 +1119,31 @@ test('workloadPlan: light requests are never heavy; dataset and whole-roster req
   const roster = [1, 2, 3].map((i) => ({ name: `C${i}` }));
   assert.equal(wp.assessWorkload({ ...base, required: roster, question: '모든 업체 현황을 누락 없이' }).heavy, true);
 });
+
+test('"Neste 업체에 대해 알려줘": a focused company profile — profile instructions, no roster sweep, no appended roster companies', async () => {
+  const { calls, restore } = mockPool([
+    ['FROM companies WHERE watched', () => ({ rows: [{ id: 1, name: 'Neste', aliases: ['네스테'] }, { id: 2, name: 'Eni', aliases: [] }, { id: 3, name: 'Infinium', aliases: [] }] })],
+    ['FROM items i', () => ({ rows: [
+      { ...SAMPLE_ROW, id: 21, title: 'Neste opens Singapore refinery', summary: 'Neste 싱가포르 정제소 연 100만 톤 SAF 생산.' },
+      { ...SAMPLE_ROW, id: 22, title: 'Infinium Texas eSAF', summary: 'Infinium 텍사스 eSAF 연 10만 톤 프로젝트.' },
+    ] })],
+  ]);
+  let writerPrompt = '';
+  const restoreProvider = mockProvider(async ({ system, user }) => {
+    if (system === searchRouter.SYSTEM_PROMPT) writerPrompt = user;
+    return { text: '# 개요\nNeste는 SAF 선도 기업이다. [1]', provider: 'p' };
+  });
+  try {
+    await withServer(async (base) => {
+      const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'Neste 업체에 대해 알려줘' }) }).then((x) => x.json());
+      assert.ok(r.answer && !r.needsConfirmation);
+      assert.ok(!r.answer.includes('추가 확인된 업체'));
+    });
+    assert.match(writerPrompt, /질의 유형: 기업 프로파일 — Neste/);
+    assert.ok(!/필수 포함 업체/.test(writerPrompt));
+    assert.ok(!calls.some((c) => c.text.includes('item_companies ic WHERE')), 'no roster sweep');
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
