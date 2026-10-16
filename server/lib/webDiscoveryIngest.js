@@ -48,6 +48,7 @@ function recentlySeen(link) {
   return true;
 }
 
+const freshness = require('./freshness');
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
 const FALLBACK_CANDIDATES_TO_TRY = 3;
 
@@ -193,6 +194,14 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         filtered++;
         await recordExclusion({ sourceId: source.id, url: candidate.link, title: candidate.title, summary: meta.summary, publishedAt: meta.published_at, reason: 'stale' });
         details.push({ title: candidate.title, link: candidate.link, stage: 'stale_for_daily_discovery', published_at: meta.published_at });
+        continue;
+      }
+
+      // FRESHNESS (searchOptions.maxFresh): outdated company/quantity material is blocked before it is archived.
+      if (searchOptions.maxFresh && (freshness.isOutdated(meta.published_at) || (!meta.published_at && freshness.textLooksOutdated(`${candidate.title} ${meta.summary || ''}`)))) {
+        filtered++;
+        await recordExclusion({ sourceId: source.id, url: candidate.link, title: candidate.title, summary: meta.summary, publishedAt: meta.published_at, reason: 'stale' });
+        details.push({ title: candidate.title, link: candidate.link, stage: 'outdated', published_at: meta.published_at });
         continue;
       }
 

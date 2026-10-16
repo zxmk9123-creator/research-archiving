@@ -5,6 +5,7 @@ const { titleSimilarity } = require('../lib/similarity');
 const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
+const freshness = require('../lib/freshness');
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
@@ -1284,6 +1285,15 @@ async function handleSearch(req, res, signal) {
   let candidates;
   try {
     candidates = await retrieveCandidates(question, req.body.history, { light: quick });
+    {
+      const rosterForFresh = await getRoster();
+      const intentForFresh = classifyIntent(question, rosterForFresh);
+      if ((intentForFresh.type !== 'general' || datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question)) && !freshness.wantsHistorical(question)) {
+        const fresh = candidates.filter((c) => !freshness.isOutdated(c.published_at));
+        if (fresh.length !== candidates.length) console.log(`ai-search freshness dropped=${candidates.length - fresh.length} kept=${fresh.length}`);
+        candidates = fresh; // an empty remainder is reported as insufficient evidence, never filled with old data
+      }
+    }
     if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);
     if (signal.aborted || res.destroyed) return;
   } catch (err) {

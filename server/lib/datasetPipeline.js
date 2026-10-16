@@ -14,6 +14,7 @@
 // groups; volume becomes mass ONLY when the product's density is known (fuels and edible
 // oils are recognised; otherwise volumes stay in volume and are never guessed into tons).
 const nc = require('./numberCheck');
+const freshness = require('./freshness');
 
 const METRIC_WORDS = /(capa|capacity|생산\s*능력|용량|생산량|생산\s*규모|처리량|공급량|출하|물량|수출량|수입량|판매량|소비량|재고|투자액|투자\s*규모|투자금|매출|시장\s*규모|규모)/i;
 const STATUS_RANK = { 가동: 3, 건설중: 2, 계획: 1, 목표: 0 };
@@ -50,11 +51,13 @@ const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB
 const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NAME.test(String(r.entity || '').trim()));
 function recordsForQuestion(records, question, density = null) {
   const q = String(question || '');
+  const historical = freshness.wantsHistorical(q);
   const wantsMoney = MONEY_Q.test(q);
   const wantsCap = CAP_Q.test(q);
   const wantsOut = OUT_Q.test(q);
   return records
     .filter((r) => {
+      if (!historical && freshness.isOutdated(r.pubAt)) return false; // outdated facts never reach an answer
       if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
       if (isMoney) return wantsMoney;
