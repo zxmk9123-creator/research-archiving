@@ -61,3 +61,17 @@ test('cleanUrl drops tracking params and converts Google Drive view links', () =
   assert.equal(cleanUrl('https://a.com/?wpfb_dl=291&utm_source=chatgpt.com'), 'https://a.com/?wpfb_dl=291');
   assert.equal(cleanUrl('https://drive.google.com/file/d/ABC123/view?utm_source=chatgpt.com'), 'https://drive.google.com/uc?export=download&id=ABC123');
 });
+
+test('chunkPages batches pages; parseRecordsLoose keeps complete objects of a truncated array', () => {
+  const pages = [{ n: 1, text: 'a'.repeat(6000) }, { n: 2, text: 'b'.repeat(6000) }, { n: 3, text: 'c'.repeat(100) }];
+  assert.deepEqual(ar.chunkPages(pages, 9000).map((c) => c.map((p) => p.n)), [[1], [2, 3]]);
+  const recs = ar.parseRecordsLoose('```json\n[{"metric":"a","value":1},{"metric":"b, {x}","value":2},{"metric":"c","val');
+  assert.deepEqual(recs.map((r) => r.metric), ['a', 'b, {x}']);
+  assert.equal(ar.parseRecordsLoose('no json').length, 0);
+});
+
+test('selectPages relaxes the threshold when a report states few figures', () => {
+  const mk = (n) => ({ n, text: `mills refinery capacity ha tonnes ${'1,000 '.repeat(40)}` });
+  const sel = ar.selectPages([mk(1), mk(2), { n: 3, text: 'nothing relevant' }]);
+  assert.ok(sel.length >= 1 && sel.every((p) => p.score >= 5));
+});

@@ -42,19 +42,23 @@ function cleanUrl(raw) {
 
 async function ingestAnnualReport({ url: rawUrl, entity, publishedAt = null, store = true }) {
   const url = cleanUrl(rawUrl);
-  const pages = await extractPdfPages(await fetchPdfBuffer(url));
+  const pages = await extractPdfPages(await fetchPdfBuffer(url, 60 * 1024 * 1024));
   const selected = ar.selectPages(pages);
   const user = selected.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n');
-  const result = await provider.callProviderWithFallback({ system: ar.EXTRACTION_SYSTEM, user: `[Company] ${entity}\n\n${user}` });
-  const text = String(result.text || '').replace(/^```(?:json)?/i, '').replace(/```$/, '');
   let records = [];
-  try { records = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); } catch (_) { /* unparsable */ }
+  const chunkErrors = [];
+  for (const chunk of ar.chunkPages(selected)) {
+    try {
+      const result = await provider.callProviderWithFallback({ system: ar.EXTRACTION_SYSTEM, user: `[Company] ${entity}\n\n${chunk.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n')}` });
+      records = records.concat(ar.parseRecordsLoose(result.text));
+    } catch (err) { chunkErrors.push(`${chunk[0].n}-${chunk[chunk.length - 1].n}: ${String(err.message).slice(0, 80)}`); }
+  }
   const verified = ar.verifyAgainstPages(Array.isArray(records) ? records : [], selected);
   const kept = ar.fillAreaDefinitions(verified.kept, selected);
   const dropped = verified.dropped;
   const years = kept.map((r) => Number(r.fiscal_year)).filter((y) => y > 2000);
   const fiscalYear = years.length ? Math.max(...years) : null;
-  const out = { totalPages: pages.length, selectedPages: selected.map((p) => p.n), sentChars: user.length, extracted: records.length, verified: kept.length, dropped, fiscalYear, records: kept };
+  const out = { chunkErrors, totalPages: pages.length, selectedPages: selected.map((p) => p.n), sentChars: user.length, extracted: records.length, verified: kept.length, dropped, fiscalYear, records: kept };
   if (!store || !kept.length) return { ...out, stored: false };
 
   for (const r of kept) {

@@ -19,8 +19,11 @@ function scorePage(text) {
 
 // Top `max` pages by score (plus each page's neighbour when it scores well, as tables continue), in page order.
 function selectPages(pages, { max = 14, minScore = 25 } = {}) {
-  const scored = pages.map((p) => ({ ...p, score: scorePage(p.text) })).filter((p) => p.score >= minScore).sort((a, b) => b.score - a.score).slice(0, max);
-  return scored.sort((a, b) => a.n - b.n);
+  const all = pages.map((p) => ({ ...p, score: scorePage(p.text) })).sort((a, b) => b.score - a.score);
+  let scored = all.filter((p) => p.score >= minScore);
+  // a report that states few figures (graphics-heavy, or a trading/refining group) still gets its best pages examined
+  if (scored.length < 3) scored = all.filter((p) => p.score >= 5).slice(0, 8);
+  return scored.slice(0, max).sort((a, b) => a.n - b.n);
 }
 
 module.exports = { scorePage, selectPages };
@@ -30,6 +33,40 @@ module.exports = { scorePage, selectPages };
 const EXTRACTION_SYSTEM = `You extract operating facts of a plantation/palm-oil group from annual-report pages. Respond with ONLY a JSON array.
 Each element: {"segment": "plantation"|"mill"|"refinery"|"oleochemical"|"kernel_crushing"|"group", "scope": "group"|"country"|"site", "location": string|null, "metric": string, "value": number, "value_max": number|null, "unit": string, "fiscal_year": number|null, "definition": string|null, "page": number}
 Rules: a RANGE printed as "20 to 120" or "20-120" is ONE element with value=20 and value_max=120 (never two elements); otherwise value_max is null. "definition" = the exact words on the page that define the figure's basis (for example "Weighted Average Hectarage", "as at 30 September 2025", "Mature", "Landbank"); two different area definitions of the same metric are different elements, each with its own definition; null only if the page gives none. One element per distinct figure stated on a page; copy value and unit EXACTLY as printed (no conversion, no rounding); keep FFB, CPO, PK (palm kernel), planted area (mature/immature/total) and capacities (per hour/day/year) as DIFFERENT metrics; "fiscal_year" is the year the figure refers to (a 5-year table gives one element per year, or at least the latest year); "page" is the page number given in the [page N] header. Never invent a figure.`;
+
+// Pages grouped into batches of at most `maxChars`, so one extraction call never has to produce a huge answer.
+function chunkPages(pages, maxChars = 9000) {
+  const chunks = [];
+  let cur = [];
+  let size = 0;
+  for (const p of pages) {
+    if (cur.length && size + p.text.length > maxChars) { chunks.push(cur); cur = []; size = 0; }
+    cur.push(p);
+    size += p.text.length;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+// JSON array of objects, tolerant of a truncated tail: every complete {...} element is kept.
+function parseRecordsLoose(raw) {
+  const text = String(raw || '').replace(/^```(?:json)?/i, '').replace(/```\s*$/, '');
+  const start = text.indexOf('[');
+  if (start < 0) return [];
+  try { const whole = JSON.parse(text.slice(start, text.lastIndexOf(']') + 1)); if (Array.isArray(whole)) return whole; } catch (_) { /* salvage below */ }
+  const out = [];
+  let depth = 0;
+  let objStart = -1;
+  let inStr = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{') { if (depth === 0) objStart = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && objStart >= 0) { try { out.push(JSON.parse(text.slice(objStart, i + 1))); } catch (_) { /* skip */ } objStart = -1; } }
+  }
+  return out;
+}
 
 function verifyAgainstPages(records, pages) {
   const byN = new Map(pages.map((p) => [p.n, String(p.text).replace(/\s+/g, ' ')]));
@@ -65,5 +102,7 @@ function fillAreaDefinitions(records, pages) {
 }
 
 module.exports.fillAreaDefinitions = fillAreaDefinitions;
+module.exports.chunkPages = chunkPages;
+module.exports.parseRecordsLoose = parseRecordsLoose;
 module.exports.EXTRACTION_SYSTEM = EXTRACTION_SYSTEM;
 module.exports.verifyAgainstPages = verifyAgainstPages;

@@ -5,13 +5,13 @@ const { readResponseBuffer } = require('./boundedResponse');
 // Fetches a PDF as a raw buffer — separate from extraction so a fetch
 // failure (network/404) and an extraction failure (corrupt/scanned PDF)
 // are distinguishable errors for the caller to record separately.
-async function fetchPdfBuffer(url) {
+async function fetchPdfBuffer(url, maxBytes = 25 * 1024 * 1024) {
   const res = await safeFetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' },
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`pdf fetch failed: ${res.status}`);
-  return readResponseBuffer(res, 25 * 1024 * 1024, 'PDF');
+  return readResponseBuffer(res, maxBytes, 'PDF');
 }
 
 // PDF is a first-class material: text-based PDFs go through the normal AI
