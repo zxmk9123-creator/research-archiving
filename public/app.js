@@ -837,6 +837,10 @@ function normalizeAnswerMarkdown(rawAnswer) {
 // block is {type, lines} (or {type:'ordered-merged', items} — see the
 // merge pass in renderAnswerHtml below). Dispatches purely on `type`,
 // already determined while chunking — no re-detection from re-joined text.
+function renderCellHtml(cell, sources) {
+  return String(cell).split(/<br\s*\/?>/gi).map((p) => renderInlineAnswerText(p.trim(), sources)).filter(Boolean).join('<br>');
+}
+
 function renderAnswerBlock(block, sources, orderedStart = 1) {
   if (block.type === 'heading') {
     return block.lines.map((l) => `<h3 class="ai-answer-heading">${renderInlineAnswerText(l.replace(/^#{1,6}\s+/, ''), sources)}</h3>`).join('');
@@ -860,8 +864,8 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
     if (rows.length >= 2 && isSeparatorRow(rows[1])) {
       const header = rows[0];
       const body = rows.slice(2);
-      return `<table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderInlineAnswerText(c, sources)}</th>`).join('')}</tr></thead><tbody>${
-        body.map((r) => `<tr>${r.map((c) => `<td>${renderInlineAnswerText(c, sources)}</td>`).join('')}</tr>`).join('')
+      return `<table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
+        body.map((r) => `<tr>${r.map((c) => `<td>${renderCellHtml(c, sources)}</td>`).join('')}</tr>`).join('')
       }</tbody></table>`;
     }
     return `<p class="ai-answer-p">${block.lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
@@ -967,7 +971,9 @@ function renderAnswerHtml(rawAnswer, sources) {
     return parts.map((p, i) => (i % 2 ? renderChartHtml(p) : (p.trim() ? renderAnswerHtml(p, sources) : ''))).join('');
   }
   const normalized = normalizeAnswerMarkdown(text).trim();
-  const lines = normalized.split('\n');
+  // The model sometimes emits literal <br>: inside a table cell it means a line
+  // break (rendered in the cell below); elsewhere it just separates lines.
+  const lines = normalized.split('\n').flatMap((l) => (/^\s*\|.*\|\s*$/.test(l) ? [l] : l.split(/<br\s*\/?>/gi)));
   const rawBlocks = [];
   let current = [];
   let currentType = null;
