@@ -1035,7 +1035,7 @@ function enrichChartJson(chart, roster) {
 }
 // A company-wide total ("전체", "전사 합계") must never share an axis with the single
 // sites it sums; the total is dropped from the chart (it stays in the table/text).
-const TOTAL_LABEL = /^\s*(전체|전사|합계|총계|총합|total|overall|all)\b|^\s*(전체|전사|합계|총계|총합)(?![A-Za-z가-힣])/i;
+const TOTAL_LABEL = /^\s*(전체|전사|합계|총계|총합|total|overall|all|grand total)(\s*(합계|총계|계|total))?\s*([(（][^)）]*[)）])?\s*$/i;
 function dropTotalFromSiteChart(chart) {
   if (!chart || !Array.isArray(chart.labels) || chart.labels.length < 3 || !Array.isArray(chart.series)) return chart;
   const idx = chart.labels.map((l, i) => (TOTAL_LABEL.test(String(l)) ? i : -1)).filter((i) => i >= 0);

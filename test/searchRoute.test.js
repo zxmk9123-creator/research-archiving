@@ -1305,3 +1305,9 @@ test('dropTotalFromSiteChart removes company-wide total from a site chart', () =
   assert.deepEqual(out.labels, ['Neste 로테르담', 'Neste 싱가포르']);
   assert.deepEqual(out.series[0].data, [1, 2]);
 });
+
+test('dropTotalFromSiteChart keeps companies whose names start with Total/All', () => {
+  const { dropTotalFromSiteChart } = require('../server/routes/search');
+  const c = { labels: ['A', 'All Nippon Airways', 'Total Energies'], series: [{ name: 's', data: [1, 2, 3] }] };
+  assert.equal(dropTotalFromSiteChart(c).labels.length, 3);
+});
