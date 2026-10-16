@@ -1170,7 +1170,7 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       }
     } catch (_) { /* keep names as extracted */ }
     trace.push(`before_build records=${records.length} entities=${[...new Set(records.map((r) => r.entity))].join(',')}`);
-    const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
+    const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density, topN: req.tableOnly ? req.topN : null, only: req.tableOnly });
     trace.push(dataset ? 'built' : 'build_returned_null');
     if (dataset) {
       dataset.extraCandidates = extraCandidates;
@@ -1234,6 +1234,14 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     const have = (dataset.entities || []).map((n) => String(n).toLowerCase());
     const contradicts = (l) => /(미공시|명시되지|확인되지|수치가 없|수치 미)/.test(l) && have.some((n) => l.toLowerCase().includes(n));
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l) && !/환산|변환|밀도|conversion|density/i.test(l) && !contradicts(l)).join('\n').trim();
+  }
+  if (dataset && dataset.only) {
+    // A ranking / "table only" request: the answer IS the code-built table and its one-line note — no model prose,
+    // no appended extras, no extra chart.
+    const only = dataset.markdown;
+    const citedOnly = extractCitedIndices(only, candidates.length);
+    const answerOnly = moveCitationsAfterPunctuation(citedOnly.length ? remapCitationMarkers(only, citedOnly) : only);
+    return { answer: answerOnly, sources: (citedOnly.length ? citedOnly.map((i) => candidates[i - 1]) : candidates).map((c) => ({ id: c.id, title: c.title, source: c.source_name || null, published_at: c.published_at })) };
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
@@ -1414,6 +1422,9 @@ async function handleSearch(req, res, signal) {
   const datasetTrace = [];
   const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace);
   datasetPromise.catch(() => {});
+  const onlyBlock = requestCompliance.parseRequest(question).tableOnly
+    ? '\n\n[출력 형식: 사용자가 도표(표)만 요청했다. 표 하나와 한 줄 주석 외에는 쓰지 않는다. 해설·배경·전략·부록·추가 업체 목록은 쓰지 않는다.]'
+    : '';
   const scopeBlock = quick
     ? '\n\n[범위: 핵심 요약 모드 — 사용자가 빠른 요약을 선택했다. 상위 10개 안팎의 주요 대상만 간결하게 정리하고 나머지는 한 줄로 언급한다.]'
     : '';
@@ -1425,7 +1436,7 @@ async function handleSearch(req, res, signal) {
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}`;
 
   if (!streaming) {
     let text;
@@ -1478,10 +1489,13 @@ async function handleSearch(req, res, signal) {
   // model has written its first paragraph), so the system table/chart can lead the stream.
   let datasetSettled = !datasetPending; // other requests stream straight through
   let held = '';
+  let datasetOnly = false; // a ranking / table-only answer: the model's own text is never shown
   const flushed = datasetPromise.then((d) => {
     datasetSettled = true;
+    datasetOnly = Boolean(d && d.only);
     if (d) sendEvent('token', { delta: `${d.markdown}\n\n` });
-    if (held) { sendEvent('token', { delta: held }); held = ''; }
+    if (held && !datasetOnly) sendEvent('token', { delta: held });
+    held = '';
     return d;
   });
   let rawText;
@@ -1490,7 +1504,7 @@ async function handleSearch(req, res, signal) {
   try {
     const result = await provider.callProviderWithFallbackStreaming(
       { system: SYSTEM_PROMPT, user },
-      (delta) => { if (datasetSettled) sendEvent('token', { delta }); else held += delta; },
+      (delta) => { if (datasetSettled) { if (!datasetOnly) sendEvent('token', { delta }); } else held += delta; },
       { signal, lane: 'chat' }
     );
     rawText = result.text;

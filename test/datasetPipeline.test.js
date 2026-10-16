@@ -160,3 +160,29 @@ test('buildDataset: the same figure stated twice is one row; entities list names
   assert.equal(ds.table.split('\n').filter((l) => /^\| KLK /.test(l)).length, 1);
   assert.deepEqual(ds.entities.sort(), ['IOI', 'KLK', 'SD Guthrie']);
 });
+
+test('ranking: Top-N companies, one row each (stated total, else site sum, else plan), countries/institutions excluded', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const rc = require('../server/lib/requestCompliance');
+  const q = '글로벌 SAF 플랜트 Capacity 기준 Top3 기업의 생산능력만 도표로 제작해줘';
+  const req = rc.parseRequest(q);
+  assert.equal(req.topN, 3);
+  assert.equal(req.tableOnly, true);
+  const r = (entity, amount, extra = {}) => ({ entity, site: null, status: '가동', year: 2025, source: 1, group: 'mass', amount, basis: '직접', original: `${amount} 톤`, tons: amount, metric: '생산능력', etype: '기업', ...extra });
+  const recs = [
+    r('Neste', 1000000, { site: 'Rotterdam' }), r('Neste', 1000000, { site: 'Singapore' }),
+    r('Neste', 6800000, { status: '목표', year: 2027 }),
+    r('Eni', 3000000), r('World Energy', 300000),
+    r('미국', 9e9, { etype: '국가' }), r('IATA', 9e9, { etype: '기관' }),
+    r('Repsol', 500000, { status: '계획', year: 2028 }),
+  ];
+  const fit = dp2.recordsForQuestion(recs, q, null);
+  assert.ok(!fit.some((x) => x.entity === '미국' || x.entity === 'IATA'));
+  const ds = dp2.buildDataset(fit, [], { topN: req.topN, only: true });
+  const rows = ds.table.split('\n').slice(2);
+  assert.equal(rows.length, 3);
+  assert.match(rows[0], /^\| 1 \| Eni /);
+  assert.match(rows[1], /^\| 2 \| Neste .*거점 합산 2곳/);
+  assert.match(rows[1], /2,000,000/);
+  assert.equal(ds.only, true);
+});

@@ -27,7 +27,15 @@ function parseRequest(question) {
   else if (/도넛|donut/i.test(q)) chartType = 'donut';
   else if (/원형|파이|pie/i.test(q)) chartType = 'pie';
   else if (/산점도|scatter/i.test(q)) chartType = 'scatter';
+  // "Top10 기업", "상위 5개 업체" -> a ranking of N; "생산능력만 도표로" -> the table and nothing else
+  const topMatch = q.match(/(?:top\s*|상위\s*)(\d{1,2})(?![0-9])|(\d{1,2})\s*(?:대|위까지|개)\s*(?:기업|업체|회사)/i);
+  const topN = topMatch ? Number(topMatch[1] || topMatch[2]) : null;
+  const wantsChartWord = CHART_WORDS.test(q);
+  const wantsTableWord = TABLE_WORDS.test(q);
+  const onlyWord = /(만\s*(?:도표|표|정리|작성|제작|보여|알려)|(?:도표|표)\s*(?:로)?\s*만)/.test(q);
   return {
+    topN,
+    tableOnly: wantsTableWord && !wantsChartWord && (onlyWord || Boolean(topN)),
     wantsChart: CHART_WORDS.test(q),
     wantsTable: TABLE_WORDS.test(q),
     // ANY visual request: the answer must contain a table or a chart (see ensureVisual in routes/search.js)

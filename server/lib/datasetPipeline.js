@@ -52,6 +52,7 @@ const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NA
 function recordsForQuestion(records, question, density = null) {
   const q = String(question || '');
   const historical = freshness.wantsHistorical(q);
+  const wantsCompanies = /(기업|업체|회사|company|companies|producer|생산자)/i.test(q);
   const wantsMoney = MONEY_Q.test(q);
   const wantsArea = /(면적|식재|헥타르|hectare|planted|landbank)/i.test(q);
   const wantsCap = CAP_Q.test(q);
@@ -60,6 +61,8 @@ function recordsForQuestion(records, question, density = null) {
     .filter((r) => {
       if (!historical && freshness.isOutdated(r.pubAt)) return false; // outdated facts never reach an answer
       if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      // a company question lists companies: countries and other non-company entities (entity_type) are out
+      if (wantsCompanies && (r.etype === '국가' || r.etype === '기관') && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       if (r.group === 'area') return wantsArea;
       if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
@@ -223,6 +226,8 @@ function chartBasis(records, { unitTons = false, density = null } = {}) {
   return { group, valueIn: (r) => valueIn(r, group) };
 }
 
+const asOfCell = (r) => (r.year ? `${r.year}년` : yearOf(r.pubAt) ? `${yearOf(r.pubAt)}년 발표` : '-');
+
 // ---- time and scope ---------------------------------------------------------------
 const yearOf = (d) => { const t = d ? new Date(d) : null; return t && !Number.isNaN(t.getTime()) ? t.getFullYear() : 0; };
 const asOfYear = (r) => r.year || yearOf(r.pubAt);
@@ -252,11 +257,64 @@ const newerCurrent = (a, b) => (asOfYear(a) - asOfYear(b)) || (pubTime(a) - pubT
 const furtherFuture = (a, b) => ((a.year || 0) - (b.year || 0)) || (pubTime(a) - pubTime(b)) || (a.amount - b.amount);
 
 // requiredNames: roster entities that have supplied materials; any without a record gets an explicit "미공시" row.
-function buildDataset(records, requiredNames = [], { unitTons = false, density = null, nowYear = new Date().getFullYear() } = {}) {
+// RANKING ("Top10 기업의 생산능력만 도표로"): one row per COMPANY, the largest first. A company's own stated total
+// is used when there is one, otherwise its current site figures are summed (and the row says so); a company with no
+// current figure is ranked by its furthest plan/target and labelled as such. Nothing else is written.
+function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
+  const byEntity = new Map();
+  for (const r of records) {
+    if (valueOf(r) === null || valueOf(r) === undefined) continue;
+    const k = r.entity.toLowerCase();
+    if (!byEntity.has(k)) byEntity.set(k, []);
+    byEntity.get(k).push(r);
+  }
+  const entries = [];
+  for (const recs of byEntity.values()) {
+    const entity = recs[0].entity;
+    const cur = recs.filter(isCurrent);
+    const totals = cur.filter((r) => !r.site).sort((a, b) => newerCurrent(b, a));
+    const siteRows = bucketRows(cur.filter((r) => r.site), valueOf, newerCurrent);
+    let entry = null;
+    if (totals.length) {
+      const t = totals[0];
+      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}`, sources: [t.source], country: t.country };
+    } else if (siteRows.length) {
+      const sum = siteRows.reduce((a, r) => a + valueOf(r), 0);
+      entry = { entity, value: sum, state: `현재 ${asOfCell(siteRows.sort((a, b) => newerCurrent(b, a))[0])}`, how: `거점 합산 ${siteRows.length}곳 (${siteRows.map((r) => r.site).join(' + ')})`, sources: siteRows.map((r) => r.source), country: siteRows[0].country };
+    } else {
+      const fut = recs.filter((r) => isFuture(r, nowYear)).sort((a, b) => furtherFuture(b, a))[0];
+      if (!fut) continue;
+      entry = { entity, value: valueOf(fut), state: `${STATUS_LABEL[fut.status]} ${fut.year ? `${fut.year}년` : asOfCell(fut)}`, how: `${fut.site ? `${fut.site} · ` : '전사 · '}원문 ${fut.original}`, sources: [fut.source], country: fut.country };
+    }
+    entries.push(entry);
+  }
+  entries.sort((a, b) => b.value - a.value);
+  const top = entries.slice(0, topN);
+  if (!top.length) return null;
+  const metric = (() => {
+    const counts = new Map();
+    for (const r of records) if (r.metric) counts.set(r.metric, (counts.get(r.metric) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '수치';
+  })();
+  const cite = (e) => [...new Set(e.sources)].map((s) => `[${s}]`).join('');
+  const lines = [
+    `| 순위 | 기업 | ${metric} (${unitLabel}) | 상태·기준 | 산정 | 출처 |`,
+    '| --- | --- | --- | --- | --- | --- |',
+    ...top.map((e, i) => `| ${i + 1} | ${e.entity}${e.country ? ` (${e.country})` : ''} | ${fmtNum(e.value)} | ${e.state} | ${e.how} | ${cite(e)} |`),
+  ];
+  const note = `※ 현재(가동) 값 기준이며 현재 값이 없는 기업은 계획·목표 값을 해당 상태로 표기했습니다.${top.length < topN ? ` 자료에서 수치가 확인된 기업은 ${top.length}곳입니다.` : ''}`;
+  return { entities: top.map((e) => e.entity), table: lines.join('\n'), chart: null, charts: [], markdown: `${lines.join('\n')}\n\n${note}`, records: top.length, only: true };
+}
+
+function buildDataset(records, requiredNames = [], { unitTons = false, density = null, nowYear = new Date().getFullYear(), topN = null, only = false } = {}) {
   if (records.length < 3) return null;
   const basis = chartBasis(records, { unitTons, density });
   const unitLabel = GROUP_LABEL[basis.group];
   const valueOf = basis.valueIn;
+  if (only || topN) {
+    const ranked = buildRanking(records, valueOf, unitLabel, topN || 10, nowYear);
+    if (ranked) return ranked;
+  }
   const statusOrder = { 가동: 0, 건설중: 1, 계획: 2, 목표: 3 };
   const seenRows = new Set();
   const sorted = records.slice().sort((a, b) => a.entity.localeCompare(b.entity) || (a.site || '').localeCompare(b.site || '') || (statusOrder[a.status] - statusOrder[b.status]) || ((b.year || 0) - (a.year || 0)))
@@ -267,7 +325,6 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
     return v === null || v === undefined ? '- (다른 단위 · 원문 참조)' : fmtNum(v);
   };
   const stateOf = (r) => `${STATUS_LABEL[r.status]}${isStalePlan(r, nowYear) ? ' · 기준 경과' : ''}`;
-  const asOfCell = (r) => (r.year ? `${r.year}년` : yearOf(r.pubAt) ? `${yearOf(r.pubAt)}년 발표` : '-');
   const lines = [
     `| 대상 | 거점·범위 | 상태 | 기준 | 수치 (${unitLabel}) | 원문 표기 | 출처 |`,
     '| --- | --- | --- | --- | --- | --- | --- |',
