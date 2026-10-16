@@ -1302,7 +1302,7 @@ async function handleSearch(req, res, signal) {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
       if ((intentForFresh.type !== 'general' || datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question)) && !freshness.wantsHistorical(question)) {
-        const fresh = candidates.filter((c) => !freshness.isOutdated(c.published_at));
+        const fresh = candidates.filter((c) => !freshness.candidateOutdated(c));
         if (fresh.length !== candidates.length) console.log(`ai-search freshness dropped=${candidates.length - fresh.length} kept=${fresh.length}`);
         candidates = fresh; // an empty remainder is reported as insufficient evidence, never filled with old data
       }

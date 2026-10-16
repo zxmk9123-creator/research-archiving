@@ -27,3 +27,8 @@ test('datasetPipeline drops outdated facts unless the question is historical', (
   assert.equal(dp.recordsForQuestion([old, fresh], 'Wilmar 생산능력 표로', null).length, 1);
   assert.equal(dp.recordsForQuestion([old, fresh], '2023년 Wilmar 생산능력 표로', null).length, 2);
 });
+test('candidateOutdated: undated material judged by the years in its own text', () => {
+  assert.equal(f.candidateOutdated({ title: 'Annual report 2022 output', summary: '' }, now), true);
+  assert.equal(f.candidateOutdated({ title: 'KLK 2026년 6월 분기 실적', summary: '' }, now), false);
+  assert.equal(f.candidateOutdated({ title: 'x', published_at: '2023-01-01' }, now), true);
+});

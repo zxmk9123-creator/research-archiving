@@ -49,3 +49,12 @@ test('numberCheck: chart values are checked in the chart\'s own unit; slips are 
   const same = nc.guardChartNumbers({ unit: '점', series: [{ name: 's', data: [1] }] }, cands, mt);
   assert.deepEqual(same.chart.series[0].data, [1]);
 });
+
+test('uppercase MT is metric tonnes (not megatonnes): 1,085,923 MT is read as 1,085,923 t', () => {
+  const nc2 = require('../server/lib/numberCheck');
+  const q = nc2.extractQuantities('연간 누적 생산량은 1,085,923 MT였습니다')[0];
+  assert.equal(q.cls, 'mass');
+  assert.equal(q.value, 1085923);
+  const mega = nc2.extractQuantities('1.2 Mt/a')[0];
+  assert.equal(mega.value, 1200000);
+});

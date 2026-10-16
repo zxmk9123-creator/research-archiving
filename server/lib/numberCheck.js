@@ -32,7 +32,7 @@ const KO_UNITS = [
 ];
 const EN_UNITS = [
   [/^(?:metric\s+)?tonnes?\b|^(?:metric\s+)?tons?\b|^t\b/i, 1, 'mass'],
-  [/^kt\b/i, 1e3, 'mass'], [/^Mt\b/, 1e6, 'mass'],
+  [/^kt\b/i, 1e3, 'mass'], [/^Mt\b/, 1e6, 'mass'], [/^MT\b/, 1, 'mass'], // MT = metric tonnes (palm-industry convention); Mt = megatonnes
   [/^mmgy\b/i, 1e6, 'gal'], [/^gal(?:lons?)?\b/i, 1, 'gal'],
   [/^b\/d\b|^bpd\b/i, 1, 'bpd'], [/^bbls?\b|^barrels?\b/i, 1, 'bbl'],
   [/^(?:liters?|litres?)\b|^l\b/i, 1, 'liter'], [/^m³|^m3\b/i, 1e3, 'liter'],

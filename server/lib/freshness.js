@@ -27,4 +27,9 @@ function textLooksOutdated(text, now = new Date()) {
   return years.length > 0 && Math.max(...years) <= now.getFullYear() - 2;
 }
 
-module.exports = { MAX_AGE_DAYS, wantsHistorical, isOutdated, textLooksOutdated };
+// A material is outdated by its published date; an undated one by the years its own text names.
+const candidateOutdated = (c, now = new Date()) => (c.published_at
+  ? isOutdated(c.published_at, now)
+  : textLooksOutdated(`${c.title || ''} ${c.summary || ''} ${c.ai_summary || ''}`, now));
+
+module.exports = { candidateOutdated, MAX_AGE_DAYS, wantsHistorical, isOutdated, textLooksOutdated };
