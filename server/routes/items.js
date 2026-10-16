@@ -45,6 +45,33 @@ router.post('/backfill-facts', requireAuth, async (req, res) => {
   const r = await itemFacts.runBackfill({ limit: req.body && req.body.limit });
   res.status(r.started ? 202 : 409).json(r);
 });
+// Annual-report extraction TRIAL (lib/annualReport.js): downloads a PDF, selects the few pages that state
+// capacity/output/area figures without any AI call, extracts only those pages, verifies every figure against
+// its page. Returns the result for review; stores nothing.
+router.post('/annual-report-trial', requireAuth, async (req, res) => {
+  try {
+    const { url, entity } = req.body || {};
+    if (!/^https:\/\//.test(String(url || ''))) return res.status(400).json({ error: 'https url required' });
+    const { fetchPdfBuffer, extractPdfPages } = require('../lib/pdfExtract');
+    const ar = require('../lib/annualReport');
+    const provider = require('../lib/ai/provider');
+    const pages = await extractPdfPages(await fetchPdfBuffer(url));
+    const selected = ar.selectPages(pages);
+    const user = selected.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n');
+    const result = await provider.callProviderWithFallback({ system: ar.EXTRACTION_SYSTEM, user: `[Company] ${entity || ''}\n\n${user}` });
+    const text = String(result.text || '').replace(/^```(?:json)?/i, '').replace(/```$/, '');
+    let records = [];
+    try { records = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); } catch (_) { /* unparsable */ }
+    const { kept, dropped } = ar.verifyAgainstPages(Array.isArray(records) ? records : [], selected);
+    res.json({
+      totalPages: pages.length, selectedPages: selected.map((p) => ({ n: p.n, score: Math.round(p.score) })),
+      sentChars: user.length, totalChars: pages.reduce((a, p) => a + p.text.length, 0),
+      extracted: records.length, verified: kept.length, dropped, records: kept,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.post('/classify-entities', requireAuth, async (req, res) => {
   const r = await require('../lib/itemFacts').classifyEntities();
   res.status(r.started ? 202 : 409).json(r);

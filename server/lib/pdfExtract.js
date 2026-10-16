@@ -33,4 +33,15 @@ async function extractPdfText(buffer) {
   }
 }
 
-module.exports = { fetchPdfBuffer, extractPdfText };
+// Per-page text (page numbers as printed in the PDF's own page index, 1-based) for page selection.
+async function extractPdfPages(buffer) {
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getText();
+    return (result.pages || []).map((p, i) => ({ n: p.num || i + 1, text: p.text || '' }));
+  } finally {
+    await parser.destroy();
+  }
+}
+
+module.exports = { fetchPdfBuffer, extractPdfText, extractPdfPages };
