@@ -211,7 +211,7 @@ function guardAnswerNumbers(text, candidates, extractCitedIndices, materialText)
     if (/^```/.test(line.trim())) { inChart = !inChart; return line; }
     if (inChart || !/\d/.test(line)) return line;
     // a line that states the conversion factors/assumptions is method text, not a data claim
-    if (/환산|conversion|밀도|density|가정|assum/i.test(line)) return line;
+    if (/환산|변환|conversion|밀도|density|가정|assum/i.test(line)) return line;
     const cited = extractCitedIndices(line, candidates.length);
     const pools = cited.length ? poolsOf(cited.map((i) => materialText(candidates[i - 1]))) : allPools;
     // a cited material set that lacks a class entirely is verified against all materials instead

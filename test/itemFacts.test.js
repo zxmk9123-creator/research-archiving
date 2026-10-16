@@ -92,3 +92,22 @@ test('hasQuantity: only unit-bearing quantities count (years, percentages and ba
   assert.equal(itemFacts.hasQuantity('연 120만 톤'), true);
   assert.equal(itemFacts.hasQuantity('투자 $850 million'), true);
 });
+
+test('loadFactsByTopic: the whole archive\'s stored facts for a topic, numbered after the chat candidates', async () => {
+  const { calls, restore } = mockPool((text) => {
+    if (text.includes('FROM items i LEFT JOIN sources')) return { rows: [{ id: 70, title: 'Chevron Geismar', summary: 's' }, { id: 71, title: 'Total Grandpuits', summary: 's' }] };
+    if (text.includes('FROM item_facts WHERE item_id = ANY')) return { rows: [
+      { item_id: 70, entity: 'Chevron', site: 'Geismar', metric: '생산능력', status: '가동', year: null, grp: 'volume', amount: 1.28e9, basis: '환산(갤런→리터)', original: '340 million gallons' },
+      { item_id: 71, entity: 'TotalEnergies', site: 'Grandpuits', metric: '생산능력', status: '계획', year: 2026, grp: 'mass', amount: 230000, basis: '직접', original: '230 kt' },
+    ] };
+    return { rows: [] };
+  });
+  try {
+    const r = await itemFacts.loadFactsByTopic(['saf'], { excludeIds: [1, 2], baseIndex: 12 });
+    assert.deepEqual(r.records.map((x) => [x.entity, x.source]), [['Chevron', 13], ['TotalEnergies', 14]]);
+    assert.deepEqual(r.items.map((i) => i.id), [70, 71]);
+    assert.deepEqual(calls[0].params[0], ['%saf%']);
+    assert.deepEqual(calls[0].params[1], [1, 2]);
+    assert.deepEqual((await itemFacts.loadFactsByTopic([], {})).records, []);
+  } finally { restore(); }
+});

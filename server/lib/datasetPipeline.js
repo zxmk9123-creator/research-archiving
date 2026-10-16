@@ -115,11 +115,20 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     const direct = nc.extractQuantities(materialText(candidates[source - 1])).filter((m) => m.cls === q.cls);
     // the figure must literally exist in the cited material (same class, within 1.5%)
     if (!direct.some((m) => Math.abs(m.value - q.value) <= Math.max(m.value, q.value) * 0.015)) continue;
-    let amount = q.value; // in the group's base unit
-    let basis = '직접';
+    // a rate stated per day/month is annualised so every figure is "per year"; per-hour or
+    // other rates cannot be placed on the same footing and are skipped
+    const periodText = `${r.period || ''} ${unit}`;
+    let annual = 1;
+    let annualNote = '';
+    if (/\/\s*(?:일|day|d)(?![A-Za-z가-힣])|일일|daily|per day/i.test(periodText) && cls !== 'bpd') { annual = 365; annualNote = '일→연 ×365'; }
+    else if (/\/\s*(?:월|month)|월간|monthly/i.test(periodText)) { annual = 12; annualNote = '월→연 ×12'; }
+    else if (/\/\s*(?:시간|hour|h|분|min|초|sec)(?![A-Za-z가-힣])/i.test(periodText)) continue;
+    let amount = q.value * annual; // in the group's base unit
+    let basis = annualNote ? `환산(${annualNote})` : '직접';
     if (group === 'volume') {
-      amount = q.value * (cls === 'gal' ? LITERS.gal : cls === 'bbl' ? LITERS.bbl : cls === 'bpd' ? LITERS.bpd : 1);
-      basis = `환산(${cls === 'gal' ? '갤런' : cls === 'bbl' ? '배럴' : cls === 'bpd' ? 'b/d×365' : '리터'}→리터)`;
+      const perUnit = cls === 'gal' ? LITERS.gal : cls === 'bbl' ? LITERS.bbl : cls === 'bpd' ? LITERS.bpd : 1;
+      amount = q.value * annual * perUnit;
+      if (cls !== 'liter') basis = `환산(${cls === 'gal' ? '갤런' : cls === 'bbl' ? '배럴' : 'b/d×365'}→리터${annualNote ? `, ${annualNote}` : ''})`;
     }
     if (!(amount > 0)) continue;
     const status = Object.prototype.hasOwnProperty.call(STATUS_RANK, r.status) ? r.status : '목표';

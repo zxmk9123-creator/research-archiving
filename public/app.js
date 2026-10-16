@@ -952,7 +952,7 @@ function renderChartHtml(jsonText) {
   }
   const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
   let vbH = 260;
-  const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 ${vbH}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
+  const wrap = (svg, legend) => `<figure class="ai-chart"><button type="button" class="ai-chart-save" title="이미지(PNG)로 저장" aria-label="차트를 PNG 이미지로 저장">PNG</button>${caption}<svg viewBox="0 0 560 ${vbH}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
 
   // combine:"sum" + groups: parts of ONE entity that ADD UP (a company's plants,
@@ -3964,3 +3964,56 @@ document.addEventListener('click', async (e) => {
   document.addEventListener('mousemove', (e) => { if (card && card.classList.contains('show') && targetOf(e)) place(e); });
   document.addEventListener('mouseout', (e) => { if (card && targetOf(e)) card.classList.remove('show'); });
 })();
+
+// Chart -> PNG image (client-side): the figure's SVG is drawn onto a white canvas with its
+// title above and legend below, then downloaded. Export colours are fixed (dark text on white)
+// so the image reads the same whatever theme the page is in.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('.ai-chart-save');
+  if (!btn) return;
+  const fig = btn.closest('.ai-chart');
+  const svg = fig && fig.querySelector('svg');
+  if (!svg) return;
+  const vb = (svg.getAttribute('viewBox') || '0 0 560 260').split(/\s+/).map(Number);
+  const W = vb[2], H = vb[3];
+  const scale = 2;
+  const title = (fig.querySelector('figcaption') || {}).textContent || '';
+  const legend = Array.from(fig.querySelectorAll('.ai-chart-legend span')).map((sp) => ({ text: sp.textContent.trim(), color: (sp.querySelector('i') || {}).style && sp.querySelector('i').style.background }));
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', String(W * scale));
+  clone.setAttribute('height', String(H * scale));
+  clone.style.color = '#222';
+  clone.querySelectorAll('[stroke*="var("]').forEach((n) => n.setAttribute('stroke', '#ffffff'));
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`;
+  const img = new Image();
+  img.onload = () => {
+    const top = title ? 34 : 8;
+    const bottom = legend.length ? 34 : 8;
+    const canvas = document.createElement('canvas');
+    canvas.width = W * scale;
+    canvas.height = H * scale + (top + bottom) * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#222222';
+    ctx.font = '600 14px sans-serif';
+    if (title) ctx.fillText(title.replace(/\s+/g, ' ').trim(), 12, 22);
+    ctx.drawImage(img, 0, top, W, H);
+    ctx.font = '12px sans-serif';
+    let x = 12;
+    legend.forEach((l) => {
+      ctx.fillStyle = l.color || '#888';
+      ctx.fillRect(x, top + H + 12, 10, 10);
+      ctx.fillStyle = '#222222';
+      ctx.fillText(l.text, x + 15, top + H + 21);
+      x += 30 + ctx.measureText(l.text).width;
+    });
+    const a = document.createElement('a');
+    a.download = `chart-${new Date().toISOString().slice(0, 10)}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  };
+  img.src = url;
+});

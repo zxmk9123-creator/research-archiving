@@ -11,6 +11,7 @@
 const { extractQuantities, unitMultiplier } = require('./numberCheck');
 
 const CHART_WORDS = /(그래프|차트|시각화|도식|막대|꺾은선|꺾은 선|선 그래프|원형|파이|도넛|산점도|면적|영역 그래프|chart|graph|plot|visuali[sz])/i;
+const VISUAL_WORDS = /(시각|도식|다이어그램|이미지로|그림으로|한눈에|chart|graph|plot|diagram|visuali)/i;
 const TABLE_WORDS = /(표로|표\s*(형태|형식|정리|만들|작성)|테이블|table|도표)/i;
 const COMPLETENESS_RE = /(누락\s*없|빠짐\s*없|빠뜨리지|전수|모든|전체|전부|all\b|every|complete|exhaustive|entire)/i;
 const TONS_RE = /(톤\s*(단위|으로|기준)|단위를?\s*톤|in\s+(metric\s+)?tonn?es?|in\s+tons)/i;
@@ -29,6 +30,8 @@ function parseRequest(question) {
   return {
     wantsChart: CHART_WORDS.test(q),
     wantsTable: TABLE_WORDS.test(q),
+    // ANY visual request: the answer must contain a table or a chart (see ensureVisual in routes/search.js)
+    wantsVisual: CHART_WORDS.test(q) || TABLE_WORDS.test(q) || VISUAL_WORDS.test(q),
     chartType,
     unitTons: TONS_RE.test(q),
     completeness: COMPLETENESS_RE.test(q),
@@ -143,4 +146,6 @@ function ensureChartPresent(text, req) {
   return { text: lines.join('\n'), built: true };
 }
 
-module.exports = { enforceCompleteChart, parseRequest, applyChartCompliance, chartFromTable, ensureChartPresent, COMPLETENESS_RE };
+const isVisualWord = (w) => CHART_WORDS.test(w) || TABLE_WORDS.test(w) || VISUAL_WORDS.test(w);
+
+module.exports = { isVisualWord, enforceCompleteChart, parseRequest, applyChartCompliance, chartFromTable, ensureChartPresent, COMPLETENESS_RE };

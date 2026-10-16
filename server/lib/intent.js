@@ -14,6 +14,8 @@ const AGGREGATE_CUE = /(들[의은이을과와도만]?(?=\s|$)|주요|글로벌|
 const COMPLETENESS = /(누락\s*없|빠짐\s*없|빠뜨리지|전수|모든|전체|전부|\ball\b|every|complete|exhaustive|entire)/i;
 const CAPACITY = /(capa|capacity|생산\s*능력|용량|생산량|설비\s*규모|처리\s*능력)/i;
 
+const VISUAL = /(그래프|차트|시각|도식|다이어그램|표로|표\s*(형태|형식|정리|만들|작성)|테이블|도표|chart|graph|plot|table|visuali)/i;
+
 function mentions(question, company) {
   const q = String(question || '').toLowerCase();
   return company.names.some((n) => {
@@ -31,8 +33,9 @@ function classifyIntent(question, roster = []) {
   if (focus.length === 1) return { type: 'entity', focus };
   if (focus.length >= 2) return { type: 'peers', focus };
   const q = String(question || '');
-  const collective = (ENTITY_NOUN.test(q) && AGGREGATE_CUE.test(q)) || (COMPLETENESS.test(q) && (ENTITY_NOUN.test(q) || CAPACITY.test(q)));
+  // a visual quantity request about plants/companies with no name is a whole-field request even without an aggregate word
+  const collective = (ENTITY_NOUN.test(q) && AGGREGATE_CUE.test(q)) || (COMPLETENESS.test(q) && (ENTITY_NOUN.test(q) || CAPACITY.test(q))) || (ENTITY_NOUN.test(q) && CAPACITY.test(q) && VISUAL.test(q));
   return { type: collective ? 'collective' : 'general', focus: [] };
 }
 
-module.exports = { classifyIntent, mentions };
+module.exports = { classifyIntent, mentions, ENTITY_NOUN, VISUAL };

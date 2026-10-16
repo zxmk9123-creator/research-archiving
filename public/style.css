@@ -1217,3 +1217,9 @@ ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: s
 .ai-scope-option input[type="radio"] { appearance: auto; -webkit-appearance: radio; flex: none; width: 15px; height: 15px; min-width: 0; margin: 2px 0 0; padding: 0; border: 0; box-shadow: none; background: none; accent-color: var(--accent, #2f6fed); }
 .ai-scope-option-body { flex: 1 1 auto; min-width: 0; }
 .ai-scope-meta { gap: 6px; }
+
+.ai-chart { position: relative; }
+.ai-chart-save { position: absolute; top: 0; right: 0; padding: 2px 8px; border: 1px solid var(--border, #e3e6ea); border-radius: 6px; background: var(--surface, #fff); color: var(--text-muted, #667085); font-size: 11px; font-weight: 600; line-height: 1.4; cursor: pointer; opacity: 0; transition: opacity .12s ease; }
+.ai-chart:hover .ai-chart-save, .ai-chart-save:focus-visible { opacity: 1; }
+.ai-chart-save:hover { color: var(--text, #1f2933); border-color: var(--accent, #2f6fed); }
+@media (hover: none) { .ai-chart-save { opacity: 1; } }

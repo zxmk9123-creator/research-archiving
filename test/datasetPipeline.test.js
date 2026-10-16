@@ -86,3 +86,14 @@ test('buildDataset: any quantity — with no known density volumes stay out of a
   assert.match(d.chart.title, /투자액/);
   assert.deepEqual(d.chart.series[0].data, [850e6, 600e6, 315e6]);
 });
+
+test('verifyRecords: per-day/per-month rates are annualised, per-hour rates skipped, liters need no conversion note', () => {
+  const src = [{ title: 'a', summary: 'Plant A 750 리터/일; Plant B 500 리터/월; Plant C 40 리터/시간; Plant D 1,000 백만 리터/년' }];
+  const v = dp.verifyRecords([
+    rec({ entity: 'A', value: 750, unit: '리터/일', source: 1 }),
+    rec({ entity: 'B', value: 500, unit: '리터/월', source: 1 }),
+    rec({ entity: 'C', value: 40, unit: '리터/시간', source: 1 }),
+    rec({ entity: 'D', value: 1000, unit: '백만 리터/년', source: 1 }),
+  ], src, mt, { density: null });
+  assert.deepEqual(v.map((x) => [x.entity, x.amount, x.basis]), [['A', 750 * 365, '환산(일→연 ×365)'], ['B', 6000, '환산(월→연 ×12)'], ['D', 1e9, '직접']]);
+});

@@ -63,3 +63,9 @@ test('dropNearDuplicates: syndicated copies of one story keep only the best-rank
   ];
   assert.deepEqual(searchRouter.dropNearDuplicates(rows).map((r) => r.id), [1, 3]);
 });
+
+test('intent: a visual quantity request about plants/companies with no name is a whole-field (collective) request', () => {
+  assert.equal(classifyIntent('SAF 플랜트 CAPA에 대해 시각화 자료로 정리해줘', roster).type, 'collective');
+  assert.equal(classifyIntent('업체별 생산량 표로 정리해줘', roster).type, 'collective');
+  assert.equal(classifyIntent('SAF 플랜트 알려줘', roster).type, 'general');
+});

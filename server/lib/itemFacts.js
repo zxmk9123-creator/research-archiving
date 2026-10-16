@@ -77,6 +77,36 @@ async function loadFactRecords(candidates) {
   return { records, statusById };
 }
 
+// DB-wide facts for a topic ("SAF", "팜유"...): every stored fact of every PUBLISHED item whose
+// text mentions one of the topic terms — so a quantity dataset is complete over the whole
+// archive, not just over the handful of articles that happened to rank into the chat's top-N.
+// Returned items are appended after the chat's own candidates (sources are numbered after them).
+async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, maxItems = 150 } = {}) {
+  const forms = (topicForms || []).map((f) => String(f).trim()).filter((f) => f.length >= 2);
+  if (!forms.length) return { records: [], items: [] };
+  const pats = forms.map((f) => `%${f}%`);
+  const { rows: items } = await pool.query(
+    `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
+     FROM items i LEFT JOIN sources s ON s.id = i.source_id
+     WHERE i.status = 'Published' AND i.facts_status = 'done' AND NOT (i.id = ANY($2))
+       AND EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id)
+       AND (i.title ILIKE ANY($1) OR i.summary ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1) OR i.insight ILIKE ANY($1))
+     ORDER BY i.published_at DESC NULLS LAST LIMIT $3`,
+    [pats, excludeIds.length ? excludeIds : [0], maxItems]
+  );
+  if (!items.length) return { records: [], items: [] };
+  const { rows } = await pool.query(
+    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original FROM item_facts WHERE item_id = ANY($1)',
+    [items.map((i) => i.id)]
+  );
+  const indexById = new Map(items.map((it, k) => [it.id, baseIndex + k + 1]));
+  const records = rows.map((r) => ({
+    entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, tons: null,
+  }));
+  return { records, items };
+}
+
 // Backfill: facts for already-published items, newest first, resumable (facts_status IS NULL).
 const backfillStatus = { running: false, startedAt: null, finishedAt: null, total: 0, done: 0, withFacts: 0, none: 0, errors: 0 };
 async function runBackfill({ limit = 300 } = {}) {
@@ -106,4 +136,4 @@ async function runBackfill({ limit = 300 } = {}) {
   return { started: true, total: rows.length };
 }
 
-module.exports = { extractFactsForItem, extractFactsInBackground, loadFactRecords, runBackfill, getBackfillStatus: () => backfillStatus, hasQuantity, textOf };
+module.exports = { loadFactsByTopic, extractFactsForItem, extractFactsInBackground, loadFactRecords, runBackfill, getBackfillStatus: () => backfillStatus, hasQuantity, textOf };

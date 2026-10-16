@@ -1261,3 +1261,40 @@ test('item_facts: a quantity dataset is built from stored facts with NO extracti
     restoreProvider();
   }
 });
+
+test('visual requests always end with a table or a chart: an answer with neither is condensed into one table', async () => {
+  const cands = [{ id: 1, title: 'a', summary: 'x', source_name: 's' }];
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) return { text: '[]', provider: 'p' };
+    return { text: '| 항목 | 내용 |\n| --- | --- |\n| 구조 | 요약 [1] |', provider: 'p' };
+  });
+  try {
+    const out = await searchRouter.finalizeAnswer('시장 구조는 이렇다. [1]', cands, undefined, [], '시장 구조를 도식화해줘', null);
+    assert.match(out.answer, /\| 항목 \| 내용 \|/);
+    // not a visual request: nothing is added
+    const plain = await searchRouter.finalizeAnswer('시장 구조는 이렇다. [1]', cands, undefined, [], '시장 구조 알려줘', null);
+    assert.ok(!plain.answer.includes('|'));
+  } finally {
+    restoreProvider();
+  }
+});
+
+test('with a verified dataset the writer\'s own unit-conversion remarks are dropped (the dataset states the basis)', async () => {
+  const dpm = require('../server/lib/datasetPipeline');
+  const mt = (m) => [m.title, m.summary].filter(Boolean).join(' ');
+  const cands = [
+    { id: 1, title: 'a', summary: 'Alpha 1.2 Mt; Beta 1.0 Mt; Gamma 0.5 Mt', source_name: 's' },
+  ];
+  const rec = (o) => ({ site: null, period: '연간', status: '가동', year: null, ...o });
+  const dataset = dpm.buildDataset(dpm.verifyRecords([
+    rec({ entity: 'Alpha', value: 1.2, unit: 'Mt', source: 1 }), rec({ entity: 'Beta', value: 1.0, unit: 'Mt', source: 1 }), rec({ entity: 'Gamma', value: 0.5, unit: 'Mt', source: 1 }),
+  ], cands, mt, { density: null }), [], {});
+  const restoreProvider = mockProvider(async () => ({ text: '[]', provider: 'p' }));
+  try {
+    const out = await searchRouter.finalizeAnswer('핵심 해석이다. [1]\n단위 변환 참고: 1억 갤런 = 0.003 인치 [1]', cands, undefined, [], 'Capa를 그래프로', dataset);
+    assert.ok(!out.answer.includes('단위 변환 참고'));
+    assert.match(out.answer, /핵심 해석이다\./);
+  } finally {
+    restoreProvider();
+  }
+});

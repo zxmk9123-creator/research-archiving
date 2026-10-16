@@ -6,7 +6,7 @@ const tableCheck = require('../lib/tableCheck');
 const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
 const workloadPlan = require('../lib/workloadPlan');
-const { classifyIntent } = require('../lib/intent');
+const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
 const itemFacts = require('../lib/itemFacts');
 const pool = require('../db/pool');
@@ -1080,6 +1080,24 @@ async function tryBuildDataset(question, candidates, required, signal) {
       console.error('ai-search item_facts read failed:', err.message);
       pending = candidates.map((_, i) => i);
     }
+    // 1b) the WHOLE archive's stored facts for the question's topic, not only the chat's top-N
+    //     articles; those extra articles are appended after the candidates so footnotes resolve
+    let extraCandidates = [];
+    try {
+      const topic = [];
+      for (const forms of extractConcepts(question)) {
+        const f = forms[0];
+        if (!f || datasetPipeline.METRIC_WORDS.test(f) || ENTITY_NOUN.test(f) || requestCompliance.isVisualWord(f)) continue;
+        topic.push(...forms);
+      }
+      if (topic.length) {
+        const wide = await itemFacts.loadFactsByTopic(topic, { excludeIds: candidates.map((c) => c.id).filter(Boolean), baseIndex: candidates.length });
+        records = records.concat(datasetPipeline.recordsForQuestion(wide.records, question, density));
+        extraCandidates = wide.items;
+      }
+    } catch (err) {
+      console.error('ai-search topic facts failed:', err.message);
+    }
     if (pending.length) {
       const controller = new AbortController();
       const onAbort = () => controller.abort(signal && signal.reason);
@@ -1101,7 +1119,10 @@ async function tryBuildDataset(question, candidates, required, signal) {
       }
     }
     const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
-    if (dataset) console.log(`ai-search dataset built records=${dataset.records} extracted_live=${pending.length ? 'yes' : 'no'}`);
+    if (dataset) {
+      dataset.extraCandidates = extraCandidates;
+      console.log(`ai-search dataset built records=${dataset.records} extra_articles=${extraCandidates.length} extracted_live=${pending.length ? 'yes' : 'no'}`);
+    }
     return dataset;
   } catch (err) {
     console.error('ai-search dataset pipeline failed:', err.message);
@@ -1120,6 +1141,28 @@ function stripStrayScripts(text, candidates) {
   return t.replace(STRAY_SCRIPT_RE, (m) => (known.includes(m) ? m : ''));
 }
 
+// ANY visual request ("시각화", "도식", "표로", "한눈에", chart words) must end up with a table
+// or a chart. A quantity request gets its chart from the answer's table (ensureChartPresent);
+// when neither exists the answer is condensed into one compact table by a short, bounded call.
+const TABULATE_SYSTEM = 'Condense the given answer into ONE compact Markdown pipe table (at most 8 rows, 2 to 5 columns) that makes its key points easy to scan. Copy every figure exactly, keep every [N] citation on the row it supports, add no new facts, and output ONLY the table.';
+async function ensureVisual(text, req, signal) {
+  if (!req.wantsVisual || /```chart/.test(text) || /^\s*\|.+\|\s*$/m.test(text)) return text;
+  try {
+    const result = await withTimeout(
+      callHedged({ system: TABULATE_SYSTEM, user: String(text).slice(0, 6000) }, { signal, hedgeAfterMs: 8000 }),
+      30000,
+      () => { throw new Error('tabulate timed out'); }
+    );
+    const table = String(result.text || '').split('\n').filter((l) => /^\s*\|/.test(l)).join('\n').trim();
+    if ((table.match(/\n/g) || []).length < 2) return text; // a header, a separator and a row at least
+    console.log('ai-search request_compliance table_built_for_visual_request');
+    return `${text}\n\n${table}`;
+  } catch (err) {
+    console.log(`ai-search visual fallback skipped (${err.message})`);
+    return text;
+  }
+}
+
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
   let rawBody = String(rawText || '');
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
@@ -1129,7 +1172,8 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   modelText = canonicalizeProperNouns(modelText, candidates.map(materialText), await getRoster());
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
-    modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
+    // (and its own unit-conversion remarks: the dataset states the basis itself)
+    modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l) && !/환산|변환|밀도|conversion|density/i.test(l)).join('\n').trim();
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
@@ -1149,8 +1193,9 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   const completed = requestCompliance.enforceCompleteChart(tabled.text, req);
   if (completed.rebuilt) console.log('ai-search request_compliance chart_rebuilt_for_completeness');
   const ensured = requestCompliance.ensureChartPresent(completed.text, req);
+  const visualText = await ensureVisual(ensured.text, req, signal);
   if (ensured.built) console.log('ai-search request_compliance chart_built_from_table');
-  const text = ensured.text;
+  const text = visualText;
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -1302,6 +1347,7 @@ async function handleSearch(req, res, signal) {
     }
     if (signal.aborted || res.destroyed) return;
     const dataset = await datasetPromise;
+    if (dataset && dataset.extraCandidates && dataset.extraCandidates.length) candidates.push(...dataset.extraCandidates);
     const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset, { quick });
     if (signal.aborted || res.destroyed) return;
     if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
@@ -1366,6 +1412,7 @@ async function handleSearch(req, res, signal) {
 
   if (signal.aborted || res.destroyed) return;
   const dataset = await flushed;
+  if (dataset && dataset.extraCandidates && dataset.extraCandidates.length) candidates.push(...dataset.extraCandidates);
   const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
