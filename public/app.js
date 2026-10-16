@@ -993,20 +993,24 @@ function renderChartHtml(jsonText) {
     const cum = labels.map(() => 0);
     series.forEach((s, si) => {
       const col = colors[si % colors.length];
-      const top = s.data.map((v, i) => { const t = type === 'area' ? (cum[i] += Math.max(0, v)) : v; return [cat(i) + band / 2, val(t)]; });
-      if (type === 'area') {
-        const bottom = s.data.map((v, i) => [cat(i) + band / 2, val(cum[i] - Math.max(0, v))]).reverse();
-        g += `<polygon fill="${col}" fill-opacity=".55" points="${top.concat(bottom).map((p) => p.join(',')).join(' ')}"/>`;
+      const top = s.data.map((v, i) => { if (!Number.isFinite(v)) return null; const t = type === 'area' ? (cum[i] += Math.max(0, v)) : v; return [cat(i) + band / 2, val(t)]; });
+      const pts = top.filter(Boolean);
+      if (type === 'area' && pts.length > 1) {
+        const bottom = s.data.map((v, i) => (Number.isFinite(v) ? [cat(i) + band / 2, val(cum[i] - Math.max(0, v))] : null)).filter(Boolean).reverse();
+        g += `<polygon fill="${col}" fill-opacity=".55" points="${pts.concat(bottom).map((p) => p.join(',')).join(' ')}"/>`;
       }
-      g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${top.map((p) => p.join(',')).join(' ')}"/>`
-        + s.data.map((v, i) => `<circle cx="${top[i][0]}" cy="${top[i][1]}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></circle>`).join('');
+      g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.map((p) => p.join(',')).join(' ')}"/>`
+        + s.data.map((v, i) => (top[i] ? `<circle cx="${top[i][0]}" cy="${top[i][1]}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></circle>` : '')).join('');
     });
   } else {
     const cum = labels.map(() => 0);
     series.forEach((s, si) => {
-      const bw = stacked ? band * 0.6 : (band * 0.7) / series.length;
+      // Slim, capped bars centred in their band (a few categories must not
+      // produce huge slabs).
+      const maxBw = horizontal ? 20 : 30;
+      const bw = Math.min(stacked ? band * 0.5 : (band * 0.6) / series.length, maxBw);
       s.data.forEach((v, i) => {
-        const off = stacked ? band * 0.2 : band * 0.15 + bw * si;
+        const off = stacked ? (band - bw) / 2 : (band - bw * series.length) / 2 + bw * si;
         let a = base, b = val(v);
         if (stacked) { a = val(cum[i]); cum[i] += Math.max(0, v); b = val(cum[i]); }
         const pos = cat(i) + off;
