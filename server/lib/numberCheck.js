@@ -16,11 +16,12 @@ const EN_SCALE = { thousand: 1e3, k: 1e3, million: 1e6, mn: 1e6, m: 1e6, billion
 const TOLERANCE = 0.03;
 const MARK_UNVERIFIED = '⚠원문 수치 확인 필요';
 // Explicit physical conversions (stated to the reader, never hidden): SAF/renewable fuel density 0.8 kg/L.
-const DENSITY_T_PER_M3 = 0.8;
+const DENSITY_T_PER_M3 = 0.8; // fuels; edible oils (~0.92) are also accepted when grounding converted figures
+const DENSITIES = [0.8, 0.92];
 const DERIVED_TOLERANCE = 0.08;
-function toTons(value, cls) {
+function toTons(value, cls, density = DENSITY_T_PER_M3) {
   const litres = cls === 'gal' ? value * 3.785411784 : cls === 'bbl' ? value * 158.987 : cls === 'bpd' ? value * 365 * 158.987 : cls === 'liter' ? value : null;
-  return litres === null ? null : (litres * DENSITY_T_PER_M3) / 1000;
+  return litres === null ? null : (litres * density) / 1000;
 }
 
 // [regex source, multiplier, class] — Korean units (no word boundary needed) then English.
@@ -47,6 +48,12 @@ function parseUnitAt(rest) {
   if (m) {
     const unit = KO_UNITS.find((u) => u[0] === m[4]);
     return { len: m[0].length, mult: (m[2] ? KO_SCALE[m[2]] : 1) * unit[1], cls: unit[2], scaleText: m[2] || '', unitText: m[4], hasScale: Boolean(m[2]) };
+  }
+  // English scale word in front of a Korean unit ("850 million 달러", "3 billion 원")
+  m = rest.match(/^(\s*)(thousand|million|billion|mn|bn)\s*(킬로톤|메가톤|톤|갤런|배럴|킬로리터|리터|달러|유로|원)/i);
+  if (m) {
+    const unit = KO_UNITS.find((u) => u[0] === m[3]);
+    return { len: m[0].length, mult: EN_SCALE[m[2].toLowerCase()] * unit[1], cls: unit[2], scaleText: m[2].toLowerCase(), unitText: m[3], hasScale: true };
   }
   m = rest.match(/^(\s*)(thousand|million|billion|mn|bn|k|m|b)?(\s*)(?=\S)/i);
   const lead = m ? m[0].length : 0;
@@ -185,8 +192,10 @@ const poolsOf = (texts) => {
   const pools = {};
   for (const q of extractQuantities(texts.join('\n'))) {
     (pools[q.cls] = pools[q.cls] || []).push(q);
-    const tons = toTons(q.value, q.cls);
-    if (tons) (pools.mass = pools.mass || []).push({ ...q, value: tons, cls: 'mass', derived: true });
+    for (const density of DENSITIES) {
+      const tons = toTons(q.value, q.cls, density);
+      if (tons) (pools.mass = pools.mass || []).push({ ...q, value: tons, cls: 'mass', derived: true });
+    }
   }
   return pools;
 };

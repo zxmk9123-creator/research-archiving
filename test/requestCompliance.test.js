@@ -6,10 +6,11 @@ const searchRouter = require('../server/routes/search');
 
 test('parseRequest: chart kind, unit unification, completeness and chart-wanted are read from the question', () => {
   const r = rc.parseRequest('글로벌 SAF 플랜트의 Capa를 누락없이 톤 단위로 통일해서 가로 막대그래프 시각화로 정리해줘');
-  assert.deepEqual(r, { wantsChart: true, chartType: 'hbar', unitTons: true, completeness: true });
+  assert.deepEqual(r, { wantsChart: true, wantsTable: false, chartType: 'hbar', unitTons: true, completeness: true });
   assert.equal(rc.parseRequest('식용유지 생산량 꺾은선 그래프').chartType, 'line');
   assert.equal(rc.parseRequest('비중을 원형으로').chartType, 'pie');
-  assert.deepEqual(rc.parseRequest('팜유 수출 정책 알려줘'), { wantsChart: false, chartType: null, unitTons: false, completeness: false });
+  assert.deepEqual(rc.parseRequest('팜유 수출 정책 알려줘'), { wantsChart: false, wantsTable: false, chartType: null, unitTons: false, completeness: false });
+  assert.equal(rc.parseRequest('업체별 생산량을 표로 정리해줘').wantsTable, true);
 });
 
 test('applyChartCompliance: requested chart kind and ton unit are enforced on the model\'s chart', () => {

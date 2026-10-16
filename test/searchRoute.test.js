@@ -960,12 +960,12 @@ test('finalizeAnswer with a verified dataset: the system table+chart lead, the m
     rec({ entity: 'Neste', site: '로테르담', value: 1.2, unit: 'Mt', source: 1 }),
     rec({ entity: 'DGD', site: 'Port Arthur', value: 235, unit: 'million gallons', source: 2 }),
     rec({ entity: 'Eni', site: 'Gela', value: 400, unit: 'kt', source: 3 }),
-  ], cands, mt), []);
+  ], cands, mt, { density: 0.8 }), [], { unitTons: true, density: 0.8 });
   const restoreProvider = mockProvider(async () => ({ text: '[]', provider: 'freellmapi' }));
   try {
     const model = '핵심 해석입니다. [1]\n| 모델표 | 값 |\n| --- | --- |\n| a | 1 |\n```chart\n{"type":"bar","labels":["a","b"],"series":[{"name":"x","data":[1,2]}]}\n```\nEni도 큽니다. [3]';
     const { answer, sources } = await searchRouter.finalizeAnswer(model, cands, undefined, [], 'SAF Capa를 그래프로', dataset);
-    assert.ok(answer.startsWith('| 업체 | 거점 | 구분 |'));
+    assert.ok(answer.startsWith('| 대상 | 거점·구분 | 상태 |'));
     assert.equal((answer.match(/```chart/g) || []).length, 1);
     assert.ok(!answer.includes('모델표'));
     assert.match(answer, /핵심 해석입니다\./);

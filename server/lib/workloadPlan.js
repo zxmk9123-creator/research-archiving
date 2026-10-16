@@ -29,7 +29,7 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
     id: 'full',
     label: '전체 누락 없이',
     detail: dataset
-      ? `관련 자료 ${candidates.length}건에서 업체·거점별 수치를 모두 추출하고, 값을 검증·톤 환산한 표와 차트를 만듭니다.`
+      ? `관련 자료 ${candidates.length}건에서 대상별 수치를 모두 추출하고, 원문과 대조·단위 통일한 표와 차트를 만듭니다.`
       : `관련 자료 ${candidates.length}건을 모두 읽고 모든 대상을 빠짐없이 다룹니다.`,
     aiCalls: dataset ? '2~3회' : '1~2회',
     tokens: round100(genIn + exIn + fullOut + exOut),
@@ -52,7 +52,7 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
     plan: {
       title: '작업 범위를 확인해 주세요',
       reason: dataset
-        ? '여러 업체의 수치를 모아 단위를 통일하고 표·차트로 만드는 큰 작업입니다.'
+        ? '여러 대상의 수치를 모아 단위를 통일하고 표·차트로 만드는 큰 작업입니다.'
         : sweep
           ? '관심 기업 전체를 대상으로 하는 큰 작업입니다.'
           : '답변이 길어질 수 있는 요청입니다. 중간에 끊기지 않도록 범위를 먼저 정합니다.',
@@ -64,7 +64,7 @@ function assessWorkload({ question, candidates, required = [], expectLong = fals
         moreCompanies: Math.max(names.length - 14, 0),
       },
       steps: dataset
-        ? ['관련 자료 검색', '업체·거점별 수치 추출 (AI)', '원문 대조 검증 · 톤 환산', '표·차트 생성', '해석 작성 (AI)']
+        ? ['관련 자료 검색', '대상별 수치 추출 (AI)', '원문 대조 검증 · 단위 통일', '표·차트 생성', '해석 작성 (AI)']
         : ['관련 자료 검색', '대상별 자료 확인', '답변 작성 (AI)', '수치·출처 검증'],
       // the lighter, faster scope is the recommended default; the full run is one click away
       options: [quick, full],

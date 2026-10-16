@@ -48,6 +48,36 @@ async function recordSearchTelemetry(fields) {
   }
 }
 
+// ===========================================================================
+// AI CHATBOT OPERATING PRINCIPLES (운영 원칙) — product-agnostic. Nothing below is tied
+// to SAF, a company or a commodity; those only appear in examples and test fixtures.
+// Each principle names the module that enforces it and the test file that proves it.
+//
+//  O1  Intent decides the work (lib/intent.js): one named company -> focused profile;
+//      several -> exactly those compared; an aggregate question with no name -> the
+//      roster; anything else -> plain answer. A generic noun never starts a sweep.
+//  O2  Retrieval follows the topic, not the phrasing (this file, P1-P9 above): concepts,
+//      language-fair candidates, member/subject coverage, near-duplicate dropping.
+//  O3  Quantities are verified, not trusted (lib/numberCheck.js): every figure is checked
+//      against its cited material in a unit-aware way; scale slips are corrected from the
+//      source, inventions flagged; model-derived parentheticals dropped.
+//  O4  Quantity comparisons are built in code (lib/datasetPipeline.js): extract -> verify
+//      -> convert -> table + chart, for any entity/metric/unit group (mass, volume, money);
+//      the writer's own table/chart are replaced by the verified ones.
+//  O5  Presentation is consistent (lib/tableCheck.js, enrichChartJson): one unit and format
+//      per column, mixed units annotated, chart == table, one state vocabulary.
+//  O6  The user's explicit request is enforced (lib/requestCompliance.js): chart kind, unit,
+//      a chart when asked for, completeness.
+//  O7  Big jobs are confirmed first (lib/workloadPlan.js): quantity datasets, whole-roster
+//      sweeps and long reports show a scope card (quick = recommended, full = one click).
+//  O8  Answers always end complete (trimToCompleteBlock/completeTruncatedAnswer): a cut-off
+//      is continued once or trimmed to the last whole block — never shown as an error.
+//  O9  Names and text are clean (lib/nameFix.js, stripStrayScripts, citation normalisation).
+//  O10 Latency and tokens are managed, not capped: parallel dataset + writer, hedged
+//      non-streaming calls, stall retry, deterministic-first verification, tiered evidence
+//      budget, answer cache, compact system prompt.
+// ===========================================================================
+
 // Bounded candidate set — never send the whole table to the LLM.
 const MAX_CANDIDATES = 12;
 // Minimal conversation context: the last few turns, not persisted anywhere
@@ -484,7 +514,7 @@ Formatting:
 - Length (hard rule): keep the whole answer within about 450 Korean words — tables and chart JSON count — or about 700 for a single-company profile. Lead with the answer, then the most decision-relevant facts; merge duplicate materials and cite each fact once. Never try to cover everything: if more material exists than fits, say in one short line what was left out and offer to continue. The answer must always END COMPLETE — never stop mid-sentence, mid-list, mid-table or mid-chart.
 - Comparisons across several targets: show every target the materials give a figure for, side by side with the same fields and the same unit; name in one line any requested target with no usable figure.
 - Charts and tables (only when asked, or when 3+ comparable numbers make one clearly better): tables use Markdown pipe tables with the unit stated once in the header, one number format per column (commas for thousands, a dot for decimals, ranges as "50만~120만 톤"), current/plan/target in separate columns, "-" for no data, "미공시" for undisclosed. A chart is a fenced block \`\`\`chart containing one JSON object {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","labels":[...],"series":[{"name":"...","data":[numbers or null]}]} (hbar for rankings, line for time trends, pie/donut only for shares of one whole, at most 10 items and 4 series). To merge the parts of one company that add up (its plants), use one series with "groups":[company per label] and "combine":"sum" and optional "notes":[detail per label]. Use ONLY figures stated in the materials; put the unit in "unit"; follow with 1-3 sentences of takeaways, each cited.
-- NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with its own scale and unit ("50만 톤" stays "50만 톤", never "5만 톤"; "1.2 Mt" stays "1.2 Mt"). Do not convert between 만/천/백만/억, kt/Mt/톤 or gallons/barrels/tonnes yourself unless the user asked for one unit — then convert with: 1 kt = 1,000톤; 1 Mt = 1,000,000톤; 1 갤런 = 0.003028톤; 1 배럴 = 0.1272톤; b/d x 365 x 0.1272톤/년, and say "환산 기준" in one line. A range uses the material's two endpoints. A figure not found in the cited material must not be written.
+- NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with its own scale and unit ("50만 톤" stays "50만 톤", never "5만 톤"; "1.2 Mt" stays "1.2 Mt"). Do not convert between 만/천/백만/억, kt/Mt/톤 or gallons/barrels/tonnes yourself — write each figure in the unit its material uses (when the user asks for one common unit, the system converts and states the basis). A range uses the material's two endpoints. A figure not found in the cited material must not be written.
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
@@ -1044,8 +1074,9 @@ async function tryBuildDataset(question, candidates, required, signal) {
         DATASET_TIMEOUT_MS,
         () => { controller.abort(); throw new Error(`dataset extraction timed out after ${DATASET_TIMEOUT_MS}ms`); }
       );
-      const records = datasetPipeline.verifyRecords(datasetPipeline.parseRecords(result.text), candidates, materialText);
-      const dataset = datasetPipeline.buildDataset(records, required);
+      const density = datasetPipeline.productDensity(`${question} ${candidates.map(materialText).join(' ').slice(0, 40000)}`);
+      const records = datasetPipeline.verifyRecords(datasetPipeline.parseRecords(result.text), candidates, materialText, { density });
+      const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
       if (dataset) console.log(`ai-search dataset built records=${dataset.records}`);
       return dataset;
     } finally {
@@ -1068,7 +1099,7 @@ function stripStrayScripts(text, candidates) {
   return t.replace(STRAY_SCRIPT_RE, (m) => (known.includes(m) ? m : ''));
 }
 
-async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false, datasetExpected = false } = {}) {
+async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
   let rawBody = String(rawText || '');
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
     rawBody = await completeTruncatedAnswer(rawBody.replace(TRUNCATION_NOTICE_RE, '').trimEnd(), candidates, signal);
@@ -1080,8 +1111,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
-  const failureNote = datasetExpected && !dataset ? '\n\n※ 표·차트 자동 생성에 실패해 해석만 제공합니다. 같은 질문을 다시 요청하면 대부분 해결됩니다.' : '';
-  const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : `${verifiedModel}${failureNote}`;
+  const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
   // Number fidelity: figures are checked against the materials cited for them and
   // corrected/flagged (see lib/numberCheck.js) BEFORE footnotes are renumbered.
@@ -1219,14 +1249,14 @@ async function handleSearch(req, res, signal) {
   }
   const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal);
   datasetPromise.catch(() => {});
-  const wantsDatasetBlock = !quick && datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question);
   const scopeBlock = quick
     ? '\n\n[범위: 핵심 요약 모드 — 사용자가 빠른 요약을 선택했다. 상위 10개 안팎의 주요 대상만 간결하게 정리하고 나머지는 한 줄로 언급한다.]'
-    : wantsDatasetBlock
-      ? '\n\n[이 질문의 표와 차트는 시스템이 검증된 데이터로 생성해 답변 맨 앞에 붙인다. 표·차트·수치 나열은 쓰지 말고, 자료에 근거한 핵심 해석 3~6개 불릿과 주의점(미공시, 단위 환산, 가동/건설/계획 구분, 총계와 거점 값 구분)만 간결하게 쓴다.]'
-      : '';
+    : '';
+  // The writer always produces a complete answer of its own; if the verified dataset
+  // (built in parallel) succeeds, its table/chart replace the writer's.
+  const datasetPending = !quick && datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question);
   const profileBlock = intent.type === 'entity'
-    ? `\n\n[질의 유형: 기업 프로파일 — ${intent.focus[0].name}] 이 질문은 한 기업에 대한 개요 요청이다. 자료를 하나씩 훑지 말고 주제별로 종합해 아래 구조로 쓴다(자료에 있는 항목만, 없으면 "미확보"로 한 줄): (1) # 개요 — 어떤 회사인지(정체성·본사·주력 사업·규모) 2~3문장 (2) # 생산·사업 거점 — 거점별 제품과 CAPA·상태(가동/건설/계획)를 표로, 수치는 자료 표기 그대로 (3) # 전략과 투자 (4) # 최근 동향 — 최신순 3~5개 (5) # 확인되지 않은 항목. 중복·유사 자료는 합치고, 문장마다 가장 관련 높은 자료 1~3개만 인용하며, 모든 자료를 나열하거나 인용할 필요는 없다. 전체 분량은 한국어 700단어 안팎으로 제한한다.`
+    ? `\n\n[질의 유형: 기업 프로파일 — ${intent.focus[0].name}] 이 질문은 한 기업에 대한 개요 요청이다. 자료를 하나씩 훑지 말고 주제별로 종합해 아래 구조로 쓴다(자료에 있는 항목만, 없으면 "미확보"로 한 줄): (1) # 개요 — 어떤 회사인지(정체성·본사·주력 사업·규모) 2~3문장 (2) # 생산·사업 거점 — 거점별 제품과 CAPA·상태(현재/건설중/계획)를 표로, 수치는 자료 표기 그대로 (3) # 전략과 투자 (4) # 최근 동향 — 최신순 3~5개 (5) # 확인되지 않은 항목. 중복·유사 자료는 합치고, 문장마다 가장 관련 높은 자료 1~3개만 인용하며, 모든 자료를 나열하거나 인용할 필요는 없다. 전체 분량은 한국어 700단어 안팎으로 제한한다.`
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
@@ -1251,7 +1281,7 @@ async function handleSearch(req, res, signal) {
     }
     if (signal.aborted || res.destroyed) return;
     const dataset = await datasetPromise;
-    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset, { quick, datasetExpected: wantsDatasetBlock });
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question, dataset, { quick });
     if (signal.aborted || res.destroyed) return;
     if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
     await recordSearchTelemetry({
@@ -1280,7 +1310,7 @@ async function handleSearch(req, res, signal) {
 
   // Tokens are held back until the dataset settles (usually already done by the time the
   // model has written its first paragraph), so the system table/chart can lead the stream.
-  let datasetSettled = !wantsDatasetBlock; // other requests stream straight through
+  let datasetSettled = !datasetPending; // other requests stream straight through
   let held = '';
   const flushed = datasetPromise.then((d) => {
     datasetSettled = true;
@@ -1315,7 +1345,7 @@ async function handleSearch(req, res, signal) {
 
   if (signal.aborted || res.destroyed) return;
   const dataset = await flushed;
-  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick, datasetExpected: wantsDatasetBlock });
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
   sendEvent('done', { answer, insufficient: false, sources });
