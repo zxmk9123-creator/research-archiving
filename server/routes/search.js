@@ -862,7 +862,7 @@ function callHedged(promptMessages, { signal, hedgeAfterMs = 12000 } = {}) {
       started++;
       const c = new AbortController();
       controllers.push(c);
-      Promise.resolve(provider.callProviderWithFallback(promptMessages, { signal: c.signal })).then(
+      Promise.resolve(provider.callProviderWithFallback(promptMessages, { signal: c.signal, lane: 'chat' })).then(
         (r) => finish(resolve, r),
         (err) => { failures++; if (failures >= started) { if (started < 2) launch(); else finish(reject, err); } }
       );
@@ -1266,7 +1266,7 @@ async function handleSearch(req, res, signal) {
     let text;
     let providerName;
     try {
-      const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user }, { signal });
+      const result = await provider.callProviderWithFallback({ system: SYSTEM_PROMPT, user }, { signal, lane: 'chat' });
       text = result.text;
       providerName = result.provider;
     } catch (err) {
@@ -1325,7 +1325,7 @@ async function handleSearch(req, res, signal) {
     const result = await provider.callProviderWithFallbackStreaming(
       { system: SYSTEM_PROMPT, user },
       (delta) => { if (datasetSettled) sendEvent('token', { delta }); else held += delta; },
-      { signal }
+      { signal, lane: 'chat' }
     );
     rawText = result.text;
     ttftMs = result.ttftMs;

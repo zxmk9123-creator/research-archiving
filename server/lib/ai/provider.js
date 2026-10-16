@@ -118,8 +118,20 @@ async function fetchProvider(providerLabel, url, init, timeoutMs = 20000, extern
 }
 
 // FreeLLMAPI: self-hosted OpenAI-compatible chat completions router.
-async function callFreeLLMAPI({ system, user }, { signal } = {}) {
-  const apiKey = process.env.FREELLMAPI_API_KEY;
+// Client lanes: FreeLLMAPI client profiles decide WHICH models a key may route to. The
+// interactive chatbot uses its own key (FREELLMAPI_CHAT_API_KEY -> a profile with only
+// fast, reliable models); everything else — collection, drafts, headlines, scope
+// analysis — keeps FREELLMAPI_API_KEY (the batch profile). With no chat key set, chat
+// falls back to the shared key, i.e. the previous behaviour.
+function apiKeyFor(lane) {
+  return (lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim()) || process.env.FREELLMAPI_API_KEY;
+}
+function laneLabel(lane) {
+  return lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim() ? 'chat' : 'shared';
+}
+
+async function callFreeLLMAPI({ system, user }, { signal, lane } = {}) {
+  const apiKey = apiKeyFor(lane);
   if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
   const baseUrl = process.env.FREELLMAPI_BASE_URL;
   if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
@@ -271,8 +283,8 @@ function extractSseDeltas(buffer) {
 // transient so the caller's chain can move to its next attempt), or the
 // same empty/degenerate-output checks requireNonEmptyText/
 // requireNonDegenerateText already apply to a full response.
-async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTimeoutMs }, onToken, { signal: externalSignal } = {}) {
-  const apiKey = process.env.FREELLMAPI_API_KEY;
+async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTimeoutMs }, onToken, { signal: externalSignal, lane } = {}) {
+  const apiKey = apiKeyFor(lane);
   if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
   const baseUrl = process.env.FREELLMAPI_BASE_URL;
   if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
@@ -372,20 +384,20 @@ async function streamFreeLLMAPIAttempt({ system, user }, { model, firstTokenTime
 // attempt that's actually running — a fast-model stream that gets
 // aborted mid-token never leaks partial text into the caller, since
 // onToken simply stops being called once that attempt's promise rejects.
-async function callProviderWithFallbackStreaming({ system, user }, onToken, { signal } = {}) {
+async function callProviderWithFallbackStreaming({ system, user }, onToken, { signal, lane } = {}) {
   const attempts = buildStreamingAttempts();
   let lastErr;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
-    console.log(`ai_provider stream_request_started model=${attempt.model}`);
+    console.log(`ai_provider stream_request_started model=${attempt.model} lane=${laneLabel(lane)}`);
     try {
-      const { text, ttftMs } = await streamFreeLLMAPIAttempt({ system, user }, attempt, onToken, { signal });
-      console.log(`ai_provider stream_request_succeeded model=${attempt.model} ttft_ms=${ttftMs}`);
+      const { text, ttftMs } = await streamFreeLLMAPIAttempt({ system, user }, attempt, onToken, { signal, lane });
+      console.log(`ai_provider stream_request_succeeded model=${attempt.model} lane=${laneLabel(lane)} ttft_ms=${ttftMs}`);
       return { text, ttftMs, model: attempt.model };
     } catch (err) {
       lastErr = err;
       const failureType = err.failureType || 'application_error';
-      console.error(`ai_provider stream_request_failed model=${attempt.model} failure_type=${failureType} reason=${err.message}`);
+      console.error(`ai_provider stream_request_failed model=${attempt.model} lane=${laneLabel(lane)} failure_type=${failureType} reason=${err.message}`);
       if (!err.transient) throw err;
       const next = attempts[i + 1];
       if (next) console.log(`ai_provider stream_fallback from=${attempt.model} to=${next.model}`);
@@ -420,9 +432,9 @@ async function runProviderChain(providers) {
 }
 
 // Single-entry chain: just FreeLLMAPI, when configured.
-function buildProviderChain(promptMessages, { signal } = {}) {
+function buildProviderChain(promptMessages, { signal, lane } = {}) {
   const chain = [];
-  if (process.env.FREELLMAPI_API_KEY) chain.push({ name: 'freellmapi', run: () => callFreeLLMAPI(promptMessages, { signal }) });
+  if (apiKeyFor(lane)) chain.push({ name: 'freellmapi', run: () => callFreeLLMAPI(promptMessages, { signal, lane }) });
   return chain;
 }
 
@@ -433,6 +445,7 @@ async function callProviderWithFallback(promptMessages, options = {}) {
 }
 
 module.exports = {
+  apiKeyFor,
   callProvider,
   callProviderWithFallback,
   callFreeLLMAPI,

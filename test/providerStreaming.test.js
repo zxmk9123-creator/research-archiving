@@ -258,3 +258,16 @@ test('buildStreamingAttempts: the fast-model attempt comes first and carries a f
     assert.equal(attempts[1].firstTokenTimeoutMs, null);
   }
 ));
+
+test('lanes: the chat lane uses FREELLMAPI_CHAT_API_KEY when set; batch work and an unset chat key use the shared key', () => {
+  const { apiKeyFor } = require('../server/lib/ai/provider');
+  return withEnv({ FREELLMAPI_API_KEY: 'batch-key', FREELLMAPI_CHAT_API_KEY: 'chat-key' }, () => {
+    assert.equal(apiKeyFor('chat'), 'chat-key');
+    assert.equal(apiKeyFor(undefined), 'batch-key');
+    assert.equal(apiKeyFor('batch'), 'batch-key');
+  }).then(() => withEnv({ FREELLMAPI_API_KEY: 'batch-key', FREELLMAPI_CHAT_API_KEY: undefined }, () => {
+    assert.equal(apiKeyFor('chat'), 'batch-key'); // no chat key configured: previous behaviour
+  })).then(() => withEnv({ FREELLMAPI_API_KEY: 'batch-key', FREELLMAPI_CHAT_API_KEY: '  ' }, () => {
+    assert.equal(apiKeyFor('chat'), 'batch-key');
+  }));
+});
