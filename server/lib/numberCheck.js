@@ -14,6 +14,14 @@
 const KO_SCALE = { 백만: 1e6, 천만: 1e7, 십만: 1e5, 만: 1e4, 억: 1e8, 조: 1e12, 천: 1e3, 백: 1e2 };
 const EN_SCALE = { thousand: 1e3, k: 1e3, million: 1e6, mn: 1e6, m: 1e6, billion: 1e9, bn: 1e9, b: 1e9 };
 const TOLERANCE = 0.03;
+const MARK_UNVERIFIED = '⚠원문 수치 확인 필요';
+// Explicit physical conversions (stated to the reader, never hidden): SAF/renewable fuel density 0.8 kg/L.
+const DENSITY_T_PER_M3 = 0.8;
+const DERIVED_TOLERANCE = 0.08;
+function toTons(value, cls) {
+  const litres = cls === 'gal' ? value * 3.785411784 : cls === 'bbl' ? value * 158.987 : cls === 'bpd' ? value * 365 * 158.987 : cls === 'liter' ? value : null;
+  return litres === null ? null : (litres * DENSITY_T_PER_M3) / 1000;
+}
 
 // [regex source, multiplier, class] — Korean units (no word boundary needed) then English.
 const KO_UNITS = [
@@ -71,8 +79,23 @@ function extractQuantities(text) {
     if (src[start - 1] === '[' && src[end] === ']') continue;
     const before = src.slice(Math.max(0, start - 2), start);
     const cur = /[$€]\s*$/.test(before) ? (before.includes('$') ? 'usd' : 'eur') : null;
-    const unit = parseUnitAt(src.slice(end));
-    raw.push({ start, end, value: parseNumber(m[0]), unit, cur });
+    let unit = parseUnitAt(src.slice(end));
+    let value = parseNumber(m[0]);
+    let spanEnd = end;
+    if (!unit) {
+      // Korean composite numerals: "2만 5,000톤" = 25,000 톤, "1억 2,000만 톤" handled as 1억 + "2,000만"
+      const comp = src.slice(end).match(/^\s*(만|억)\s+(\d{1,3}(?:,\d{3})+|\d{1,4})(?!\d)/);
+      if (comp) {
+        const tailUnit = parseUnitAt(src.slice(end + comp[0].length));
+        if (tailUnit && !tailUnit.scaleText) {
+          value = value * KO_SCALE[comp[1]] + parseNumber(comp[2]);
+          unit = { ...tailUnit, len: comp[0].length + tailUnit.len };
+          spanEnd = end;
+          NUM_RE.lastIndex = end + unit.len;
+        }
+      }
+    }
+    raw.push({ start, end: spanEnd, value, unit, cur });
   }
   const out = [];
   for (let i = 0; i < raw.length; i++) {
@@ -110,8 +133,8 @@ const mantissa = (v) => { const e = Math.floor(Math.log10(v)); return Math.round
 const close = (a, b) => Math.abs(a - b) <= Math.max(a, b) * TOLERANCE;
 
 function isGrounded(value, pool) {
-  if (pool.some((m) => close(value, m.value))) return true;
-  const vals = [...new Set(pool.map((m) => m.value))].slice(0, 24);
+  if (pool.some((m) => Math.abs(value - m.value) <= Math.max(value, m.value) * (m.derived ? DERIVED_TOLERANCE : TOLERANCE))) return true;
+  const vals = [...new Set(pool.filter((m) => !m.derived).map((m) => m.value))].slice(0, 24);
   for (let i = 0; i < vals.length; i++) {
     for (let j = i; j < vals.length; j++) {
       if (close(value, vals[i] + vals[j]) || (vals[i] !== vals[j] && close(value, Math.abs(vals[i] - vals[j])))) return true; // sums and differences (e.g. an expansion increment)
@@ -123,7 +146,7 @@ function isGrounded(value, pool) {
 function findSlipMatch(value, pool) {
   if (!(value > 0)) return null;
   const mv = mantissa(value);
-  const hits = pool.filter((m) => m.value > 0 && Math.abs(mantissa(m.value) - mv) < 0.006 && !close(value, m.value));
+  const hits = pool.filter((m) => !m.derived && m.value > 0 && Math.abs(mantissa(m.value) - mv) < 0.006 && !close(value, m.value));
   if (!hits.length) return null;
   return hits.sort((a, b) => Math.abs(Math.log10(a.value / value)) - Math.abs(Math.log10(b.value / value)))[0];
 }
@@ -147,7 +170,7 @@ function guardLine(line, pools) {
       replacement = q.inherited ? match.numberPart : match.surface;
       fixed++;
     } else {
-      replacement = '(원문 수치 확인 필요)';
+      replacement = MARK_UNVERIFIED;
       flagged++;
     }
     out = out.slice(0, q.start) + replacement + out.slice(q.end);
@@ -157,7 +180,11 @@ function guardLine(line, pools) {
 
 const poolsOf = (texts) => {
   const pools = {};
-  for (const q of extractQuantities(texts.join('\n'))) (pools[q.cls] = pools[q.cls] || []).push(q);
+  for (const q of extractQuantities(texts.join('\n'))) {
+    (pools[q.cls] = pools[q.cls] || []).push(q);
+    const tons = toTons(q.value, q.cls);
+    if (tons) (pools.mass = pools.mass || []).push({ ...q, value: tons, cls: 'mass', derived: true });
+  }
   return pools;
 };
 
@@ -216,4 +243,4 @@ function unitMultiplier(unitText) {
   return probe ? { mult: probe.value, cls: probe.cls } : null;
 }
 
-module.exports = { unitMultiplier, extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };
+module.exports = { MARK_UNVERIFIED, toTons, DENSITY_T_PER_M3, unitMultiplier, extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };

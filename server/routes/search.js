@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const numberCheck = require('../lib/numberCheck');
 const tableCheck = require('../lib/tableCheck');
+const requestCompliance = require('../lib/requestCompliance');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -309,7 +310,9 @@ async function retrieveForTarget(target, otherForms) {
 // question speaks of companies in general, every watchlist company (the
 // `companies` table, with aliases) gets its own slots, ranked by overlap with
 // the question's other terms.
-const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|compan|major|producer|supplier|refiner|player|operator)/i;
+const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|플랜트|설비|시설|거점|공장|사업장|프로젝트|compan|major|producer|supplier|refiner|player|operator|plant|facilit|biorefiner|site)/i;
+// A completeness request ("누락 없이", "전체", "모든") is treated as a collective question too.
+const isCollectiveQuestion = (q) => COLLECTIVE_ENTITY_RE.test(String(q || '')) || requestCompliance.COMPLETENESS_RE.test(String(q || ''));
 const MAX_WATCHLIST = 40;
 const PER_COMPANY = 2; // roster sweep: fewer rows per company so a long roster stays within the prompt budget
 async function retrieveForWatchlist(otherForms) {
@@ -425,7 +428,7 @@ async function retrieveCandidates(question, history) {
   }
   let baseCovered = base.concat(coverage);
   let ceiling = MAX_TOTAL_CANDIDATES;
-  if (COLLECTIVE_ENTITY_RE.test(retrievalQuery)) {
+  if (isCollectiveQuestion(retrievalQuery)) {
     const nonGeneric = concepts.filter((forms, i) => docFreqs[i] > 0 && docFreqs[i] <= SPECIFIC_DOCFREQ * 8).flat();
     const known = new Set(baseCovered.map((r) => r.id));
     const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
@@ -467,13 +470,15 @@ Formatting:
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
 - Thoroughness protocol (quality over brevity; spend the extra effort): before writing, silently read EVERY supplied 자료 one by one and note each fact, figure (with its unit, year and scope), entity, date and claim it contains that bears on the question. Then answer from the union of all of them, not from the first few: every 자료 that contains something relevant must be used and cited at least once; do not stop after the most obvious two or three, and do not summarize several materials into one vague sentence when they give distinct figures or cases. When materials disagree (different numbers, years, definitions), show both with their [N] and say they differ instead of picking one silently. Give concrete specifics (names, numbers, dates, places) over generalities, and when the materials cover only some of what was asked (e.g. only some of the requested commodities, companies or years), state exactly which parts are covered and which are not.
 - Comparison and data requests across several targets (commodities, companies, countries, years): first assemble, from ALL materials, a complete set of every available data point per target and period; present it as a Markdown table (rows = targets, columns = periods or measures, "-" for no data, a [N] in or right after each row); then, if a chart is useful or was requested, build it from exactly that set, covering every target that has any usable number — never reduce the comparison to one target because it has the most data. If the supplied materials hold fewer than 3 data points for a requested target, still list it in the table with what exists.
-- Layout discipline for data answers (the answer is read in a narrow panel; a wall of text or a cramped chart is a failure): (1) open with ONE or TWO sentences stating the main conclusion; (2) then the chart or table — never repeat the same data point-by-point as a long bullet list as well: when a chart or table carries the numbers, the text must not re-list them (at most 3-5 bullets for what the chart cannot show, e.g. caveats, definitions, key differences); (3) a chart shows AT MOST 10 bars/points — rank by value and keep the top 10 (say "상위 10개" in the title), put the remainder only in the table; (4) category labels are short (<= 14 characters, "회사 거점" like "Neste 로테르담"; no parentheses with explanations, no units inside labels); (5) one chart = one unit and one kind of measure; if the data mix units (톤, 억 갤런, b/d, m³), convert ONLY when the materials give the conversion, otherwise make separate charts per unit or show the mixed values in a table; (6) the table holds the full detail (all targets, all periods, notes like "계획"/"가동"/"미공시"), the chart holds only the comparable core; (7) finish with 2-4 short insight bullets, each with [N].
+- Layout discipline for data answers (the answer is read in a narrow panel; a wall of text or a cramped chart is a failure): (1) open with ONE or TWO sentences stating the main conclusion; (2) then the chart or table — never repeat the same data point-by-point as a long bullet list as well: when a chart or table carries the numbers, the text must not re-list them (at most 3-5 bullets for what the chart cannot show, e.g. caveats, definitions, key differences); (3) a chart shows AT MOST 10 bars/points — rank by value and keep the top 10 (say "상위 10개" in the title), put the remainder only in the table (EXCEPTION: when the user asks for completeness — 누락 없이/전체/모든/전수 — show every item, up to 30 bars, no top-N); (4) category labels are short (<= 14 characters, "회사 거점" like "Neste 로테르담"; no parentheses with explanations, no units inside labels); (5) one chart = one unit and one kind of measure; if the data mix units (톤, 억 갤런, b/d, m³), convert ONLY when the materials give the conversion, otherwise make separate charts per unit or show the mixed values in a table; (6) the table holds the full detail (all targets, all periods, notes like "계획"/"가동"/"미공시"), the chart holds only the comparable core; (7) finish with 2-4 short insight bullets, each with [N].
 - Visualization process (follow in order whenever you produce a table or chart):
   1. Prepare the data: gather only figures stated in the materials; put them in one consistent unit and one consistent period basis (state any conversion in one sentence, and never convert with outside numbers); use null for a missing value; drop items with no usable number and say so.
   2. Choose the chart by the question: bar/hbar = compare a quantity across categories (e.g. sales or capacity by company; sort rankings in descending order); line = change over time (prices, production by year); scatter = the relationship between two numeric variables across items (e.g. capacity vs investment per plant) — needs at least 5 points, otherwise use a table or bar; stacked/pie/donut/area as described below. If no chart type fits the data honestly, use a table or plain text instead.
   3. Build it readable: always set a specific "title" (what, where, when), the "unit", and axis names "xLabel"/"yLabel" when the axes are not obvious; put the unit in "yLabel" (e.g. "만 톤") and do NOT set "xLabel" when the category names are self-explanatory (never generic words like "항목", "구분", "범주", "값"); use "xLabel" only for a real axis such as "연도"; all bars in one chart must share the same unit and the same kind of measure (do not mix volume and price); keep labels short; at most 12 categories and 4 series; do not add decoration.
   4. Interpret it: right after the chart or table write 1-3 sentences of takeaways (the highest/lowest, the trend or gap, anything notable), each with [N]; do not claim causes the materials do not state; mention data gaps or comparability caveats (different years, units, definitions).
 - Visuals: when the user asks for a table/chart/graph, or when numeric comparisons across 3+ items/periods would be clearer visually, include one. Tables use standard Markdown pipe tables. Charts use a fenced block exactly like \`\`\`chart followed by one-line-or-multi-line JSON {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","xLabel":"...","yLabel":"...","labels":["..."],"series":[{"name":"...","data":[numbers]}]} and a closing \`\`\`. When several bars belong to ONE entity and ADD UP (a company's plants/sites, regions, product lines — e.g. Neste Rotterdam + Neste Singapore capacity), do NOT draw them as separate bars: send a single series with one entry per part, "labels" like "Neste 로테르담", a parallel "groups" array naming the entity ("Neste") — identical spelling for every part of that entity — "combine":"sum", and an optional parallel "notes" array with a short detail per part (status, year, plan vs operating; shown on hover). The chart then draws one row per entity, parts as differently coloured segments, with the total at the end. Use this only for additive quantities of the same unit and basis (capacity, volume, investment); keep at most 10 entities. When several values belong to one entity (e.g. a company's capacity now vs 2030, or cost by scenario), MERGE them into ONE cluster per entity: make the entities the "labels" and the detail (현재, 2030년, 시나리오 A ...) the "series", with identical series names for every entity (max 4) and null for a missing value. Never list one bar per entity-detail pair. (Writing labels as "Entity(detail)" is also merged automatically, but the labels/series form is preferred.) Different details of the same entity are NOT additive, so use "bar"/"hbar" (never "stacked") for them. When the user asks to compare MULTIPLE targets (e.g. "식용유지들의 생산량 비교" = palm, soybean, rapeseed, sunflower oil), never chart just one of them: build ONE chart with every target the materials give numbers for as separate series (max 4, most-covered first), using a "line" chart over the shared periods (years) as labels; use null where a target has no figure for a period. If targets lack a common period, use a "bar" chart of the same year or the latest comparable figure per target, and say so in one sentence. Always list in text which requested targets had no usable data instead of silently dropping them. For "scatter": "labels" are the point names, series[0].data are the X values, series[1].data the Y values (same length, both numeric, name the series after the X and Y variables). Pick the type by the data: "line" for a time trend; "area" for cumulative/volume over time; "bar" to compare categories (or a few periods); "hbar" for rankings or long labels; "stacked" for composition of totals across categories/periods (one series per component); "pie"/"donut" ONLY for shares of ONE whole that sum to roughly 100% (single series, max 8 slices). Use several series (max 4) only when they share the same unit and labels. Use ONLY numbers stated in the supplied materials (never estimate or invent; omit the chart if fewer than 3 real data points), keep it to 12 labels and 4 series at most, and cite the source [N] in a sentence right after the chart or table.
+- COMPLETENESS REQUESTS ("누락 없이", "전체", "모든", "전수", "all"): the user wants every item, so do NOT truncate to a top-N and do NOT leave an item out because its unit, year or detail differs; chart and tabulate EVERY plant/company the materials give a figure for (up to 30 chart bars), most capacity first, and list in one final line any item that has no usable figure. An item that cannot be shown is a failure, not a choice.
+- UNIT UNIFICATION REQUESTS (e.g. "톤 단위로 통일"): convert EVERY item to the requested unit with these fixed factors and say so in one line under the chart ("환산 기준: ..."): 1 kt = 1,000 톤; 1 Mt = 1,000,000 톤; 1 갤런(gal) = 0.003028 톤 (SAF/재생연료 밀도 0.8 kg/L 가정); 1 배럴(bbl) = 0.1272 톤; 1 리터 = 0.0008 톤; 1 m³ = 0.8 톤; b/d(일 배럴) x 365 x 0.1272 톤/년 (가동률 100% 가정). For converted items keep the original figure and unit in the table or in "notes" (e.g. "원문 340백만 갤런, 약 103만 톤"). When the user asks for 톤 the chart "unit" is "톤" with plain ton values (e.g. 1200000), not "만 톤". Never drop an item merely because its source unit is gallons or barrels.
 - Table rules (figures must be directly comparable down each column): put the unit ONCE in the column header or give every cell in that column the same unit — never mix 톤 / kt / Mt / 갤런 / 배럴 in one column; use one consistent number format per column (same decimal places, thousands commas like 1,200, a dot for decimals — never 1,2 or 1.200 for 1.2; ranges as "50만~120만 톤"); put different measures (현재 vs 계획 vs 목표, 연도별 값) in SEPARATE columns, not in one cell; write "-" for no data and "미공시" for undisclosed; the figure in a table row must be the same figure the chart shows for that entity.
 - NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with the material's own scale and unit — "50만 톤" stays "50만 톤" (never "5만 톤"), "1.2 Mt" stays "1.2 Mt", "340 million gallons" stays "340 million gallons". Do not convert between 만/천/백만/억, kt/Mt/톤, or gallons/barrels/tonnes yourself; if a comparison needs one common unit, give the converted value only when the materials state it, otherwise show each figure in its original unit side by side. A range uses the material's two stated endpoints ("50만~120만 톤", not "5만~12만 톤"). Count digits and zeros twice before writing; a figure that cannot be found in the cited material must not be written at all. Chart data must use the same figures (scaled consistently to the chart's unit).
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
@@ -771,7 +776,7 @@ async function getRoster() {
 //    deterministically from its own material, with a [N] footnote — so the
 //    answer can never silently omit a company that the archive covers.
 function requiredCompanies(question, candidates, roster) {
-  if (!COLLECTIVE_ENTITY_RE.test(String(question || ''))) return [];
+  if (!isCollectiveQuestion(question)) return [];
   const texts = candidates.map((m) => `${m.title} ${m.summary || ''} ${m.ai_summary || ''} ${m.insight || ''} ${m.ai_insight || ''}`.toLowerCase());
   return roster
     .map((c) => ({ ...c, indices: texts.map((t, i) => (c.names.some((n) => t.includes(n)) ? i + 1 : null)).filter(Boolean) }))
@@ -827,7 +832,7 @@ function enrichChartJson(chart, roster) {
   if (!mergeable.size) return chart;
   return { ...chart, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)) };
 }
-async function enrichChartBlocks(text, candidates = []) {
+async function enrichChartBlocks(text, candidates = [], question = '') {
   if (!/```chart/.test(text)) return text;
   const roster = await getRoster();
   if (!roster.length) return text;
@@ -836,7 +841,9 @@ async function enrichChartBlocks(text, candidates = []) {
     try {
       const guardedChart = numberCheck.guardChartNumbers(JSON.parse(body), candidates, materialText);
       if (guardedChart.fixed || guardedChart.dropped) console.log(`ai-search chart_number_guard fixed=${guardedChart.fixed} dropped=${guardedChart.dropped}`);
-      let chartOut = guardedChart.chart;
+      const compliant = requestCompliance.applyChartCompliance(guardedChart.chart, requestCompliance.parseRequest(question));
+      if (compliant.changed.length) console.log(`ai-search request_compliance chart_${compliant.changed.join('+')}`);
+      let chartOut = compliant.chart;
       const um = numberCheck.unitMultiplier(chartOut.unit);
       if (um) {
         const rec = tableCheck.reconcileChartWithTable(chartOut, rowMap, um.mult, um.cls);
@@ -849,7 +856,7 @@ async function enrichChartBlocks(text, candidates = []) {
   });
 }
 
-async function finalizeAnswer(rawText, candidates, signal, required = []) {
+async function finalizeAnswer(rawText, candidates, signal, required = [], question = '') {
   const verified = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
   const covered = ensureCompanyCoverage(verified, required, candidates);
   // Number fidelity: figures are checked against the materials cited for them and
@@ -860,7 +867,12 @@ async function finalizeAnswer(rawText, candidates, signal, required = []) {
   // removed, mixed-unit columns annotated (see lib/tableCheck.js).
   const tabled = tableCheck.normalizeTablesInText(guarded.text);
   if (tabled.normalized || tabled.warnings) console.log(`ai-search table_guard normalized=${tabled.normalized} warnings=${tabled.warnings}`);
-  const text = tabled.text;
+  // Explicit user requests are enforced in code (chart kind, unit, a chart when one
+  // was asked for) — see lib/requestCompliance.js.
+  const req = requestCompliance.parseRequest(question);
+  const ensured = requestCompliance.ensureChartPresent(tabled.text, req);
+  if (ensured.built) console.log('ai-search request_compliance chart_built_from_table');
+  const text = ensured.text;
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -870,7 +882,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = []) {
   // back to showing every retrieved candidate rather than an empty list.
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
-  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text), candidates);
+  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text), candidates, question);
   const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
@@ -964,7 +976,7 @@ async function handleSearch(req, res, signal) {
       return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     }
     if (signal.aborted || res.destroyed) return;
-    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required);
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required, question);
     if (signal.aborted || res.destroyed) return;
     await recordSearchTelemetry({
       requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
@@ -1016,7 +1028,7 @@ async function handleSearch(req, res, signal) {
   }
 
   if (signal.aborted || res.destroyed) return;
-  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required);
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question);
   if (signal.aborted || res.destroyed) return;
   sendEvent('done', { answer, insufficient: false, sources });
   res.end();

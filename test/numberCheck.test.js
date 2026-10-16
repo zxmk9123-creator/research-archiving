@@ -30,7 +30,7 @@ test('numberCheck: grounded figures, sums, differences and unit-equivalent notat
 
 test('numberCheck: an invented figure with no counterpart is flagged, never shown', () => {
   const r = run('로테르담 77만 톤 [1]', 'Rotterdam 0.5 Mt/a to 1.2 Mt/a');
-  assert.match(r.text, /\(원문 수치 확인 필요\)/);
+  assert.match(r.text, /원문 수치 확인 필요/);
   assert.equal(r.flagged, 1);
 });
 

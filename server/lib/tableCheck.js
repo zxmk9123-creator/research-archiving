@@ -9,7 +9,7 @@
 //   * malformed numbers ("1.2.5", "1,2 Mt", "0.5.") are never displayed;
 //   * chart values are reconciled with the table row of the same entity, so the
 //     chart cannot contradict the table.
-const { extractQuantities } = require('./numberCheck');
+const { extractQuantities, MARK_UNVERIFIED } = require('./numberCheck');
 
 const SCALES = [[1e12, '조'], [1e8, '억'], [1e4, '만'], [1, '']];
 const BASE_LABEL = { mass: '톤', gal: '갤런', bbl: '배럴', liter: '리터', usd: '달러', eur: '유로', krw: '원', bpd: 'b/d' };
@@ -55,7 +55,7 @@ function normalizeTablesInText(text) {
     for (let c = 1; c < width; c++) {
       // malformed number text in any cell of the column
       rows.forEach((r) => {
-        if (r[c] !== undefined && MALFORMED.test(r[c])) { r[c] = r[c].replace(MALFORMED, '(원문 수치 확인 필요)'); warnings++; }
+        if (r[c] !== undefined && MALFORMED.test(r[c])) { r[c] = r[c].replace(MALFORMED, MARK_UNVERIFIED); warnings++; }
       });
       const cellQs = rows.map((r) => (r[c] !== undefined ? extractQuantities(r[c]) : []));
       const classes = new Set(cellQs.flat().map((q) => q.cls));

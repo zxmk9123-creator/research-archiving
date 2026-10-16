@@ -917,7 +917,7 @@ function compactNumber(v) {
 function renderChartHtml(jsonText) {
   let c;
   try { c = JSON.parse(jsonText); } catch (_) { return ''; }
-  const labels = Array.isArray(c.labels) ? c.labels.slice(0, 12).map(String) : [];
+  const labels = Array.isArray(c.labels) ? c.labels.slice(0, 30).map(String) : [];
   const series = (Array.isArray(c.series) ? c.series : []).slice(0, 4)
     .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map((v) => (v === null || v === '' ? NaN : Number(v))) }))
     .filter((s) => s.data.some(Number.isFinite));
@@ -962,7 +962,7 @@ function renderChartHtml(jsonText) {
     const byEntity = new Map();
     parts.forEach((p) => { if (!byEntity.has(p.entity)) byEntity.set(p.entity, []); byEntity.get(p.entity).push(p); });
     const rows = Array.from(byEntity, ([entity, ps]) => ({ entity, ps, total: ps.reduce((a, p) => a + p.v, 0) }))
-      .sort((a, b) => b.total - a.total).slice(0, 10);
+      .sort((a, b) => b.total - a.total).slice(0, 30);
     if (rows.length >= 2) {
       const detailOf = (p) => (p.label.replace(p.entity, '').replace(/^[\s·\-–:(（]+|[\s)）]+$/g, '') || p.label);
       const W = 560, R = 52, T = 14, rowH = 30, B = 24;
@@ -1122,8 +1122,8 @@ function renderChartHtml(jsonText) {
         const pos = cat(i) + off;
         const col = colors[si % colors.length];
         if (!Number.isFinite(v)) return;
-        const lo = Math.min(a, b), len = Math.abs(a - b);
-        const showVal = !stacked && n * series.length <= 12;
+        const lo = Math.min(a, b), len = Math.max(Math.abs(a - b), v ? 2 : 0); // tiny non-zero values stay visible
+        const showVal = !stacked && n * series.length <= (horizontal ? 30 : 12);
         g += horizontal
           ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}${escapeHtml(sName(s))}: ${fmt(v)}${escapeHtml(uSfx)}</title></rect>${showVal ? `<text x="${Math.max(a, b) + 4}" y="${pos + bw / 2 + 3.5}" font-size="10" fill="currentColor">${compactNumber(v)}</text>` : ''}`
           : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}${escapeHtml(sName(s))}: ${fmt(v)}${escapeHtml(uSfx)}</title></rect>${showVal ? `<text x="${pos + bw / 2}" y="${(v >= 0 ? lo : lo + len) + (v >= 0 ? -4 : 11)}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>` : ''}`;
