@@ -75,8 +75,8 @@ function mockItemsTable(existingUrls = []) {
   let nextId = 1000;
   return [
     ['SELECT id FROM items WHERE source_url', (text, params) => {
-      const url = params[0];
-      return urls.has(url) ? { rows: [{ id: 1 }] } : { rows: [] };
+      const list = [].concat(params[0]);
+      return list.some((url) => urls.has(url)) ? { rows: [{ id: 1 }] } : { rows: [] };
     }],
     ['INSERT INTO items', (text, params) => {
       const url = params[1];

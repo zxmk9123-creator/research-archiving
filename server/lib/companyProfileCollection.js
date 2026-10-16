@@ -88,7 +88,7 @@ async function runCompanyProfileCollection({ only, set } = {}) {
         const pc = (status.perCompany[company.name] = { queries: 0, archived: 0, discovered: 0 });
         for (const q of buildQueries(company)) {
           status.current = q;
-          const r = await collectWebDiscoverySource({ ...source, url: q }, { itemType: '보고서', skipStaleCheck: true });
+          const r = await collectWebDiscoverySource({ ...source, url: q }, { itemType: '보고서', skipStaleCheck: true, skipKnownRejects: true });
           status.done++; pc.queries++;
           if (!r.ok) { status.failedQueries++; continue; }
           for (const k of Object.keys(status.totals)) status.totals[k] += r[k] || 0;

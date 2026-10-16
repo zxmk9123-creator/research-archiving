@@ -25,3 +25,10 @@ test('palm set: 10 companies, palm-specific queries, valid aliases', () => {
     for (const n of c.aliases) assert.ok(n.length >= (/[가-힣]/.test(n) ? 2 : 3) && n === n.trim(), n);
   }
 });
+
+test('normalizeUrl treats tracking/www/fragment/trailing-slash variants as one URL', () => {
+  const { normalizeUrl } = require('../server/lib/webDiscoveryIngest');
+  const base = normalizeUrl('https://example.com/a/report');
+  for (const v of ['https://www.example.com/a/report/', 'https://example.com/a/report?utm_source=x&fbclid=1', 'https://example.com/a/report#top']) assert.equal(normalizeUrl(v), base);
+  assert.notEqual(normalizeUrl('https://example.com/a/report?id=2'), base);
+});

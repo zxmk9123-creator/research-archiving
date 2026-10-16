@@ -21,6 +21,33 @@ const { recordExclusion } = require('./discoveryExclusions');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const { titleSimilarity } = require('./similarity');
 
+// EFFICIENCY: the same URL resurfaces across overlapping queries/templates and re-runs. Three
+// layers stop re-doing work on it: (1) URL variants (tracking params, www, fragment, trailing
+// slash) count as the same URL; (2) a process-wide memo of URLs already settled in the last
+// SEEN_TTL_MS (archived / already ingested / duplicate title / out of scope / unreachable) is
+// skipped before any DB, fetch or AI call; (3) with searchOptions.skipKnownRejects, URLs
+// already recorded as out_of_scope in discovery_exclusions are skipped without re-fetching.
+// "stale" outcomes are never memoised (they depend on the run's freshness options).
+const SEEN_TTL_MS = 6 * 60 * 60 * 1000;
+const seenUrls = new Map();
+function normalizeUrl(link) {
+  try {
+    const u = new URL(link);
+    u.hash = '';
+    u.hostname = u.hostname.replace(/^www\./, '');
+    for (const k of Array.from(u.searchParams.keys())) if (/^(utm_|fbclid|gclid|mc_|ref$|source$)/i.test(k)) u.searchParams.delete(k);
+    return u.toString().replace(/\/$/, '');
+  } catch (_) { return String(link || ''); }
+}
+function rememberUrl(link) { seenUrls.set(normalizeUrl(link), Date.now()); if (seenUrls.size > 5000) seenUrls.delete(seenUrls.keys().next().value); }
+function recentlySeen(link) {
+  if (process.env.URL_MEMO === 'off') return false;
+  const t = seenUrls.get(normalizeUrl(link));
+  if (!t) return false;
+  if (Date.now() - t > SEEN_TTL_MS) { seenUrls.delete(normalizeUrl(link)); return false; }
+  return true;
+}
+
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
 const FALLBACK_CANDIDATES_TO_TRY = 3;
 
@@ -116,14 +143,29 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
     const recentTitles = titleRows.map((r) => r.title);
 
     for (const candidate of candidates) {
-      const { rows: existing } = await pool.query('SELECT id FROM items WHERE source_url = $1', [candidate.link]);
+      if (recentlySeen(candidate.link)) {
+        details.push({ title: candidate.title, link: candidate.link, stage: 'recently_seen' });
+        continue;
+      }
+      const norm = normalizeUrl(candidate.link);
+      const { rows: existing } = await pool.query('SELECT id FROM items WHERE source_url = ANY($1)', [Array.from(new Set([candidate.link, norm, `${norm}/`]))]);
       if (existing.length) {
+        rememberUrl(candidate.link);
         details.push({ title: candidate.title, link: candidate.link, stage: 'already_ingested', itemId: existing[0].id });
         continue;
       }
       if (recentTitles.some((t) => titleSimilarity(candidate.title, t) >= TITLE_SIMILARITY_THRESHOLD)) {
+        rememberUrl(candidate.link);
         details.push({ title: candidate.title, link: candidate.link, stage: 'duplicate_title' });
         continue;
+      }
+      if (searchOptions.skipKnownRejects) {
+        const { rows: known } = await pool.query("SELECT 1 FROM discovery_exclusions WHERE url = ANY($1) AND reason = 'out_of_scope' LIMIT 1", [[candidate.link, norm]]);
+        if (known.length) {
+          rememberUrl(candidate.link);
+          details.push({ title: candidate.title, link: candidate.link, stage: 'known_reject' });
+          continue;
+        }
       }
 
       // Acquisition/extraction failures are isolated per candidate — one
@@ -138,6 +180,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         const status = statusMatch ? Number(statusMatch[1]) : null;
         const fallback = status === 403 ? await attemptAcquisitionFallback(candidate) : null;
         if (!fallback) {
+          rememberUrl(candidate.link);
           failed++;
           details.push({ title: candidate.title, link: candidate.link, stage: 'acquisition_failed', error: err.message });
           continue;
@@ -164,6 +207,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       const aiDraftText = meta.body_text || extractedText;
       if (!isRelevantToOilFatsScope(candidate.title, extractedText)) {
         filtered++;
+        rememberUrl(candidate.link);
         await recordExclusion({ sourceId: source.id, url: candidate.link, title: candidate.title, summary: extractedText, publishedAt: meta.published_at, reason: 'out_of_scope' });
         details.push({ title: candidate.title, link: candidate.link, stage: 'filtered' });
         continue;
@@ -188,6 +232,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
           [meta.title || candidate.title, candidate.link, meta.published_at, source.id, itemType, meta.thumbnail_url, fallbackUrl]
         );
         itemId = inserted[0].id;
+        rememberUrl(candidate.link);
         recentTitles.push(meta.title || candidate.title);
       } catch (err) {
         // 23505 = unique_violation on items.source_url — a different
@@ -245,4 +290,4 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
   }
 }
 
-module.exports = { collectWebDiscoverySource, attemptAcquisitionFallback, isClearlyStale, STALE_THRESHOLD_DAYS };
+module.exports = { collectWebDiscoverySource, normalizeUrl, attemptAcquisitionFallback, isClearlyStale, STALE_THRESHOLD_DAYS };
