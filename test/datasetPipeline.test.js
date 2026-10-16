@@ -46,7 +46,7 @@ test('buildDataset: one unit, every entity (missing ones as 미공시), latest f
   assert.ok(d);
   assert.match(d.table, /\| Chevron \| - \| 미공시 \|/);
   assert.match(d.table, /\| Neste \| 로테르담 \| 계획 \(2026\) \| 1,200,000 \|/);
-  assert.match(d.table, /\| Neste \| 로테르담 \| 가동 \(2023\) \| 500,000 \|/); // the table keeps every figure
+  assert.match(d.table, /\| Neste \| 로테르담 \| 현재 \(2023\) \| 500,000 \|/); // the table keeps every figure
   assert.deepEqual([...d.chart.labels].sort(), ['DGD Port Arthur', 'Neste 로테르담 (계획)', 'Neste 싱가포르']);
   // 로테르담 once (latest), 싱가포르, DGD; the 6.8 Mt corporate total is not a bar
   assert.ok(d.chart.labels.includes('Neste 로테르담 (계획)'));

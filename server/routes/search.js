@@ -7,6 +7,7 @@ const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent } = require('../lib/intent');
+const { canonicalizeProperNouns } = require('../lib/nameFix');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -896,6 +897,7 @@ async function getRoster() {
     const { rows } = await pool.query('SELECT name, aliases FROM companies WHERE watched = true');
     return rows.map((r) => ({
       name: r.name,
+      rawNames: [r.name, ...(r.aliases || [])].map((n) => String(n || '').trim()).filter(Boolean),
       names: Array.from(new Set([r.name, String(r.name).split(/[\s.]+/)[0], ...(r.aliases || [])]
         .map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))),
     }));
@@ -948,11 +950,29 @@ function ensureCompanyCoverage(text, required, candidates) {
 // combined, group the parts by KNOWN company (watchlist names/aliases) so the
 // client draws one stacked row per company. Parts whose labels read like
 // scenarios of one quantity (현재/2030/계획/전망...) are never summed.
-const SCENARIO_WORDS = /20\d\d|현재|기존|계획|전망|목표|예정|확장\s*후|target|plan|forecast|current|expected/i;
+// One vocabulary for the state of a figure, everywhere: 현재 / 건설중 / 계획 / 목표.
+// ("현대" is a model typo for 현재; 기존/가동/운영 -> 현재; 신규/예정/전망 -> 계획.)
+const STATUS_ONLY = /^(?:20\d\d|현재|현대|기존|가동\s*중?|운영\s*중?|건설\s*중|계획|신규|예정|전망|목표|[\s,~\-년])*$/;
+function normalizeStatusPart(part) {
+  const t = part.trim();
+  const year = (t.match(/20\d\d/) || [''])[0];
+  if (/^(?:20\d\d\s*년?\s*)?(?:현재|현대|기존|가동\s*중?|운영\s*중?)$/.test(t)) return year ? `${year} 현재` : '현재';
+  if (/^(?:20\d\d\s*년?\s*)?(?:건설\s*중)$/.test(t)) return year ? `${year} 건설중` : '건설중';
+  if (/^(?:20\d\d\s*년?\s*)?(?:목표)(?!\s*[가-힣A-Za-z0-9])/.test(t)) return year ? `${year} 목표` : '목표';
+  if (/^(?:20\d\d\s*년?\s*)?(?:계획|신규|예정|전망)(?:[^,]*)$/.test(t) && !/\d\s*(?:만|억|톤|Mt|kt)/.test(t)) return year ? `${year} 계획` : '계획';
+  return t;
+}
+function normalizeStatusLabel(label) {
+  return String(label).replace(/[(（]([^)）]*)[)）]/g, (m, inner) => `(${inner.split(',').map(normalizeStatusPart).join(', ')})`);
+}
+
 function enrichChartJson(chart, roster) {
-  if (!chart || chart.combine || !['bar', 'hbar'].includes(chart.type || 'bar')) return chart;
-  const labels = Array.isArray(chart.labels) ? chart.labels.map(String) : [];
-  if (labels.length < 3 || !Array.isArray(chart.series) || chart.series.length !== 1) return chart;
+  if (!chart || !Array.isArray(chart.labels)) return chart;
+  // consistent state wording in every label
+  const labels = chart.labels.map((l) => normalizeStatusLabel(String(l)));
+  let out = { ...chart, labels };
+  if (chart.combine || !['bar', 'hbar'].includes(chart.type || 'bar')) return out;
+  if (labels.length < 3 || !Array.isArray(chart.series) || chart.series.length !== 1) return out;
   const entityOf = (label) => {
     const low = label.toLowerCase();
     let best = null;
@@ -964,17 +984,22 @@ function enrichChartJson(chart, roster) {
     return best;
   };
   const found = labels.map((l) => entityOf(l));
+  const siteOf = (l, f) => l.slice(f.len).replace(/[(（][^)）]*[)）]/g, '').trim().toLowerCase();
   const counts = new Map();
   found.forEach((f) => { if (f) counts.set(f.name, (counts.get(f.name) || 0) + 1); });
   const mergeable = new Set();
   for (const [name, count] of counts) {
     if (count < 2) continue;
-    const details = labels.filter((l, i) => found[i] && found[i].name === name).map((l, i) => l);
-    if (details.some((l) => SCENARIO_WORDS.test(l))) continue;
+    // parts of ONE company that add up are DIFFERENT plants: every part names its own site.
+    // Parts that only differ by year/status wording are scenarios of one figure — never summed.
+    const sites = labels.map((l, i) => (found[i] && found[i].name === name ? siteOf(l, found[i]) : null)).filter((x) => x !== null);
+    if (sites.some((x) => !x || STATUS_ONLY.test(x))) continue;
+    if (new Set(sites).size !== sites.length) continue;
     mergeable.add(name);
   }
-  if (!mergeable.size) return chart;
-  return { ...chart, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)) };
+  if (!mergeable.size) return out;
+  const notes = Array.isArray(chart.notes) ? chart.notes : labels.map((l) => (l.match(/[(（]([^)）]*)[)）]/) || [])[1] || '');
+  return { ...out, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)), notes };
 }
 async function enrichChartBlocks(text, candidates = [], question = '') {
   if (!/```chart/.test(text)) return text;
@@ -1049,6 +1074,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     rawBody = await completeTruncatedAnswer(rawBody.replace(TRUNCATION_NOTICE_RE, '').trimEnd(), candidates, signal);
   }
   let modelText = stripStrayScripts(normalizeCitationMarkers(rawBody), candidates);
+  modelText = canonicalizeProperNouns(modelText, candidates.map(materialText), await getRoster());
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
@@ -1304,6 +1330,7 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.normalizeStatusLabel = normalizeStatusLabel;
 module.exports.trimToCompleteBlock = trimToCompleteBlock;
 module.exports.stripStrayScripts = stripStrayScripts;
 module.exports.dropNearDuplicates = dropNearDuplicates;

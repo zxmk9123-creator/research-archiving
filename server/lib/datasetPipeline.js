@@ -17,6 +17,8 @@ const nc = require('./numberCheck');
 
 const CAPACITY_WORDS = /(capa|capacity|생산\s*능력|생산능력|용량|생산량|설비\s*규모|처리\s*능력)/i;
 const STATUS_RANK = { 가동: 3, 건설중: 2, 계획: 1, 목표: 0 };
+// One state vocabulary on screen (the same words the chart labels use): 현재 / 건설중 / 계획 / 목표.
+const STATUS_LABEL = { 가동: '현재', 건설중: '건설중', 계획: '계획', 목표: '목표' };
 
 function isDatasetRequest(req, question) {
   return Boolean(req && req.wantsChart && CAPACITY_WORDS.test(String(question || '')));
@@ -114,7 +116,7 @@ function buildDataset(records, requiredNames = []) {
   const lines = [
     '| 업체 | 거점 | 구분 | CAPA (톤/년) | 원문 표기 | 출처 |',
     '| --- | --- | --- | --- | --- | --- |',
-    ...sorted.map((r) => `| ${r.entity} | ${r.site || '-'} | ${r.status}${r.year ? ` (${r.year})` : ''} | ${fmtTons(r.tons)} | ${r.original}${r.basis.startsWith('환산') ? ` → ${r.basis}` : ''} | [${r.source}] |`),
+    ...sorted.map((r) => `| ${r.entity} | ${r.site || '-'} | ${STATUS_LABEL[r.status]}${r.year ? ` (${r.year})` : ''} | ${fmtTons(r.tons)} | ${r.original}${r.basis.startsWith('환산') ? ` → ${r.basis}` : ''} | [${r.source}] |`),
   ];
   for (const name of requiredNames) {
     const key = name.name.toLowerCase();
@@ -128,9 +130,9 @@ function buildDataset(records, requiredNames = []) {
     title: '업체·거점별 SAF/재생연료 생산능력 (톤/년, 환산 포함)',
     unit: '톤',
     combine: 'sum',
-    labels: rows.map((r) => `${r.entity}${r.site ? ` ${r.site}` : ''}${r.status !== '가동' ? ` (${r.status})` : ''}`),
+    labels: rows.map((r) => `${r.entity}${r.site ? ` ${r.site}` : ''}${r.status !== '가동' ? ` (${STATUS_LABEL[r.status]})` : ''}`),
     groups: rows.map((r) => r.entity),
-    notes: rows.map((r) => `${r.status}${r.year ? ` ${r.year}` : ''} · 원문 ${r.original}${r.basis.startsWith('환산') ? ` → ${r.basis}` : ''}`),
+    notes: rows.map((r) => `${STATUS_LABEL[r.status]}${r.year ? ` ${r.year}` : ''} · 원문 ${r.original}${r.basis.startsWith('환산') ? ` → ${r.basis}` : ''}`),
     series: [{ name: 'CAPA (톤/년)', data: rows.map((r) => Math.round(r.tons)) }],
   };
   const converted = records.some((r) => r.basis.startsWith('환산'));

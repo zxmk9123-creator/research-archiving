@@ -1195,3 +1195,33 @@ test('a grounded-less derived figure in parentheses is dropped with its parenthe
   const r = nc.guardAnswerNumbers('일일 48,000배럴 (연간 약 999만 톤) 가동 [1]', [{ summary: 'Martinez 48,000 b/d capacity' }], () => [1], (m) => m.summary);
   assert.equal(r.text, '일일 48,000배럴 가동 [1]');
 });
+
+test('chart labels: different plants of one known company merge into one stacked row; state wording is canonical (현대/기존/가동 -> 현재)', () => {
+  const roster = [{ name: 'Neste', names: ['neste'] }, { name: 'Chevron', names: ['chevron'] }, { name: 'Phillips 66', names: ['phillips 66'] }];
+  const chart = {
+    type: 'hbar', unit: '톤',
+    labels: ['Neste Rotterdam (2026)', 'Neste Singapore (현대)', 'Chevron (2030 목표, 10만 b/d)', 'Chevron Geismar (기존)', 'Phillips 66 Rodeo'],
+    series: [{ name: 's', data: [1200000, 1000000, 4646000, 1030000, 2310000] }],
+  };
+  const out = searchRouter.enrichChartJson(chart, roster);
+  assert.equal(out.combine, 'sum');
+  assert.deepEqual(out.groups.slice(0, 2), ['Neste', 'Neste']); // plants with their own site names merge
+  assert.notEqual(out.groups[2], 'Chevron'); // a corporate target (no site) is never summed with a plant
+  assert.equal(out.labels[1], 'Neste Singapore (현재)');
+  assert.equal(out.labels[3], 'Chevron Geismar (현재)');
+  assert.equal(out.labels[2], 'Chevron (2030 목표, 10만 b/d)'); // unrecognised detail text is left as written
+  assert.equal(out.notes[0], '2026');
+  assert.equal(searchRouter.normalizeStatusLabel('Eco (2030 신규 SAF 플랜트)'), 'Eco (2030 계획)'); // long status wording is shortened to the canonical term
+  assert.equal(searchRouter.normalizeStatusLabel('Eco (2030 신규)'), 'Eco (2030 계획)');
+  assert.equal(searchRouter.normalizeStatusLabel('Eco (기존 재생 연료)'), 'Eco (기존 재생 연료)');
+  assert.equal(searchRouter.normalizeStatusLabel('Eco (기존)'), 'Eco (현재)');
+});
+
+test('proper-noun canonicalization: a near-misspelling of a name in the materials is restored (Ecoseas -> EcoCeres)', () => {
+  const nf = require('../server/lib/nameFix');
+  const mats = ['EcoCeres plans a SAF plant in Dongguan', 'Neste Rotterdam Singapore'];
+  const roster = [{ name: '에코세레스', rawNames: ['EcoCeres'] }];
+  assert.equal(nf.canonicalizeProperNouns('Ecoseas는 Neste와 Singapore에 있다', mats, roster), 'EcoCeres는 Neste와 Singapore에 있다');
+  assert.equal(nf.canonicalizeProperNouns('Neste Rotterdam', mats, roster), 'Neste Rotterdam');
+  assert.equal(nf.canonicalizeProperNouns('Zzzzzzzz stays', mats, roster), 'Zzzzzzzz stays');
+});
