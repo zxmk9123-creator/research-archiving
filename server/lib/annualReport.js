@@ -51,5 +51,19 @@ function verifyAgainstPages(records, pages) {
   return { kept, dropped };
 }
 
+// Area figures without an explicit definition inherit the basis their own page states
+// ("Weighted Average Hectarage", or an "as at <date>" year-end basis) — decided from the page text, not by the model.
+function fillAreaDefinitions(records, pages) {
+  const byN = new Map(pages.map((p) => [p.n, String(p.text).replace(/\s+/g, ' ')]));
+  return records.map((r) => {
+    if (r.definition || !/^(ha|hectares?)$/i.test(String(r.unit || '').trim())) return r;
+    const text = byN.get(Number(r.page)) || '';
+    if (/weighted average hectarage/i.test(text)) return { ...r, definition: 'Weighted Average Hectarage' };
+    const asAt = text.match(/as at \d{1,2} [A-Za-z]+ \d{4}/i);
+    return asAt ? { ...r, definition: asAt[0] } : r;
+  });
+}
+
+module.exports.fillAreaDefinitions = fillAreaDefinitions;
 module.exports.EXTRACTION_SYSTEM = EXTRACTION_SYSTEM;
 module.exports.verifyAgainstPages = verifyAgainstPages;

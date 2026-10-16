@@ -32,7 +32,16 @@ async function ensureSource() {
   return ins.rows[0].id;
 }
 
-async function ingestAnnualReport({ url, entity, publishedAt = null, store = true }) {
+// Tracking params are removed; a Google Drive "view" link is turned into its direct download link.
+function cleanUrl(raw) {
+  const u = new URL(String(raw).trim());
+  for (const k of Array.from(u.searchParams.keys())) if (/^utm_/i.test(k)) u.searchParams.delete(k);
+  const drive = u.hostname === 'drive.google.com' && u.pathname.match(/\/file\/d\/([^/]+)/);
+  return drive ? `https://drive.google.com/uc?export=download&id=${drive[1]}` : u.toString();
+}
+
+async function ingestAnnualReport({ url: rawUrl, entity, publishedAt = null, store = true }) {
+  const url = cleanUrl(rawUrl);
   const pages = await extractPdfPages(await fetchPdfBuffer(url));
   const selected = ar.selectPages(pages);
   const user = selected.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n');
@@ -40,7 +49,9 @@ async function ingestAnnualReport({ url, entity, publishedAt = null, store = tru
   const text = String(result.text || '').replace(/^```(?:json)?/i, '').replace(/```$/, '');
   let records = [];
   try { records = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); } catch (_) { /* unparsable */ }
-  const { kept, dropped } = ar.verifyAgainstPages(Array.isArray(records) ? records : [], selected);
+  const verified = ar.verifyAgainstPages(Array.isArray(records) ? records : [], selected);
+  const kept = ar.fillAreaDefinitions(verified.kept, selected);
+  const dropped = verified.dropped;
   const years = kept.map((r) => Number(r.fiscal_year)).filter((y) => y > 2000);
   const fiscalYear = years.length ? Math.max(...years) : null;
   const out = { totalPages: pages.length, selectedPages: selected.map((p) => p.n), sentChars: user.length, extracted: records.length, verified: kept.length, dropped, fiscalYear, records: kept };
@@ -70,4 +81,4 @@ async function ingestAnnualReport({ url, entity, publishedAt = null, store = tru
   return { ...out, stored: true, itemId: rows[0].id };
 }
 
-module.exports = { ingestAnnualReport, buildReportText, valueText };
+module.exports = { cleanUrl, ingestAnnualReport, buildReportText, valueText };

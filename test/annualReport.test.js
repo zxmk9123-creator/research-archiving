@@ -40,3 +40,24 @@ test('buildReportText states ranges, definitions and pages', () => {
   assert.match(t, /20~120 FFB mt\/hr/);
   assert.match(t, /293,427 ha \(기준: Weighted Average Hectarage\) — 보고서 p\.36/);
 });
+
+test('fillAreaDefinitions: area without a definition inherits its page basis; other units untouched', () => {
+  const pages = [{ n: 36, text: 'Weighted Average Hectarage - Mature (ha) 265,983' }, { n: 30, text: 'Planted area as at 30 September 2025 301,090 hectares' }];
+  const out = ar.fillAreaDefinitions([
+    { page: 36, unit: 'ha', metric: 'total planted area' },
+    { page: 30, unit: 'hectares', metric: 'planted area' },
+    { page: 36, unit: 'mt', metric: 'FFB' },
+    { page: 36, unit: 'ha', definition: 'Mature' },
+  ], pages);
+  assert.equal(out[0].definition, 'Weighted Average Hectarage');
+  assert.equal(out[1].definition, 'as at 30 September 2025');
+  assert.equal(out[2].definition, undefined);
+  assert.equal(out[3].definition, 'Mature');
+});
+
+test('cleanUrl drops tracking params and converts Google Drive view links', () => {
+  const { cleanUrl } = require('../server/lib/annualReportIngest');
+  assert.equal(cleanUrl('https://a.com/x.pdf?utm_source=chatgpt.com'), 'https://a.com/x.pdf');
+  assert.equal(cleanUrl('https://a.com/?wpfb_dl=291&utm_source=chatgpt.com'), 'https://a.com/?wpfb_dl=291');
+  assert.equal(cleanUrl('https://drive.google.com/file/d/ABC123/view?utm_source=chatgpt.com'), 'https://drive.google.com/uc?export=download&id=ABC123');
+});
