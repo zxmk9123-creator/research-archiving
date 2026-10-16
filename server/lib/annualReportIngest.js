@@ -50,7 +50,7 @@ async function ingestAnnualReport({ url, entity, publishedAt = null, store = tru
     await pool.query(
       `INSERT INTO annual_report_facts (entity, fiscal_year, segment, scope, location, metric, value, value_max, unit, definition, page, source_url)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       ON CONFLICT (entity, fiscal_year, segment, scope, COALESCE(location,''), metric, COALESCE(definition,''), source_url)
+       ON CONFLICT (entity, COALESCE(fiscal_year, 0), COALESCE(segment, ''), COALESCE(scope, ''), COALESCE(location, ''), metric, COALESCE(definition, ''), source_url)
        DO UPDATE SET value = EXCLUDED.value, value_max = EXCLUDED.value_max, unit = EXCLUDED.unit, page = EXCLUDED.page`,
       [entity, r.fiscal_year || fiscalYear, r.segment, r.scope, r.location || null, r.metric, r.value, r.value_max > 0 ? r.value_max : null, r.unit, r.definition || null, r.page, url]
     );
