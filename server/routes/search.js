@@ -1033,6 +1033,19 @@ function enrichChartJson(chart, roster) {
   const notes = Array.isArray(chart.notes) ? chart.notes : labels.map((l) => (l.match(/[(（]([^)）]*)[)）]/) || [])[1] || '');
   return { ...out, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)), notes };
 }
+// A company-wide total ("전체", "전사 합계") must never share an axis with the single
+// sites it sums; the total is dropped from the chart (it stays in the table/text).
+const TOTAL_LABEL = /^\s*(전체|전사|합계|총계|총합|total|overall|all)\b|^\s*(전체|전사|합계|총계|총합)(?![A-Za-z가-힣])/i;
+function dropTotalFromSiteChart(chart) {
+  if (!chart || !Array.isArray(chart.labels) || chart.labels.length < 3 || !Array.isArray(chart.series)) return chart;
+  const idx = chart.labels.map((l, i) => (TOTAL_LABEL.test(String(l)) ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length || idx.length === chart.labels.length) return chart;
+  const keep = (_, i) => !idx.includes(i);
+  const out = { ...chart, labels: chart.labels.filter(keep), series: chart.series.map((s) => ({ ...s, data: (s.data || []).filter(keep) })) };
+  if (Array.isArray(chart.groups)) out.groups = chart.groups.filter(keep);
+  if (Array.isArray(chart.notes)) out.notes = chart.notes.filter(keep);
+  return out;
+}
 async function enrichChartBlocks(text, candidates = [], question = '') {
   if (!/```chart/.test(text)) return text;
   const roster = await getRoster();
@@ -1044,7 +1057,7 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
       if (guardedChart.fixed || guardedChart.dropped) console.log(`ai-search chart_number_guard fixed=${guardedChart.fixed} dropped=${guardedChart.dropped}`);
       const compliant = requestCompliance.applyChartCompliance(guardedChart.chart, requestCompliance.parseRequest(question));
       if (compliant.changed.length) console.log(`ai-search request_compliance chart_${compliant.changed.join('+')}`);
-      let chartOut = compliant.chart;
+      let chartOut = dropTotalFromSiteChart(compliant.chart);
       const um = numberCheck.unitMultiplier(chartOut.unit);
       if (um) {
         const rec = tableCheck.reconcileChartWithTable(chartOut, rowMap, um.mult, um.cls);
@@ -1437,6 +1450,7 @@ module.exports.callHedged = callHedged;
 module.exports.answerCacheKey = answerCacheKey;
 module.exports._clearAnswerCache = () => answerCache.clear();
 module.exports.enrichChartBlocks = enrichChartBlocks;
+module.exports.dropTotalFromSiteChart = dropTotalFromSiteChart;
 module.exports.requiredCompanies = requiredCompanies;
 module.exports.ensureCompanyCoverage = ensureCompanyCoverage;
 module.exports.buildCoverageBlock = buildCoverageBlock;

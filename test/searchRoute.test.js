@@ -1298,3 +1298,10 @@ test('with a verified dataset the writer\'s own unit-conversion remarks are drop
     restoreProvider();
   }
 });
+
+test('dropTotalFromSiteChart removes company-wide total from a site chart', () => {
+  const { dropTotalFromSiteChart } = require('../server/routes/search');
+  const out = dropTotalFromSiteChart({ type: 'bar', labels: ['Neste 로테르담', 'Neste 싱가포르', '전체'], series: [{ name: '현재', data: [1, 2, 3] }] });
+  assert.deepEqual(out.labels, ['Neste 로테르담', 'Neste 싱가포르']);
+  assert.deepEqual(out.series[0].data, [1, 2]);
+});

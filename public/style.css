@@ -287,8 +287,11 @@ p { margin: 0; }
 .ai-answer-list li { margin-bottom: 6px; }
 .ai-answer-sublist { margin: 4px 0 0; }
 .ai-answer-table { width: 100%; margin: 0 0 var(--sp-3); border-collapse: collapse; font-size: 14px; }
-.ai-answer-table th, .ai-answer-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
-.ai-answer-table th { background: var(--surface-sunken); font-weight: 600; }
+.ai-answer-table-wrap { overflow-x: auto; margin: 0 0 var(--sp-3); }
+.ai-answer-table-wrap .ai-answer-table { margin: 0; }
+.ai-answer-table th, .ai-answer-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.ai-answer-table th { background: var(--surface-sunken); font-weight: 600; text-align: center; }
+.ai-answer-table td.num { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ai-answer-p:last-child, .ai-answer-list:last-child, .ai-answer-table:last-child { margin-bottom: 0; }
 
 /* Streamed answer, rendered through the same renderAnswerHtml() the final

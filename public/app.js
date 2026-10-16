@@ -864,9 +864,17 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
     if (rows.length >= 2 && isSeparatorRow(rows[1])) {
       const header = rows[0];
       const body = rows.slice(2);
-      return `<table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
-        body.map((r) => `<tr>${r.map((c) => `<td>${renderCellHtml(c, sources)}</td>`).join('')}</tr>`).join('')
-      }</tbody></table>`;
+      // A column is "numeric" when most of its filled cells start with a digit
+      // (number/range/currency); those columns are centred under a centred
+      // heading with tabular figures so values line up with their labels.
+      const numCol = header.map((_, i) => {
+        const vals = body.map((r) => (r[i] || '').replace(/^[~≈약>＜<\s]+/, '')).filter((v) => v && v !== '-' && v !== '—');
+        return vals.length > 0 && vals.filter((v) => /^[+-]?[$€£₩]?\d/.test(v)).length / vals.length >= 0.6;
+      });
+      const cls = (i) => (numCol[i] ? ' class="num"' : '');
+      return `<div class="ai-answer-table-wrap"><table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
+        body.map((r) => `<tr>${r.map((c, i) => `<td${cls(i)}>${renderCellHtml(c, sources)}</td>`).join('')}</tr>`).join('')
+      }</tbody></table></div>`;
     }
     return `<p class="ai-answer-p">${block.lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
   }
