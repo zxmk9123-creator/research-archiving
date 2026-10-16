@@ -11,6 +11,14 @@ test('familyOf separates FFB / CPO / PK / area and rejects rates, rubber, mature
   assert.equal(arr.familyOf('PK Production'), 'pk');
   assert.equal(arr.familyOf('total planted area'), 'area');
   assert.equal(arr.familyOf('planted area - mature'), null);
+  assert.equal(arr.familyOf('CPO'), 'cpo');
+  assert.equal(arr.familyOf('PK'), 'pk');
+  assert.equal(arr.familyOf('FFB'), 'ffb');
+  assert.equal(arr.familyOf('planted area', 'Mature'), null);
+  assert.equal(arr.familyOf('planted area', 'total planted area'), 'area');
+  assert.equal(arr.familyOf('coconuts planted area'), null);
+  assert.equal(arr.familyOf('total replanted area'), null);
+  assert.equal(arr.familyOf('FFB', 'Nucleus'), null);
   assert.equal(arr.familyOf('rubber planted area'), null);
   assert.equal(arr.familyOf('Oil Extraction Rate - CPO'), null);
   assert.equal(arr.familyOf('FFB yield per mature hectare'), null);
@@ -38,7 +46,7 @@ test('onePerEntity prefers the year-end basis over weighted average', () => {
     arr.toRecord(row({ metric: 'total planted area', value: 293427, unit: 'ha', definition: 'Weighted Average Hectarage' })),
     arr.toRecord(row({ metric: 'planted area', value: 301090, unit: 'hectares', definition: 'as at 30 September 2025' })),
   ];
-  const out = arr.onePerEntity(recs);
+  const out = arr.onePerEntity(recs, 'area');
   assert.equal(out.length, 1);
   assert.equal(out[0].amount, 301090);
 });
@@ -52,4 +60,22 @@ test('dataset: an area question builds a hectare table + chart from annual recor
   assert.equal(ds.chart.unit, '헥타르');
   // a production question drops area records
   assert.equal(dp.recordsForQuestion([mk('KLK', 1)], '팜유 생산량 표', null).length, 0);
+});
+
+test('toRecord reads thousand/million tonne units; onePerEntity prefers a multi-year series and the latest year', () => {
+  const k = arr.toRecord(row({ entity: 'Golden Agri-Resources', metric: 'CPO', value: 2769, unit: "'000 tonnes", fiscal_year: 2025 }));
+  assert.equal(k.amount, 2769000);
+  const m = arr.toRecord(row({ entity: 'Golden Agri-Resources', metric: 'CPO', value: 2.2, unit: 'million tonnes', fiscal_year: 2025, definition: 'for the year' }));
+  assert.equal(m.amount, 2200000);
+  const old = arr.toRecord(row({ entity: 'Golden Agri-Resources', metric: 'CPO', value: 2722, unit: "'000 tonnes", fiscal_year: 2024 }));
+  const out = arr.onePerEntity([k, m, old], 'cpo');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].amount, 2769000); // series (2024+2025) beats the one-off 2.2 million
+});
+
+test('area: an all-crops total loses to the smaller oil-palm total; mature-only is never picked', () => {
+  const a = arr.toRecord(row({ entity: 'Wilmar', metric: 'planted area', value: 241761, unit: 'Hectares', definition: 'total planted area' }));
+  const mature = arr.toRecord(row({ entity: 'Wilmar', metric: 'planted area', value: 216772, unit: 'Hectares', definition: 'Mature' }));
+  assert.equal(mature, null);
+  assert.equal(arr.onePerEntity([a], 'area')[0].amount, 241761);
 });

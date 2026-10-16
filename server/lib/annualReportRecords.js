@@ -4,18 +4,24 @@
 // money and per-hour/day capacities are not charted here (they stay in the report text).
 const pool = require('../db/pool');
 
-const TONNE_UNIT = /^(?:(million|'?000|thousand)\s+)?(?:mt|metric\s+tonnes?|tonnes?|tons?)$/i;
+const TONNE_UNIT = /^(?:(million|thousand|M|[\u2019'\u2018]?000)\s*)?(?:mt|metric\s+(?:tonnes?|tons?)|tonnes?|tons?)$/i;
 const HA_UNIT = /^(?:ha|hectares?)$/i;
 
-function familyOf(metric) {
+// Wording that makes a figure NOT the comparable one (rates, prices, other crops, partial bases, certified volumes).
+const NOT_COMPARABLE = /(yield|rate|price|cost|ratio|per hectare|per ha|per mature|sales|export|capacity|revenue|%)/i;
+const OTHER_CROP = /(rubber|sugar|cocoa|coconut|durian|avocado|banana|pineapple|organic|replant|harvested area|associate|subsidiar|cash crop|estate area)/i;
+const PARTIAL_BASIS = /(mature|immature|young|nucleus|plasma|associate|organic|certified|rspo|mspo|iscc|segment|since |coconut)/i;
+
+function familyOf(metric, definition = '') {
   const m = String(metric || '').toLowerCase();
-  if (/(rate|yield|cost|price|per hectare|per mature|extraction|ratio|%)/.test(m)) return null;
-  if (/(rubber|sugar|cocoa)/.test(m)) return null;
-  if (/ffb|fresh fruit bunch/.test(m) && /(production|output|harvest)/.test(m)) return 'ffb';
-  if (/(crude palm kernel oil|cpko)/.test(m)) return null;
-  if (/\bcpo\b|crude palm oil/.test(m) && /(production|output)/.test(m)) return 'cpo';
-  if (/(\bpk\b|palm kernel)/.test(m) && /(production|output)/.test(m)) return 'pk';
-  if (/(planted area|hectarage|oil palm area)/.test(m) && !/(mature|immature|young)/.test(m)) return 'area';
+  const d = String(definition || '');
+  if (NOT_COMPARABLE.test(m) || OTHER_CROP.test(m)) return null;
+  if (/(planted area|hectarage)/.test(m)) return PARTIAL_BASIS.test(m) || PARTIAL_BASIS.test(d) || OTHER_CROP.test(d) ? null : 'area';
+  if (PARTIAL_BASIS.test(m) || PARTIAL_BASIS.test(d)) return null;
+  if (/(crude palm kernel oil|cpko|kernel oil)/.test(m)) return null;
+  if (/\bffb\b|fresh fruit bunch/.test(m)) return 'ffb';
+  if (/\bcpo\b|crude palm oil/.test(m)) return 'cpo';
+  if (/(\bpk\b|palm kernel)/.test(m)) return 'pk';
   return null;
 }
 const FAMILY_LABEL = { ffb: 'FFB 생산량', cpo: 'CPO(원유) 생산량', pk: 'PK(팜핵) 생산량', area: '식재 면적(전체)' };
@@ -31,7 +37,7 @@ function familyForQuestion(question) {
 }
 
 function toRecord(row) {
-  const family = familyOf(row.metric);
+  const family = familyOf(row.metric, row.definition);
   if (!family) return null;
   const unit = String(row.unit || '').trim();
   const value = Number(row.value);
@@ -54,14 +60,28 @@ function toRecord(row) {
   };
 }
 
-// One definition per company and year: a year-end ("as at") basis wins over a weighted-average one.
-function onePerEntity(records) {
-  const rank = (r) => (/as at/i.test(r.definition || '') ? 3 : /weighted/i.test(r.definition || '') ? 1 : 2);
+// One figure per company: among the candidates of the company's latest year, a figure that belongs to a
+// multi-year series (the same metric and definition stated for several years) is preferred over a one-off
+// mention; then a year-end ("as at") basis over a weighted average; for area the smaller total is taken
+// (an all-crops total is never smaller than the oil-palm total); for output the larger.
+function onePerEntity(records, family) {
+  const seriesYears = new Map();
+  for (const r of records) {
+    const k = `${r.entity.toLowerCase()}|${r.metric}|${r.definition || ''}`;
+    if (!seriesYears.has(k)) seriesYears.set(k, new Set());
+    seriesYears.get(k).add(r.year || 0);
+  }
+  const series = (r) => seriesYears.get(`${r.entity.toLowerCase()}|${r.metric}|${r.definition || ''}`).size;
+  const defRank = (r) => (/as at/i.test(r.definition || '') ? 3 : /weighted/i.test(r.definition || '') ? 1 : 2);
+  const better = (a, b) => (series(a) - series(b)) || (defRank(a) - defRank(b)) || (family === 'area' ? b.amount - a.amount : a.amount - b.amount);
+  const latest = new Map();
+  for (const r of records) latest.set(r.entity.toLowerCase(), Math.max(latest.get(r.entity.toLowerCase()) || 0, r.year || 0));
   const best = new Map();
   for (const r of records) {
-    const key = `${r.entity.toLowerCase()}|${r.site || ''}|${r.year || 0}`;
+    const key = r.entity.toLowerCase();
+    if ((r.year || 0) !== latest.get(key)) continue;
     const cur = best.get(key);
-    if (!cur || rank(r) > rank(cur) || (rank(r) === rank(cur) && r.amount > cur.amount)) best.set(key, r);
+    if (!cur || better(r, cur) > 0) best.set(key, r);
   }
   return [...best.values()];
 }
@@ -75,23 +95,22 @@ async function loadAnnualRecords(question, { candidates = [], baseIndex = 0 } = 
        FROM annual_report_facts f JOIN items i ON i.source_url = f.source_url || '#annual-report-facts' AND i.status = 'Published'`
   );
   const mapped = rows.filter((r) => r.scope !== 'country' && r.scope !== 'site').map((r) => ({ row: r, rec: toRecord(r) })).filter((x) => x.rec && x.rec.family === family);
-  // latest fiscal year per company
-  const latest = new Map();
-  for (const x of mapped) latest.set(x.rec.entity.toLowerCase(), Math.max(latest.get(x.rec.entity.toLowerCase()) || 0, x.rec.year || 0));
-  const kept = mapped.filter((x) => (x.rec.year || 0) === latest.get(x.rec.entity.toLowerCase()));
+  const picked = onePerEntity(mapped.map((x) => x.rec), family);
+  const rowOf = new Map(mapped.map((x) => [x.rec, x.row]));
   const items = [];
   const indexOf = new Map(candidates.map((c, i) => [c.id, i + 1]));
   const records = [];
-  for (const x of kept) {
-    let idx = indexOf.get(x.row.item_id);
+  for (const rec of picked) {
+    const row = rowOf.get(rec);
+    let idx = indexOf.get(row.item_id);
     if (!idx) {
-      items.push({ id: x.row.item_id, title: x.row.title, summary: x.row.summary, ai_summary: x.row.ai_summary, insight: x.row.insight, ai_insight: x.row.ai_insight, published_at: x.row.published_at, source_name: 'Company annual report' });
+      items.push({ id: row.item_id, title: row.title, summary: row.summary, ai_summary: row.ai_summary, insight: row.insight, ai_insight: row.ai_insight, published_at: row.published_at, source_name: 'Company annual report' });
       idx = baseIndex + items.length;
-      indexOf.set(x.row.item_id, idx);
+      indexOf.set(row.item_id, idx);
     }
-    records.push({ ...x.rec, source: idx });
+    records.push({ ...rec, source: idx });
   }
-  return { records: family === 'area' ? onePerEntity(records) : records, items, family };
+  return { records, items, family };
 }
 
 module.exports = { familyOf, familyForQuestion, toRecord, onePerEntity, loadAnnualRecords, FAMILY_LABEL };
