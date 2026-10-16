@@ -1166,7 +1166,8 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .ai-copy-btn.copied { color: #2f9e6f; opacity: 1; }
 .ai-chart { margin: 0 0 var(--sp-3); }
 .ai-chart figcaption { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-.ai-chart svg { width: 100%; max-width: 560px; height: auto; color: var(--text-muted, #666); }
+.ai-chart { overflow-x: auto; }
+.ai-chart svg { width: 100%; min-width: 480px; max-width: 640px; height: auto; color: var(--text-muted, #666); }
 .ai-chart-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
 .ai-chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 

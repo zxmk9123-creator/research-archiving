@@ -946,7 +946,8 @@ function renderChartHtml(jsonText) {
     }
   }
   const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
-  const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 260" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
+  let vbH = 260;
+  const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 ${vbH}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
 
   if (type === 'scatter') {
@@ -1002,13 +1003,25 @@ function renderChartHtml(jsonText) {
     return wrap(g, '');
   }
 
-  const W = 560, H = 260, R = 16;
+  const W = 560, R = 16;
   const T = c.yLabel ? 30 : 18; // headroom for value labels / the unit caption
   const n = labels.length, n0 = labels.length;
   const horizontal = type === 'hbar';
+  // Rankings read best sorted high -> low (one series, category bars).
+  if (horizontal && series.length === 1) {
+    const order = labels.map((_, i) => i).sort((a, b) => (Number.isFinite(series[0].data[b]) ? series[0].data[b] : -Infinity) - (Number.isFinite(series[0].data[a]) ? series[0].data[a] : -Infinity));
+    const ls = order.map((i) => labels[i]), ds = order.map((i) => series[0].data[i]);
+    labels.splice(0, labels.length, ...ls);
+    series[0].data = ds;
+  }
   const stacked = type === 'stacked' || type === 'area';
   const hasSubLine = labels.some((l) => /^(.+?)\s*[(（]/.test(l));
-  const L = horizontal ? 96 : 56;
+  // Label gutter sized to the longest label (Hangul ~10px, Latin ~6px at 11px font) so names are not cut off.
+  const textPx = (t) => Array.from(t).reduce((a, ch) => a + (/[가-힣]/.test(ch) ? 11 : 6.2), 0);
+  const L = horizontal ? Math.min(210, Math.max(90, Math.ceil(Math.max(...labels.map((l) => textPx(trunc(l, 26))))) + 14)) : 56;
+  // Tall enough that every bar keeps a readable band (about 26px per category).
+  const H = horizontal ? Math.max(200, T + 28 + labels.length * 26) : 260;
+  vbH = H;
   const B = horizontal ? 24 : (n0 > 6 ? 52 : hasSubLine ? 44 : 30) + (c.xLabel ? 16 : 0);
   const sums = labels.map((_, i) => series.reduce((a, s) => a + Math.max(0, s.data[i]), 0));
   const all = series.flatMap((s) => s.data).filter(Number.isFinite);
@@ -1030,7 +1043,7 @@ function renderChartHtml(jsonText) {
   }
   labels.forEach((l, i) => {
     if (horizontal) {
-      g += `<text x="${L - 6}" y="${cat(i) + band / 2 + 4}" font-size="10" text-anchor="end" fill="currentColor">${escapeHtml(trunc(l, 14))}</text>`;
+      g += `<text x="${L - 6}" y="${cat(i) + band / 2 + 4}" font-size="11" text-anchor="end" fill="currentColor">${escapeHtml(trunc(l, 26))}</text>`;
     } else {
       const x = cat(i) + band / 2;
       const m = l.match(/^(.*?)\s*([(（].*)$/);

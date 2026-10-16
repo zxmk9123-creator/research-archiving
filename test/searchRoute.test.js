@@ -858,3 +858,9 @@ test('SYSTEM_PROMPT: carries the thoroughness and multi-target data-assembly pro
   assert.match(src, /Thoroughness protocol/);
   assert.match(src, /Comparison and data requests across several targets/);
 });
+
+test('SYSTEM_PROMPT: layout discipline (conclusion first, no duplicated data list, top-10 charts, short labels, one unit)', () => {
+  const src = require('fs').readFileSync(require.resolve('../server/routes/search.js'), 'utf8');
+  assert.match(src, /Layout discipline for data answers/);
+  assert.match(src, /AT MOST 10 bars\/points/);
+});
