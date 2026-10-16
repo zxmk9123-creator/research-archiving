@@ -214,7 +214,17 @@ function buildStreamingAttempts() {
     const firstTokenTimeoutMs = Number(process.env.FREELLMAPI_FAST_MODEL_TIMEOUT_MS) || 8000;
     attempts.push({ model: fastModel, firstTokenTimeoutMs });
   }
-  attempts.push({ model: process.env.FREELLMAPI_MODEL || 'auto', firstTokenTimeoutMs: null });
+  const mainModel = process.env.FREELLMAPI_MODEL || 'auto';
+  // Stall retry: the router's "auto" can land on an upstream that never produces a first
+  // token (production logs: "empty completion" after 60-590 s). Instead of waiting out
+  // the full 150 s cap on one such route, an attempt with no first token inside the
+  // window is abandoned and "auto" is asked again (a different route is usually picked);
+  // the last attempt keeps the full cascade budget. FREELLMAPI_STALL_RETRY=off disables.
+  if ((process.env.FREELLMAPI_STALL_RETRY || '').toLowerCase() !== 'off') {
+    attempts.push({ model: mainModel, firstTokenTimeoutMs: Number(process.env.FREELLMAPI_STALL_FIRST_MS) || 25000 });
+    attempts.push({ model: mainModel, firstTokenTimeoutMs: Number(process.env.FREELLMAPI_STALL_SECOND_MS) || 35000 });
+  }
+  attempts.push({ model: mainModel, firstTokenTimeoutMs: null });
   return attempts;
 }
 

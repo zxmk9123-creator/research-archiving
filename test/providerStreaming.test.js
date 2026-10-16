@@ -235,15 +235,22 @@ test('callProviderWithFallbackStreaming: an empty accumulated response is reject
   }
 }));
 
-test('buildStreamingAttempts: only the default model attempt exists when FREELLMAPI_FAST_MODEL is unset', () => withEnv(BASE_ENV, () => {
+test('buildStreamingAttempts: with the stall retry disabled only the default model attempt exists', () => withEnv({ ...BASE_ENV, FREELLMAPI_STALL_RETRY: 'off' }, () => {
   const attempts = buildStreamingAttempts();
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0].model, 'auto');
   assert.equal(attempts[0].firstTokenTimeoutMs, null);
 }));
 
+test('buildStreamingAttempts: by default a stalled route is abandoned and "auto" is asked again; the last attempt keeps the full budget', () => withEnv(BASE_ENV, () => {
+  const attempts = buildStreamingAttempts();
+  assert.equal(attempts.length, 3);
+  assert.deepEqual(attempts.map((a) => a.model), ['auto', 'auto', 'auto']);
+  assert.deepEqual(attempts.map((a) => a.firstTokenTimeoutMs), [25000, 35000, null]);
+}));
+
 test('buildStreamingAttempts: the fast-model attempt comes first and carries a first-token timeout; the default attempt has none', () => withEnv(
-  { ...BASE_ENV, FREELLMAPI_FAST_MODEL: 'fast-model', FREELLMAPI_FAST_MODEL_TIMEOUT_MS: '3000' },
+  { ...BASE_ENV, FREELLMAPI_FAST_MODEL: 'fast-model', FREELLMAPI_FAST_MODEL_TIMEOUT_MS: '3000', FREELLMAPI_STALL_RETRY: 'off' },
   () => {
     const attempts = buildStreamingAttempts();
     assert.equal(attempts.length, 2);
