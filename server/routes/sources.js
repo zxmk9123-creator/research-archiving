@@ -136,7 +136,7 @@ router.post('/:id/collect', requireAuth, async (req, res) => {
 // /collect-company-profiles/status. Safe to repeat: dedup makes reruns no-ops.
 router.post('/collect-company-profiles', requireAuth, async (req, res) => {
   const only = Array.isArray(req.body && req.body.only) ? req.body.only : undefined;
-  const r = await companyProfileCollection.runCompanyProfileCollection({ only });
+  const r = await companyProfileCollection.runCompanyProfileCollection({ only, set: req.body && req.body.set });
   res.status(r.started ? 202 : 409).json(r);
 });
 router.get('/collect-company-profiles/status', requireAuth, (req, res) => {

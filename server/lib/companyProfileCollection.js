@@ -20,6 +20,28 @@ const COMPANIES = [
   { name: 'VARO Energy', aliases: ['VARO', 'Preem', '프림'], extra: ['Preem Lysekil ICR SEK 5.5 billion FID', 'Preem Rotterdam SAF $600M VARO FID', 'VARO Energy acquires Preem 2026', 'Preem Synsat co-processing renewable diesel Lysekil'] },
 ];
 
+// Second one-off set (palm-oil upstream/refining majors): CPO mills, refineries, oleochemicals,
+// kernel crushing plants, FFB/CPO/PK output and planted area.
+const PALM_TEMPLATES = [
+  (n) => `${n} palm oil refinery capacity tonnes per year`,
+  (n) => `${n} CPO mills FFB CPO PK production annual output`,
+  (n) => `${n} oleochemical kernel crushing plant capacity`,
+  (n) => `${n} oil palm planted area hectares plantation`,
+  (n) => `${n} 팜유 정제 생산능력 플랜테이션 면적`,
+];
+const PALM_COMPANIES = [
+  { name: 'Golden Agri-Resources', qname: 'Golden Agri-Resources GAR Sinar Mas', aliases: ['Golden Agri-Resources', 'Golden Agri', 'Sinar Mas Agribusiness', '시나르마스'], extra: ['Golden Agri-Resources planted area mills refineries annual report'] },
+  { name: 'Wilmar', qname: 'Wilmar International', aliases: ['Wilmar', 'Wilmar International', '윌마'], extra: ['Wilmar International palm oil refining capacity plants oleochemicals', 'Wilmar plantation planted area CPO production'] },
+  { name: 'SD Guthrie', qname: 'SD Guthrie Berhad Sime Darby Plantation', aliases: ['SD Guthrie', 'SD Guthrie Berhad', 'Sime Darby Plantation'], extra: ['SD Guthrie FFB production planted area mills downstream'] },
+  { name: 'KLK', qname: 'KLK Kuala Lumpur Kepong Berhad', aliases: ['KLK', 'Kuala Lumpur Kepong', 'KLK Oleo'], extra: ['Kuala Lumpur Kepong plantation oleochemical KLK Oleo capacity', 'KLK refinery kernel crushing capacity'] },
+  { name: 'Tunas Baru Lampung', qname: 'TBL Tunas Baru Lampung Sungai Budi', aliases: ['Tunas Baru Lampung', 'Sungai Budi', 'Sungai Budi Group'], extra: ['Sungai Budi Group palm oil refinery cooking oil capacity'] },
+  { name: 'Mewah', qname: 'Mewah International', aliases: ['Mewah', 'Mewah International'], extra: ['Mewah International refinery capacity Pasir Gudang Port Klang'] },
+  { name: 'IOI Corporation', qname: 'IOI Group IOI Corporation', aliases: ['IOI Corporation', 'IOI Group', 'IOI Loders Croklaan'], extra: ['IOI Corporation plantation planted area FFB mills refinery oleochemical'] },
+  { name: 'FGV Holdings', qname: 'FGV Holdings', aliases: ['FGV Holdings', 'FGV', 'Felda Global Ventures'], extra: ['FGV Holdings CPO mills refinery kernel crushing planted area'] },
+  { name: 'Mahkota Group', qname: 'Mahkota Group Berhad', aliases: ['Mahkota Group', 'Mahkota'], extra: ['Mahkota Group palm oil mills plantation capacity'] },
+  { name: 'Sarawak Oil Palms', qname: 'Sarawak Oil Palms Berhad', aliases: ['Sarawak Oil Palms', 'Sarawak Oil Palms Berhad', 'SOPB'], extra: ['Sarawak Oil Palms Berhad planted area mills FFB CPO production'] },
+];
+
 const TEMPLATES = [
   (n) => `${n} sustainable aviation fuel SAF capacity production sites`,
   (n) => `${n} SAF investment expansion plan capex`,
@@ -31,11 +53,11 @@ const TEMPLATES = [
 const status = { running: false, startedAt: null, finishedAt: null, total: 0, done: 0, current: null, totals: { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0 }, failedQueries: 0, perCompany: {} };
 
 function buildQueries(company) {
-  return [...TEMPLATES.map((t) => t(company.qname || company.name)), ...company.extra];
+  return [...(company.palm ? PALM_TEMPLATES : TEMPLATES).map((t) => t(company.qname || company.name)), ...company.extra];
 }
 
-async function ensureSetup() {
-  for (const c of COMPANIES) {
+async function ensureSetup(list = COMPANIES) {
+  for (const c of list) {
     await pool.query(
       `INSERT INTO companies (name, aliases, watched) VALUES ($1, $2, true)
        ON CONFLICT (name) DO UPDATE SET aliases = (SELECT ARRAY(SELECT DISTINCT unnest(companies.aliases || EXCLUDED.aliases))), watched = true`,
@@ -53,14 +75,15 @@ async function ensureSetup() {
   return ins.rows[0];
 }
 
-async function runCompanyProfileCollection({ only } = {}) {
+async function runCompanyProfileCollection({ only, set } = {}) {
   if (status.running) return { started: false, reason: 'already_running' };
-  const companies = COMPANIES.filter((c) => !only || only.includes(c.name));
+  const pool_ = set === 'palm' ? PALM_COMPANIES.map((c) => ({ ...c, palm: true })) : COMPANIES;
+  const companies = pool_.filter((c) => !only || only.includes(c.name));
   Object.assign(status, { running: true, startedAt: new Date().toISOString(), finishedAt: null, done: 0, current: null, failedQueries: 0, perCompany: {}, totals: { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0 } });
   status.total = companies.reduce((a, c) => a + buildQueries(c).length, 0);
   (async () => {
     try {
-      const source = await ensureSetup();
+      const source = await ensureSetup(companies);
       for (const company of companies) {
         const pc = (status.perCompany[company.name] = { queries: 0, archived: 0, discovered: 0 });
         for (const q of buildQueries(company)) {
@@ -90,4 +113,4 @@ async function runCompanyProfileCollection({ only } = {}) {
   return { started: true, total: status.total };
 }
 
-module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, buildQueries };
+module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, buildQueries };
