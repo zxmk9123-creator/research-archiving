@@ -8,6 +8,7 @@ const datasetPipeline = require('../lib/datasetPipeline');
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
+const itemFacts = require('../lib/itemFacts');
 const pool = require('../db/pool');
 // Accessed via the module object (not destructured) so tests can mock
 // provider.callProviderWithFallback without a real network call, the same
@@ -551,9 +552,10 @@ function truncateField(text, maxChars) {
 const FULL_MATERIALS = 12;
 const TAIL_SUMMARY_CHARS = 380;
 const TAIL_INSIGHT_CHARS = 200;
-const CAPACITY_CLASSES = new Set(['mass', 'gal', 'bbl', 'bpd', 'liter']);
-function buildMaterialsBlock(candidates, { onlyWithQuantities = false } = {}) {
+const CAPACITY_CLASSES = new Set(['mass', 'gal', 'bbl', 'bpd', 'liter', 'usd', 'eur', 'krw']);
+function buildMaterialsBlock(candidates, { onlyWithQuantities = false, onlyIndices = null } = {}) {
   return candidates.map((m, i) => {
+    if (onlyIndices && !onlyIndices.has(i)) return null;
     if (onlyWithQuantities && !numberCheck.extractQuantities(materialText(m)).some((q) => CAPACITY_CLASSES.has(q.cls))) return null;
     const tail = i >= FULL_MATERIALS;
     return [
@@ -1062,26 +1064,45 @@ async function tryBuildDataset(question, candidates, required, signal) {
   const req = requestCompliance.parseRequest(question);
   if (!datasetPipeline.isDatasetRequest(req, question)) return null;
   try {
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal && signal.reason);
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    const density = datasetPipeline.productDensity(`${question} ${candidates.map(materialText).join(' ').slice(0, 40000)}`);
+    // 1) facts stored when the items were published (item_facts): no AI call at all
+    let records = [];
+    let pending = [];
     try {
-      const result = await withTimeout(
-        callHedged(
-          { system: datasetPipeline.EXTRACTION_SYSTEM, user: datasetPipeline.buildExtractionUser(question, buildMaterialsBlock(candidates, { onlyWithQuantities: true })) },
-          { signal: controller.signal, hedgeAfterMs: 15000 }
-        ),
-        DATASET_TIMEOUT_MS,
-        () => { controller.abort(); throw new Error(`dataset extraction timed out after ${DATASET_TIMEOUT_MS}ms`); }
-      );
-      const density = datasetPipeline.productDensity(`${question} ${candidates.map(materialText).join(' ').slice(0, 40000)}`);
-      const records = datasetPipeline.verifyRecords(datasetPipeline.parseRecords(result.text), candidates, materialText, { density });
-      const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
-      if (dataset) console.log(`ai-search dataset built records=${dataset.records}`);
-      return dataset;
-    } finally {
-      if (signal) signal.removeEventListener('abort', onAbort);
+      const loaded = await itemFacts.loadFactRecords(candidates);
+      records = datasetPipeline.recordsForQuestion(loaded.records, question, density);
+      // 2) only items never processed (facts_status IS NULL) that state a quantity still need the AI extraction
+      pending = candidates
+        .map((c, i) => ({ c, i }))
+        .filter(({ c }) => !loaded.statusById.get(c.id) && itemFacts.hasQuantity(materialText(c)))
+        .map(({ i }) => i);
+    } catch (err) {
+      console.error('ai-search item_facts read failed:', err.message);
+      pending = candidates.map((_, i) => i);
     }
+    if (pending.length) {
+      const controller = new AbortController();
+      const onAbort = () => controller.abort(signal && signal.reason);
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        const result = await withTimeout(
+          callHedged(
+            { system: datasetPipeline.EXTRACTION_SYSTEM, user: datasetPipeline.buildExtractionUser(question, buildMaterialsBlock(candidates, { onlyWithQuantities: true, onlyIndices: new Set(pending) })) },
+            { signal: controller.signal, hedgeAfterMs: 15000 }
+          ),
+          DATASET_TIMEOUT_MS,
+          () => { controller.abort(); throw new Error(`dataset extraction timed out after ${DATASET_TIMEOUT_MS}ms`); }
+        );
+        records = records.concat(datasetPipeline.verifyRecords(datasetPipeline.parseRecords(result.text), candidates, materialText, { density }));
+      } catch (err) {
+        console.error('ai-search dataset extraction failed (using stored facts only):', err.message);
+      } finally {
+        if (signal) signal.removeEventListener('abort', onAbort);
+      }
+    }
+    const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density });
+    if (dataset) console.log(`ai-search dataset built records=${dataset.records} extracted_live=${pending.length ? 'yes' : 'no'}`);
+    return dataset;
   } catch (err) {
     console.error('ai-search dataset pipeline failed:', err.message);
     return null;

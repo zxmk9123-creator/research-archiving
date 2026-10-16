@@ -35,6 +35,32 @@ function productDensity(text) {
   return fuel >= oil ? 0.8 : 0.92;
 }
 
+// Stored facts (item_facts) -> the records of THIS question: only the kind of quantity it
+// asks about (capacity vs output volume vs money), tons filled in from the product density.
+const MONEY_Q = /(투자|매출|금액|자금|인수|예산|capex|달러|유로)/i;
+const CAP_Q = /(capa|capacity|생산\s*능력|용량|처리\s*능력|설비)/i;
+const OUT_Q = /(생산량|출하|물량|판매|수출|수입|소비|재고|공급량)/i;
+const CAP_METRIC = /(능력|capa|capacity|용량|처리)/i;
+const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|공급)/i;
+const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
+function recordsForQuestion(records, question, density = null) {
+  const q = String(question || '');
+  const wantsMoney = MONEY_Q.test(q);
+  const wantsCap = CAP_Q.test(q);
+  const wantsOut = OUT_Q.test(q);
+  return records
+    .filter((r) => {
+      const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
+      if (isMoney) return wantsMoney;
+      if (wantsMoney && !wantsCap && !wantsOut) return false; // a money question: quantities of goods are out
+      const m = r.metric || '';
+      if (m && wantsCap && !wantsOut && !CAP_METRIC.test(m) && (OUT_METRIC.test(m) || MONEY_METRIC.test(m))) return false;
+      if (m && wantsOut && !wantsCap && !OUT_METRIC.test(m) && (CAP_METRIC.test(m) || MONEY_METRIC.test(m))) return false;
+      return true;
+    })
+    .map((r) => ({ ...r, tons: r.group === 'mass' ? r.amount : r.group === 'volume' && density ? (r.amount * density) / 1000 : null }));
+}
+
 function isDatasetRequest(req, question) {
   return Boolean(req && (req.wantsChart || req.wantsTable) && METRIC_WORDS.test(String(question || '')));
 }
@@ -196,4 +222,4 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   return { table: lines.join('\n'), chart, markdown: `${lines.join('\n')}\n\n\`\`\`chart\n${JSON.stringify(chart)}\n\`\`\`\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, chartRows, chartBasis, METRIC_WORDS };
+module.exports = { recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, chartRows, chartBasis, METRIC_WORDS };

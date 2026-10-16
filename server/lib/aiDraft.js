@@ -5,6 +5,7 @@ const { hasValidClassification, deriveContentCategory } = require('./classificat
 const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
 const { hasGroundedClassification, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
 const { extractCompanyNames, recordCompanyMentions } = require('./companyDiscovery');
+const { extractFactsInBackground } = require('./itemFacts');
 
 const NO_CLASSIFICATION_GATE_VERSION = 'no-classification-invariant-v1';
 const { titleSimilarity } = require('./similarity');
@@ -577,6 +578,8 @@ async function applyAiDraftIfEligible(itemId) {
 
   // Auto company intake (tagging + candidate/promotion); never blocks publishing.
   await recordCompanyMentions(item);
+  // Quantities are extracted once, now (batch lane, background) — see lib/itemFacts.js.
+  extractFactsInBackground(item);
 
   return { archived: true };
 }

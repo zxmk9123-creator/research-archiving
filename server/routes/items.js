@@ -37,6 +37,18 @@ function titleFromUrlPath(url) {
   return null;
 }
 
+// Item facts backfill (lib/itemFacts.js): extracts, verifies and stores the quantities of
+// already-published items, newest first, in the background (batch lane, throttled).
+// Resumable: only items with facts_status IS NULL are picked, so repeating continues.
+router.post('/backfill-facts', requireAuth, async (req, res) => {
+  const itemFacts = require('../lib/itemFacts');
+  const r = await itemFacts.runBackfill({ limit: req.body && req.body.limit });
+  res.status(r.started ? 202 : 409).json(r);
+});
+router.get('/backfill-facts/status', requireAuth, (req, res) => {
+  res.json(require('../lib/itemFacts').getBackfillStatus());
+});
+
 router.post('/extract-metadata', requireAuth, async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });

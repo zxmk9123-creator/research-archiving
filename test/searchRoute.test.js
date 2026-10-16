@@ -1225,3 +1225,39 @@ test('proper-noun canonicalization: a near-misspelling of a name in the material
   assert.equal(nf.canonicalizeProperNouns('Neste Rotterdam', mats, roster), 'Neste Rotterdam');
   assert.equal(nf.canonicalizeProperNouns('Zzzzzzzz stays', mats, roster), 'Zzzzzzzz stays');
 });
+
+test('item_facts: a quantity dataset is built from stored facts with NO extraction call', async () => {
+  const rows = [
+    { ...SAMPLE_ROW, id: 31, title: 'Neste Rotterdam', summary: 'Neste 로테르담 정제소 연 120만 톤 SAF 생산 계획.' },
+    { ...SAMPLE_ROW, id: 32, title: 'Neste Singapore', summary: 'Neste 싱가포르 연 100만 톤 SAF 생산.' },
+    { ...SAMPLE_ROW, id: 33, title: 'Eni Gela', summary: 'Eni Gela 400 kt 연간 SAF.' },
+  ];
+  const { restore } = mockPool([
+    ['FROM item_facts', () => ({ rows: [
+      { item_id: 31, entity: 'Neste', site: '로테르담', metric: '생산능력', status: '계획', year: 2026, grp: 'mass', amount: 1200000, basis: '직접', original: '120 만 톤' },
+      { item_id: 32, entity: 'Neste', site: '싱가포르', metric: '생산능력', status: '가동', year: null, grp: 'mass', amount: 1000000, basis: '직접', original: '100 만 톤' },
+      { item_id: 33, entity: 'Eni', site: 'Gela', metric: '생산능력', status: '가동', year: null, grp: 'mass', amount: 400000, basis: '직접', original: '400 kt' },
+    ] })],
+    ['facts_status FROM items', () => ({ rows: [{ id: 31, facts_status: 'done' }, { id: 32, facts_status: 'done' }, { id: 33, facts_status: 'done' }] })],
+    ['FROM companies WHERE watched', () => ({ rows: [] })],
+    ['FROM items i', () => ({ rows: rows })],
+  ]);
+  let extractionCalls = 0;
+  const restoreProvider = mockProvider(async ({ system }) => {
+    if (/extract a structured dataset/i.test(system)) { extractionCalls++; return { text: '[]', provider: 'p' }; }
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) return { text: '[]', provider: 'p' };
+    return { text: '핵심 해석이다. [1]', provider: 'p' };
+  });
+  try {
+    await withServer(async (base) => {
+      const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'SAF 생산능력을 그래프로 정리해줘', scope: { confirmed: true, mode: 'full' } }) }).then((x) => x.json());
+      assert.ok(r.answer.startsWith('| 대상 | 거점·구분 | 상태 |'));
+      assert.match(r.answer, /\| Neste \| 로테르담 \| 계획 \(2026\) \| 1,200,000 \|/);
+      assert.equal((r.answer.match(/```chart/g) || []).length, 1);
+    });
+    assert.equal(extractionCalls, 0, 'stored facts replace the extraction call');
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});

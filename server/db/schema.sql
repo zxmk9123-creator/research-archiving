@@ -1197,3 +1197,26 @@ CREATE TABLE IF NOT EXISTS company_candidates (
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   promoted_at TIMESTAMPTZ
 );
+
+-- Item facts (lib/itemFacts.js): quantities extracted once at publish time and verified
+-- against the item's own text, so quantity-comparison questions read rows instead of
+-- calling an AI extraction at question time. grp is mass | volume | usd | eur | krw and
+-- amount is in that group's base unit (tons / litres / currency units).
+ALTER TABLE items ADD COLUMN IF NOT EXISTS facts_status TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS facts_extracted_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS item_facts (
+  id SERIAL PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  entity TEXT NOT NULL,
+  site TEXT,
+  metric TEXT,
+  status TEXT NOT NULL DEFAULT '목표',
+  year INTEGER,
+  grp TEXT NOT NULL,
+  amount DOUBLE PRECISION NOT NULL,
+  basis TEXT,
+  original TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS item_facts_dedupe ON item_facts (item_id, entity, COALESCE(site, ''), status, grp, amount);
+CREATE INDEX IF NOT EXISTS item_facts_entity ON item_facts (lower(entity));
