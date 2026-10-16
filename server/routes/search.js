@@ -92,10 +92,42 @@ function stemKorean(word) {
 // e-SAF-tagged material above generic SAF), while STILL adding the
 // hyphen-stripped parts ("saf") as fallback keywords so a broader
 // question keeps matching broader material too.
+// Question-framing words ("~에 대해 구체적으로 알려줘") say HOW the user is
+// asking, not WHAT about. They're rare in the archive's own text, so the
+// IDF weighting below scores them as highly "specific" — measured on
+// production data, "대해/구체적/구체적으로" alone out-scored the actual topic
+// (e-SAF) and filled all 8 candidate slots with unrelated articles. They are
+// dropped before retrieval (unless that would leave nothing to search).
+const QUESTION_FRAMING_TERMS = new Set([
+  '대해', '대하여', '대한', '관해', '관한', '관련', '구체적', '구체적으로', '구체', '자세히', '상세히', '상세',
+  '알려줘', '알려주세요', '알려', '알고', '설명', '설명해줘', '설명해주세요', '설명해', '무엇', '뭐야', '뭔가', '뭔지',
+  '어떻게', '어떤', '어떠한', '궁금', '질문', '내용', '정보', '개념', '정의', '의미', '있는지', '있나요', '인가요', '인지',
+  '주세요', '해줘', '해주세요', '대해서', '부탁',
+  'tell', 'about', 'explain', 'please', 'what', 'detail', 'details', 'information', 'describe',
+]);
+
+// Short domain alias sets: a conceptual question about a term should also
+// reach articles that name the same thing differently (e-SAF is often
+// written eSAF / power-to-liquid / synthetic kerosene / e-fuel). Only
+// unambiguous, narrow terms are expanded — a broad one like "saf" must not
+// fan out.
+const DOMAIN_ALIASES = {
+  'e-saf': ['esaf', 'e-fuel', 'efuel', 'power-to-liquid', 'e-kerosene', 'synthetic kerosene', 'synthetic aviation fuel'],
+  uco: ['used cooking oil', '폐식용유'],
+  '폐식용유': ['uco', 'used cooking oil'],
+};
+const MAX_BASE_KEYWORDS = 16;
+
 function extractKeywords(q) {
   const tokens = String(q || '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    // A Korean particle glued to a Latin/number term ("e-SAF에", "SAF를") makes
+    // one token like "saf에" that matches almost nothing — and the hyphen
+    // branch below skips Korean suffix-stripping for "e-saf에". Splitting at
+    // every Latin<->Hangul boundary yields "e-saf" + "에" / "saf" + "를".
+    .replace(/([a-z0-9-])([가-힣])/g, '$1 $2')
+    .replace(/([가-힣])([a-z0-9])/g, '$1 $2')
     .split(/\s+/)
     .map((w) => w.replace(/^-+|-+$/g, '')) // strip stray leading/trailing hyphens (e.g. a bare "-" bullet)
     .filter((w) => w.replace(/-/g, '').length >= 2);
@@ -113,7 +145,13 @@ function extractKeywords(q) {
     const stem = stemKorean(token);
     if (stem !== token) withStems.add(stem);
   }
-  return Array.from(withStems).slice(0, 16);
+  const topical = Array.from(withStems).filter((k) => !QUESTION_FRAMING_TERMS.has(k));
+  const base = (topical.length ? topical : Array.from(withStems)).slice(0, MAX_BASE_KEYWORDS);
+  const keywords = new Set(base);
+  for (const k of base) {
+    for (const alias of DOMAIN_ALIASES[k] || []) keywords.add(alias);
+  }
+  return Array.from(keywords);
 }
 
 // A context-dependent follow-up ("그 요인을 더 자세히 설명해줘", "그럼 수출량은?")

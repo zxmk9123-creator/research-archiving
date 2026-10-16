@@ -734,6 +734,58 @@ test('extractKeywords (via retrieveCandidates SQL): a hyphenated technical term 
   }
 });
 
+async function keywordParamsFor(question) {
+  const { calls, restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
+  try {
+    let params;
+    await withServer(async (base) => {
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) });
+      params = calls.find((c) => c.text.includes('ORDER BY ('))?.params;
+    });
+    return params;
+  } finally {
+    restore();
+  }
+}
+
+test('keywords: a Korean particle glued to a Latin term is split off ("e-SAF에" -> e-saf, never "e-saf에"/"saf에")', async () => {
+  // Production incident: "e-SAF에 대해 구체적으로 알려줘" searched "e-saf에" and
+  // "saf에" (matching 0 and 3 items), so no e-SAF article reached the model
+  // and it answered "근거가 부족합니다" despite ~20 e-SAF items in the archive.
+  const params = await keywordParamsFor('e-SAF에 대해 구체적으로 알려줘');
+  assert.ok(params.includes('%e-saf%'));
+  assert.ok(params.includes('%saf%'));
+  assert.ok(!params.includes('%e-saf에%'));
+  assert.ok(!params.includes('%saf에%'));
+});
+
+test('keywords: question-framing words (대해/구체적으로/알려줘) are not searched', async () => {
+  // They are rare in the archive's own text, so IDF weighting scored them as
+  // "specific" and they out-ranked the real topic, filling all 8 slots with
+  // unrelated articles.
+  const params = await keywordParamsFor('e-SAF에 대해 구체적으로 알려줘');
+  for (const framing of ['%대해%', '%구체적으로%', '%구체적%', '%알려줘%']) {
+    assert.ok(!params.includes(framing), `${framing} must not be a search keyword`);
+  }
+});
+
+test('keywords: e-SAF also searches its common aliases (eSAF / power-to-liquid / e-fuel / synthetic kerosene)', async () => {
+  const params = await keywordParamsFor('e-SAF 생산 기술');
+  for (const alias of ['%esaf%', '%power-to-liquid%', '%e-fuel%', '%synthetic kerosene%']) {
+    assert.ok(params.includes(alias), `${alias} expected`);
+  }
+});
+
+test('keywords: a broad term like "saf" is NOT alias-expanded', async () => {
+  const params = await keywordParamsFor('SAF 의무혼합');
+  assert.ok(!params.some((p) => /power-to-liquid|esaf|e-fuel/.test(p)));
+});
+
+test('keywords: a question made ONLY of framing words still searches something (no empty retrieval)', async () => {
+  const params = await keywordParamsFor('자세히 알려줘');
+  assert.ok(params && params.length > 0);
+});
+
 test('retrieveCandidates SQL: the relevance expression reuses the same bound params as the WHERE clause (no duplicate params)', async () => {
   const { calls, restore } = mockPool([
     ['FROM items i', () => ({ rows: [] })],
