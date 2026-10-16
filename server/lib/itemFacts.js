@@ -69,9 +69,10 @@ async function loadFactRecords(candidates) {
   const statusById = new Map(statuses.map((r) => [r.id, r.facts_status]));
   const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original FROM item_facts WHERE item_id = ANY($1)', [ids]);
   const indexById = new Map(candidates.map((c, i) => [c.id, i + 1]));
+  const pubById = new Map(candidates.map((c) => [c.id, c.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
-    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original,
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null,
     tons: null,
   }));
   return { records, statusById };
@@ -100,9 +101,10 @@ async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, ma
     [items.map((i) => i.id)]
   );
   const indexById = new Map(items.map((it, k) => [it.id, baseIndex + k + 1]));
+  const pubById = new Map(items.map((it) => [it.id, it.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
-    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, tons: null,
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, tons: null,
   }));
   return { records, items };
 }

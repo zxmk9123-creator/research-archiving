@@ -1070,7 +1070,7 @@ async function tryBuildDataset(question, candidates, required, signal) {
     let pending = [];
     try {
       const loaded = await itemFacts.loadFactRecords(candidates);
-      records = datasetPipeline.recordsForQuestion(loaded.records, question, density);
+      records = datasetPipeline.recordsForQuestion(loaded.records.map((r) => datasetPipeline.guardStoredRecord(r, materialText(candidates[r.source - 1] || {}))), question, density);
       // 2) only items never processed (facts_status IS NULL) that state a quantity still need the AI extraction
       pending = candidates
         .map((c, i) => ({ c, i }))
@@ -1092,7 +1092,8 @@ async function tryBuildDataset(question, candidates, required, signal) {
       }
       if (topic.length) {
         const wide = await itemFacts.loadFactsByTopic(topic, { excludeIds: candidates.map((c) => c.id).filter(Boolean), baseIndex: candidates.length });
-        records = records.concat(datasetPipeline.recordsForQuestion(wide.records, question, density));
+        const textOfSource = (r) => materialText(wide.items[r.source - candidates.length - 1] || {});
+        records = records.concat(datasetPipeline.recordsForQuestion(wide.records.map((r) => datasetPipeline.guardStoredRecord(r, textOfSource(r))), question, density));
         extraCandidates = wide.items;
       }
     } catch (err) {

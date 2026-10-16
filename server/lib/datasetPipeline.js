@@ -66,12 +66,14 @@ function isDatasetRequest(req, question) {
 }
 
 const EXTRACTION_SYSTEM = `You extract a structured dataset from supplied materials. Respond with ONLY a JSON array — no prose, no code fences.
-Each element: {"entity": string, "site": string|null, "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "source": number}
+Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "source": number}
 Rules:
 - Extract the quantity the QUESTION asks about (for example production capacity, output volume, shipments, trade volume, investment amount). One element per distinct figure that a material STATES for an entity's plant/site/segment (or for the entity as a whole when no site is given, site=null). Cover EVERY entity and EVERY site the materials give a figure for; never skip an item because of its unit (gallons, barrels, b/d, currency are all fine).
 - "metric" is a short Korean label of the quantity (e.g. "생산능력", "생산량", "투자액").
 - "value" and "unit" must reproduce the material's own figure exactly as written, splitting number from unit: "50만 톤" -> value 50, unit "만 톤"; "1.2 Mt/a" -> value 1.2, unit "Mt"; "340 million gallons" -> value 340, unit "million gallons"; "22,000 b/d" -> value 22000, unit "b/d"; "2만 5,000톤" -> value 25000, unit "톤". Never convert, round or rescale. Never invent a figure. Skip prices per unit (e.g. $/톤) and percentages.
-- "source" is the 자료 number the figure comes from. "status": 가동 (operating/current), 건설중 (under construction), 계획 (planned/expected), 목표 (entity-wide target). "year": the year the status/figure refers to, if stated.
+- SCOPE (critical): "scope":"site" only for a figure stated for ONE named plant/site, and "site" is then that plant. A figure for the entity's TOTAL across several sites ("전체", "총", "글로벌", "합계", "global/total capacity", "across all refineries") is scope "total" with site=null — NEVER attribute a company-wide total to a site, and never attribute one site's figure to another site or to the company.
+- TIME (critical): "status" is 가동 (operating NOW), 건설중 (under construction), 계획 (planned), 목표 (target). A figure that is true today is 가동 with the year it was reported if stated; a figure for a future date ("by 2027", "2026년 완공") is 계획 or 목표 with year = that future year. "year" is the year the figure refers to (not the article year), null only if truly unstated. Record the present value and each future value as SEPARATE elements — never merge a current and a future figure.
+- "source" is the 자료 number the figure comes from.
 - "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.`;
 
 function buildExtractionUser(question, materialsBlock) {
@@ -89,6 +91,33 @@ function parseRecords(raw) {
   } catch (_) {
     return [];
   }
+}
+
+// A figure that follows words like 전체/총/글로벌/합계/total/global describes the ENTITY, not a
+// site, whatever site the extraction attached to it; and a site that is not named in the
+// material at all cannot be the figure's site.
+const TOTAL_CUE = /(전체|총\s*[가-힣0-9]|총생산|글로벌|전\s*세계|전사|합계|합산|전반|\bglobal\b|\btotal\b|worldwide|company-?wide|combined|overall|across (?:all|its)|all (?:its )?(?:refineries|sites|plants))/i;
+function demoteToTotal(site, text, figureStart) {
+  if (!site) return site;
+  // a Latin site name must literally occur in the material; a Hangul one may be a translation of it, so it cannot be checked this way
+  if (/[A-Za-z]/.test(site) && !/[가-힣]/.test(site) && !String(text || '').toLowerCase().includes(String(site).toLowerCase())) return null;
+  if (figureStart !== null && figureStart !== undefined) {
+    const before = text.slice(Math.max(0, figureStart - 50), figureStart);
+    if (TOTAL_CUE.test(before)) return null;
+  }
+  return site;
+}
+// the same guard for a STORED record: locate its figure in the source text via its original wording
+function guardStoredRecord(rec, text) {
+  if (!rec.site) return rec;
+  const q = nc.extractQuantities(String(rec.original || ''))[0];
+  let start = null;
+  if (q) {
+    const hit = nc.extractQuantities(text).find((m) => m.cls === q.cls && Math.abs(m.value - q.value) <= Math.max(m.value, q.value) * 0.015);
+    if (hit) start = hit.start;
+  }
+  const site = demoteToTotal(rec.site, text, start);
+  return site === rec.site ? rec : { ...rec, site };
 }
 
 const fmtNum = (n) => Math.round(n).toLocaleString('en-US');
@@ -114,7 +143,8 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     if (!group) continue;
     const direct = nc.extractQuantities(materialText(candidates[source - 1])).filter((m) => m.cls === q.cls);
     // the figure must literally exist in the cited material (same class, within 1.5%)
-    if (!direct.some((m) => Math.abs(m.value - q.value) <= Math.max(m.value, q.value) * 0.015)) continue;
+    const hit = direct.find((m) => Math.abs(m.value - q.value) <= Math.max(m.value, q.value) * 0.015);
+    if (!hit) continue;
     // a rate stated per day/month is annualised so every figure is "per year"; per-hour or
     // other rates cannot be placed on the same footing and are skipped
     const periodText = `${r.period || ''} ${unit}`;
@@ -132,13 +162,14 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     }
     if (!(amount > 0)) continue;
     const status = Object.prototype.hasOwnProperty.call(STATUS_RANK, r.status) ? r.status : '목표';
-    const site = clean(r.site) || null;
+    const mText = materialText(candidates[source - 1]);
+    const site = r.scope === 'total' ? null : demoteToTotal(clean(r.site) || null, mText, hit.start);
     const year = Number.isInteger(Number(r.year)) && Number(r.year) > 1990 && Number(r.year) < 2100 ? Number(r.year) : null;
     const key = `${entity.toLowerCase()}|${(site || '').toLowerCase()}|${status}|${group}|${Math.round(amount)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null,
+      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, pubAt: candidates[source - 1].published_at || null,
       tons: group === 'mass' ? amount : group === 'volume' && density ? (amount * density) / 1000 : null,
       original: `${Number(r.value).toLocaleString('en-US')} ${unit}${r.period === '일일' && cls !== 'bpd' ? '/일' : ''}`.trim(),
     });
@@ -162,73 +193,93 @@ function chartBasis(records, { unitTons = false, density = null } = {}) {
   return { group, valueIn: (r) => valueIn(r, group) };
 }
 
-// One chart row per (entity, site): the latest-year record wins (an expansion
-// supersedes the older figure); entity-wide totals (site=null) are kept out of the stacked
-// bars when the same entity has site rows, so a total is never summed with its parts.
-function chartRows(records, valueOf = (r) => r.amount) {
-  const bySite = new Map();
+// ---- time and scope ---------------------------------------------------------------
+const yearOf = (d) => { const t = d ? new Date(d) : null; return t && !Number.isNaN(t.getTime()) ? t.getFullYear() : 0; };
+const asOfYear = (r) => r.year || yearOf(r.pubAt);
+const pubTime = (r) => { const t = r.pubAt ? new Date(r.pubAt).getTime() : 0; return Number.isNaN(t) ? 0 : t; };
+const isCurrent = (r) => r.status === '가동';
+const isStalePlan = (r, nowYear) => r.status !== '가동' && r.year != null && r.year < nowYear;
+const isFuture = (r, nowYear) => r.status !== '가동' && !isStalePlan(r, nowYear);
+
+// One row per (entity, site) for a bucket: CURRENT keeps the most recent as-of figure; FUTURE keeps
+// the furthest-year plan/target (the newest statement wins ties). An entity-wide TOTAL (site=null) is
+// never stacked with its own sites: it only appears when the entity has no site rows in the bucket.
+function bucketRows(records, valueOf, pick) {
+  const best = new Map();
   for (const r of records) {
-    if (valueOf(r) === null || valueOf(r) === undefined) continue;
-    if (r.status === '목표' && !r.site) continue;
+    const v = valueOf(r);
+    if (v === null || v === undefined) continue;
     const key = `${r.entity.toLowerCase()}|${(r.site || '').toLowerCase()}`;
-    const cur = bySite.get(key);
-    const rank = (x) => [x.year || 0, STATUS_RANK[x.status], valueOf(x)];
-    if (!cur || rank(r) > rank(cur)) bySite.set(key, r);
+    const cur = best.get(key);
+    if (!cur || pick(r, cur) > 0) best.set(key, r);
   }
-  let rows = [...bySite.values()];
-  const entitiesWithSites = new Set(rows.filter((r) => r.site).map((r) => r.entity.toLowerCase()));
-  rows = rows.filter((r) => r.site || !entitiesWithSites.has(r.entity.toLowerCase()));
+  let rows = [...best.values()];
+  const withSites = new Set(rows.filter((r) => r.site).map((r) => r.entity.toLowerCase()));
+  rows = rows.filter((r) => r.site || !withSites.has(r.entity.toLowerCase()));
   return rows.sort((a, b) => valueOf(b) - valueOf(a)).slice(0, 30);
 }
+const newerCurrent = (a, b) => (asOfYear(a) - asOfYear(b)) || (pubTime(a) - pubTime(b)) || (a.amount - b.amount);
+const furtherFuture = (a, b) => ((a.year || 0) - (b.year || 0)) || (pubTime(a) - pubTime(b)) || (a.amount - b.amount);
 
 // requiredNames: roster entities that have supplied materials; any without a record gets an explicit "미공시" row.
-function buildDataset(records, requiredNames = [], { unitTons = false, density = null } = {}) {
+function buildDataset(records, requiredNames = [], { unitTons = false, density = null, nowYear = new Date().getFullYear() } = {}) {
   if (records.length < 3) return null;
   const basis = chartBasis(records, { unitTons, density });
   const unitLabel = GROUP_LABEL[basis.group];
   const valueOf = basis.valueIn;
-  const sorted = records.slice().sort((a, b) => a.entity.localeCompare(b.entity) || (a.site || '').localeCompare(b.site || '') || (b.year || 0) - (a.year || 0));
+  const statusOrder = { 가동: 0, 건설중: 1, 계획: 2, 목표: 3 };
+  const sorted = records.slice().sort((a, b) => a.entity.localeCompare(b.entity) || (a.site || '').localeCompare(b.site || '') || (statusOrder[a.status] - statusOrder[b.status]) || ((b.year || 0) - (a.year || 0)));
   const have = new Set(records.map((r) => r.entity.toLowerCase()));
   const cellOf = (r) => {
     const v = valueOf(r);
     return v === null || v === undefined ? '- (다른 단위 · 원문 참조)' : fmtNum(v);
   };
+  const stateOf = (r) => `${STATUS_LABEL[r.status]}${isStalePlan(r, nowYear) ? ' · 기준 경과' : ''}`;
+  const asOfCell = (r) => (r.year ? `${r.year}년` : yearOf(r.pubAt) ? `${yearOf(r.pubAt)}년 발표` : '-');
   const lines = [
-    `| 대상 | 거점·구분 | 상태 | 수치 (${unitLabel}) | 원문 표기 | 출처 |`,
-    '| --- | --- | --- | --- | --- | --- |',
-    ...sorted.map((r) => `| ${r.entity} | ${r.site || '-'} | ${STATUS_LABEL[r.status]}${r.year ? ` (${r.year})` : ''} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''} | [${r.source}] |`),
+    `| 대상 | 거점·범위 | 상태 | 기준 | 수치 (${unitLabel}) | 원문 표기 | 출처 |`,
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...sorted.map((r) => `| ${r.entity} | ${r.site || '전사 합계'} | ${stateOf(r)} | ${asOfCell(r)} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''} | [${r.source}] |`),
   ];
   for (const name of requiredNames) {
     const key = name.name.toLowerCase();
     if ([...have].some((h) => h.includes(key) || key.includes(h) || name.names.some((n) => h.includes(n)))) continue;
-    lines.push(`| ${name.name} | - | 미공시 | - | 자료에 수치 없음 | [${name.indices[0]}] |`);
+    lines.push(`| ${name.name} | - | 미공시 | - | - | 자료에 수치 없음 | [${name.indices[0]}] |`);
   }
-  const rows = chartRows(records, valueOf);
-  if (!rows.length) return null;
   const metric = (() => {
     const counts = new Map();
     for (const r of records) if (r.metric) counts.set(r.metric, (counts.get(r.metric) || 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '수치';
   })();
-  const chart = {
+  const converted = records.some((r) => r.basis !== '직접');
+  const makeChart = (title, rows, future) => ({
     type: 'hbar',
     auto: 'dataset',
-    title: `대상·거점별 ${metric} (${unitLabel}${records.some((r) => r.basis !== '직접') ? ', 환산 포함' : ''})`,
+    title: `${title} (${unitLabel}${converted ? ', 환산 포함' : ''})`,
     unit: unitLabel,
     combine: 'sum',
-    labels: rows.map((r) => `${r.entity}${r.site ? ` ${r.site}` : ''}${r.status !== '가동' ? ` (${STATUS_LABEL[r.status]})` : ''}`),
+    labels: rows.map((r) => `${r.entity}${r.site ? ` ${r.site}` : ' 전사'}${future && r.year ? ` (${r.year})` : ''}`),
     groups: rows.map((r) => r.entity),
-    notes: rows.map((r) => `${STATUS_LABEL[r.status]}${r.year ? ` ${r.year}` : ''} · 원문 ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''}`),
+    notes: rows.map((r) => `${STATUS_LABEL[r.status]}${r.year ? ` ${r.year}` : ''}${r.site ? '' : ' · 전사 합계'} · 원문 ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''}`),
     series: [{ name: `${metric} (${unitLabel})`, data: rows.map((r) => Math.round(valueOf(r))) }],
-  };
+  });
+  const currentRows = bucketRows(records.filter(isCurrent), valueOf, newerCurrent);
+  const futureRows = bucketRows(records.filter((r) => isFuture(r, nowYear)), valueOf, furtherFuture);
+  if (!currentRows.length && !futureRows.length) return null;
+  const charts = [];
+  if (currentRows.length && futureRows.length) {
+    charts.push(makeChart(`현재 ${metric}`, currentRows, false), makeChart(`계획·목표 ${metric}`, futureRows, true));
+  } else if (currentRows.length) charts.push(makeChart(`현재 ${metric}`, currentRows, false));
+  else charts.push(makeChart(`계획·목표 ${metric}`, futureRows, true));
   const notes = [];
   const toMass = basis.group === 'mass' && records.some((r) => r.group === 'volume' && r.tons !== null);
-  if (records.some((r) => r.basis !== '직접')) notes.push('부피 단위는 갤런 3.785리터, 배럴 158.987리터, b/d는 ×365일 연환산(가동률 100% 가정)으로 리터로 바꿨습니다.');
+  if (converted) notes.push('부피 단위는 갤런 3.785리터, 배럴 158.987리터, b/d는 ×365일 연환산(가동률 100% 가정)으로, 일·월 단위는 연으로 바꿨습니다.');
   if (toMass) notes.push(`리터를 톤으로 바꿀 때는 제품 밀도 ${density} kg/L를 가정했습니다.`);
   const excluded = records.filter((r) => valueOf(r) === null || valueOf(r) === undefined).length;
   if (excluded) notes.push(`다른 단위의 ${excluded}건은 차트에서 제외했고 표에 원문 표기로 남겼습니다${basis.group === 'mass' && !density ? ' (제품 밀도를 알 수 없어 톤으로 환산하지 않음)' : ''}.`);
-  notes.push('같은 거점은 가장 최근 연도 값을 막대에 사용했고, 표에는 모든 값을 기재했습니다.');
-  return { table: lines.join('\n'), chart, markdown: `${lines.join('\n')}\n\n\`\`\`chart\n${JSON.stringify(chart)}\n\`\`\`\n\n${notes.join(' ')}`, records: sorted.length };
+  notes.push('현재 값은 거점별 가장 최근 기준, 계획·목표는 거점별 가장 먼 연도의 값을 막대로 그렸고, 전사 합계는 거점 값과 합산하지 않았습니다. 표에는 모든 값과 기준 연도를 기재했습니다.');
+  const chartBlocks = charts.map((c) => `\`\`\`chart\n${JSON.stringify(c)}\n\`\`\``).join('\n\n');
+  return { table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, chartRows, chartBasis, METRIC_WORDS };
+module.exports = { guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

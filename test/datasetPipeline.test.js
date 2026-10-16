@@ -50,26 +50,63 @@ test('verifyRecords: figures must exist in the cited material; units are grouped
   assert.equal(noDensity[0].tons, null);
 });
 
-test('buildDataset: one unit, every entity (missing ones as 미공시), latest figure per site, totals not stacked, state wording canonical', () => {
+test('buildDataset: current and future figures are separated per site; a company-wide total is its own row, never a site; recency is shown', () => {
   const v = dp.verifyRecords([
     rec({ entity: 'Neste', site: '로테르담', value: 0.5, unit: 'Mt', year: 2023, source: 1 }),
     rec({ entity: 'Neste', site: '로테르담', value: 1.2, unit: 'Mt', status: '계획', year: 2026, source: 1 }),
-    rec({ entity: 'Neste', site: '싱가포르', value: 1.0, unit: 'Mt', source: 1 }),
-    rec({ entity: 'Neste', site: null, value: 6.8, unit: 'Mt', status: '목표', source: 1 }),
+    rec({ entity: 'Neste', site: '싱가포르', value: 1.0, unit: 'Mt', year: 2025, source: 1 }),
+    rec({ entity: 'Neste', site: null, scope: 'total', value: 6.8, unit: 'Mt', status: '목표', year: 2027, source: 1 }),
     rec({ entity: 'DGD', site: 'Port Arthur', value: 235, unit: 'million gallons', source: 2 }),
   ], cands, mt, { density: 0.8 });
-  const d = dp.buildDataset(v, [{ name: 'Chevron', names: ['chevron'], indices: [2] }], { unitTons: true, density: 0.8 });
+  const d = dp.buildDataset(v, [{ name: 'Chevron', names: ['chevron'], indices: [2] }], { unitTons: true, density: 0.8, nowYear: 2026 });
   assert.ok(d);
   assert.match(d.table, /수치 \(톤\)/);
   assert.match(d.table, /\| Chevron \| - \| 미공시 \|/);
-  assert.match(d.table, /\| Neste \| 로테르담 \| 계획 \(2026\) \| 1,200,000 \|/);
-  assert.match(d.table, /\| Neste \| 로테르담 \| 현재 \(2023\) \| 500,000 \|/); // the table keeps every figure, wording 현재 (never 가동)
+  assert.match(d.table, /\| Neste \| 로테르담 \| 현재 \| 2023년 \| 500,000 \|/);
+  assert.match(d.table, /\| Neste \| 로테르담 \| 계획 \| 2026년 \| 1,200,000 \|/);
+  assert.match(d.table, /\| Neste \| 전사 합계 \| 목표 \| 2027년 \| 6,800,000 \|/);
   assert.ok(!/가동(?!률)/.test(d.markdown));
-  assert.deepEqual([...d.chart.labels].sort(), ['DGD Port Arthur', 'Neste 로테르담 (계획)', 'Neste 싱가포르']);
-  assert.equal(d.chart.unit, '톤');
-  assert.equal(d.chart.combine, 'sum');
+  // two charts: what is true now, and what is planned/targeted — never mixed in one bar
+  assert.equal(d.charts.length, 2);
+  assert.match(d.charts[0].title, /^현재 /);
+  assert.match(d.charts[1].title, /^계획·목표 /);
+  assert.deepEqual([...d.charts[0].labels].sort(), ['DGD Port Arthur', 'Neste 로테르담', 'Neste 싱가포르']);
+  assert.deepEqual(d.charts[0].series[0].data.slice().sort((a, b) => b - a), [1000000, 711657, 500000]);
+  // future chart: the site's furthest-year plan; the 6.8 Mt company total is NOT stacked with the site
+  assert.deepEqual(d.charts[1].labels, ['Neste 로테르담 (2026)']);
+  assert.deepEqual(d.charts[1].series[0].data, [1200000]);
   assert.match(d.markdown, /밀도 0\.8/);
   assert.equal(dp.buildDataset(v.slice(0, 2), []), null); // too few records: fall back to normal generation
+});
+
+test('a plan whose target year has already passed is flagged (기준 경과) and kept out of the future chart', () => {
+  const v = dp.verifyRecords([
+    rec({ entity: 'Neste', site: '로테르담', value: 0.5, unit: 'Mt', status: '계획', year: 2023, source: 1 }),
+    rec({ entity: 'Neste', site: '싱가포르', value: 1.0, unit: 'Mt', source: 1 }),
+    rec({ entity: 'Neste', site: '로테르담', value: 1.2, unit: 'Mt', status: '목표', year: 2027, source: 1 }),
+  ], cands, mt, { density: 0.8 });
+  const d = dp.buildDataset(v, [], { nowYear: 2026 });
+  assert.match(d.table, /\| 계획 · 기준 경과 \| 2023년 \|/);
+  assert.deepEqual(d.charts[1].labels, ['Neste 로테르담 (2027)']);
+});
+
+test('scope guard: a company-wide total is never attributed to a site, and a site absent from the material is dropped', () => {
+  const src = [{ title: 'Neste', summary: 'Neste 로테르담 정제소는 연 50만 톤 SAF를 생산하며, 글로벌 재생 연료 생산 능력을 680만 톤까지 확대한다.' }];
+  const v = dp.verifyRecords([
+    rec({ entity: 'Neste', site: '로테르담', value: 50, unit: '만 톤', source: 1 }),
+    rec({ entity: 'Neste', site: '로테르담', value: 680, unit: '만 톤', status: '목표', year: 2027, source: 1 }), // mislabelled total
+    rec({ entity: 'Neste', site: '포르보', value: 55, unit: '만 톤', source: 1 }), // not in the text at all -> dropped (figure absent)
+    rec({ entity: 'Neste', site: 'Ulsan', value: 50, unit: '만 톤', source: 1 }), // a Latin site that is not in the material
+  ], src, mt, { density: null });
+  const bySite = Object.fromEntries(v.map((x) => [`${x.site}|${Math.round(x.amount)}`, x]));
+  assert.ok(bySite['로테르담|500000']);
+  assert.equal(bySite['null|6800000'].site, null); // demoted to the entity total
+  assert.equal(v.find((x) => x.amount === 500000 && x.site === null) !== undefined, true); // the Ulsan-labelled 50 만 톤 lost its site
+  // the same guard on a STORED record
+  const stored = dp.guardStoredRecord({ entity: 'Neste', site: '로테르담', original: '680 만 톤', amount: 6800000 }, src[0].title + ' ' + src[0].summary);
+  assert.equal(stored.site, null);
+  const ok = dp.guardStoredRecord({ entity: 'Neste', site: '로테르담', original: '50 만 톤', amount: 500000 }, src[0].title + ' ' + src[0].summary);
+  assert.equal(ok.site, '로테르담');
 });
 
 test('buildDataset: any quantity — with no known density volumes stay out of a tons chart; money is its own group', () => {

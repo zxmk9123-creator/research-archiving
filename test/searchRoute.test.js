@@ -965,7 +965,7 @@ test('finalizeAnswer with a verified dataset: the system table+chart lead, the m
   try {
     const model = '핵심 해석입니다. [1]\n| 모델표 | 값 |\n| --- | --- |\n| a | 1 |\n```chart\n{"type":"bar","labels":["a","b"],"series":[{"name":"x","data":[1,2]}]}\n```\nEni도 큽니다. [3]';
     const { answer, sources } = await searchRouter.finalizeAnswer(model, cands, undefined, [], 'SAF Capa를 그래프로', dataset);
-    assert.ok(answer.startsWith('| 대상 | 거점·구분 | 상태 |'));
+    assert.ok(answer.startsWith('| 대상 | 거점·범위 | 상태 | 기준 |'));
     assert.equal((answer.match(/```chart/g) || []).length, 1);
     assert.ok(!answer.includes('모델표'));
     assert.match(answer, /핵심 해석입니다\./);
@@ -1251,9 +1251,9 @@ test('item_facts: a quantity dataset is built from stored facts with NO extracti
   try {
     await withServer(async (base) => {
       const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'SAF 생산능력을 그래프로 정리해줘', scope: { confirmed: true, mode: 'full' } }) }).then((x) => x.json());
-      assert.ok(r.answer.startsWith('| 대상 | 거점·구분 | 상태 |'));
-      assert.match(r.answer, /\| Neste \| 로테르담 \| 계획 \(2026\) \| 1,200,000 \|/);
-      assert.equal((r.answer.match(/```chart/g) || []).length, 1);
+      assert.ok(r.answer.startsWith('| 대상 | 거점·범위 | 상태 | 기준 |'));
+      assert.match(r.answer, /\| Neste \| 로테르담 \| 계획 \| 2026년 \| 1,200,000 \|/);
+      assert.ok((r.answer.match(/```chart/g) || []).length >= 1);
     });
     assert.equal(extractionCalls, 0, 'stored facts replace the extraction call');
   } finally {
