@@ -43,6 +43,11 @@ const OUT_Q = /(생산량|출하|물량|판매|수출|수입|소비|재고|공�
 const CAP_METRIC = /(능력|capa|capacity|용량|처리)/i;
 const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|공급)/i;
 const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
+// Industry bodies / agencies are sources of estimates, not producers: never charted as a company
+// unless the question names them. Unlabelled (older) facts fall back to a name list.
+const ENTITY_TYPES = new Set(['기업', '기관', '국가', '기타']);
+const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|EU|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
+const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NAME.test(String(r.entity || '').trim()));
 function recordsForQuestion(records, question, density = null) {
   const q = String(question || '');
   const wantsMoney = MONEY_Q.test(q);
@@ -50,6 +55,7 @@ function recordsForQuestion(records, question, density = null) {
   const wantsOut = OUT_Q.test(q);
   return records
     .filter((r) => {
+      if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
       if (isMoney) return wantsMoney;
       if (wantsMoney && !wantsCap && !wantsOut) return false; // a money question: quantities of goods are out
@@ -66,7 +72,7 @@ function isDatasetRequest(req, question) {
 }
 
 const EXTRACTION_SYSTEM = `You extract a structured dataset from supplied materials. Respond with ONLY a JSON array — no prose, no code fences.
-Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "source": number}
+Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "entity_type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "source": number}
 Rules:
 - Extract the quantity the QUESTION asks about (for example production capacity, output volume, shipments, trade volume, investment amount). One element per distinct figure that a material STATES for an entity's plant/site/segment (or for the entity as a whole when no site is given, site=null). Cover EVERY entity and EVERY site the materials give a figure for; never skip an item because of its unit (gallons, barrels, b/d, currency are all fine).
 - "metric" is a short Korean label of the quantity (e.g. "생산능력", "생산량", "투자액").
@@ -74,7 +80,8 @@ Rules:
 - SCOPE (critical): "scope":"site" only for a figure stated for ONE named plant/site, and "site" is then that plant. A figure for the entity's TOTAL across several sites ("전체", "총", "글로벌", "합계", "global/total capacity", "across all refineries") is scope "total" with site=null — NEVER attribute a company-wide total to a site, and never attribute one site's figure to another site or to the company.
 - TIME (critical): "status" is 가동 (operating NOW), 건설중 (under construction), 계획 (planned), 목표 (target). A figure that is true today is 가동 with the year it was reported if stated; a figure for a future date ("by 2027", "2026년 완공") is 계획 or 목표 with year = that future year. "year" is the year the figure refers to (not the article year), null only if truly unstated. Record the present value and each future value as SEPARATE elements — never merge a current and a future figure.
 - "source" is the 자료 number the figure comes from.
-- "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.`;
+- "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.
+- "entity_type": 기업 = a company or its plant operator; 기관 = an industry body, agency, regulator, NGO, research house or exchange (IATA, ICAO, IEA, USDA, EU, ISCC...) that merely reports/estimates a figure; 국가 = a country/region; 기타 otherwise. "country" = the country (Korean) where the entity is headquartered (or the country itself for 국가), null if not stated or not certain. "parent" = the owning group when the entity is a subsidiary/JV named so in the material, else null.`;
 
 function buildExtractionUser(question, materialsBlock) {
   return `[Question]\n${question}\n\n[Materials]\n${materialsBlock}`;
@@ -169,7 +176,7 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, pubAt: candidates[source - 1].published_at || null,
+      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, etype: ENTITY_TYPES.has(r.entity_type) ? r.entity_type : null, country: clean(r.country) || null, parent: clean(r.parent) || null, pubAt: candidates[source - 1].published_at || null,
       tons: group === 'mass' ? amount : group === 'volume' && density ? (amount * density) / 1000 : null,
       original: `${Number(r.value).toLocaleString('en-US')} ${unit}${r.period === '일일' && cls !== 'bpd' ? '/일' : ''}`.trim(),
     });
@@ -239,7 +246,7 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   const lines = [
     `| 대상 | 거점·범위 | 상태 | 기준 | 수치 (${unitLabel}) | 원문 표기 | 출처 |`,
     '| --- | --- | --- | --- | --- | --- | --- |',
-    ...sorted.map((r) => `| ${r.entity} | ${r.site || '전사 합계'} | ${stateOf(r)} | ${asOfCell(r)} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''} | [${r.source}] |`),
+    ...sorted.map((r) => `| ${r.entity}${r.country ? ` (${r.country})` : ''} | ${r.site || '전사 합계'} | ${stateOf(r)} | ${asOfCell(r)} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''} | [${r.source}] |`),
   ];
   for (const name of requiredNames) {
     const key = name.name.toLowerCase();

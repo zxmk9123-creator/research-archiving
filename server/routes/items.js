@@ -45,6 +45,11 @@ router.post('/backfill-facts', requireAuth, async (req, res) => {
   const r = await itemFacts.runBackfill({ limit: req.body && req.body.limit });
   res.status(r.started ? 202 : 409).json(r);
 });
+router.post('/classify-entities', requireAuth, async (req, res) => {
+  const r = await require('../lib/itemFacts').classifyEntities();
+  res.status(r.started ? 202 : 409).json(r);
+});
+router.get('/classify-entities/status', requireAuth, (req, res) => res.json(require('../lib/itemFacts').getClassifyStatus()));
 router.get('/backfill-facts/status', requireAuth, (req, res) => {
   res.json(require('../lib/itemFacts').getBackfillStatus());
 });

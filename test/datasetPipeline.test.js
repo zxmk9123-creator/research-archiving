@@ -134,3 +134,14 @@ test('verifyRecords: per-day/per-month rates are annualised, per-hour rates skip
   ], src, mt, { density: null });
   assert.deepEqual(v.map((x) => [x.entity, x.amount, x.basis]), [['A', 750 * 365, '환산(일→연 ×365)'], ['B', 6000, '환산(월→연 ×12)'], ['D', 1e9, '직접']]);
 });
+
+test('institutions (IATA) are not charted as companies; type/country carried through', () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const recs = [
+    { entity: 'IATA', etype: '기관', status: '목표', group: 'mass', amount: 1e6, original: '100만 톤', basis: '직접', source: 1 },
+    { entity: 'Neste', etype: '기업', country: '핀란드', status: '가동', group: 'mass', amount: 1e6, original: '100만 톤', basis: '직접', source: 1 },
+    { entity: 'ICAO', status: '목표', group: 'mass', amount: 1e6, original: '100만 톤', basis: '직접', source: 1 },
+  ];
+  const out = dp.recordsForQuestion(recs, 'SAF 생산능력 표로 정리', null);
+  assert.deepEqual(out.map((r) => r.entity), ['Neste']);
+});

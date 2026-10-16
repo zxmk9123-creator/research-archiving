@@ -1218,5 +1218,8 @@ CREATE TABLE IF NOT EXISTS item_facts (
   original TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE item_facts ADD COLUMN IF NOT EXISTS entity_type TEXT;
+ALTER TABLE item_facts ADD COLUMN IF NOT EXISTS country TEXT;
+ALTER TABLE item_facts ADD COLUMN IF NOT EXISTS parent TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS item_facts_dedupe ON item_facts (item_id, entity, COALESCE(site, ''), status, grp, amount);
 CREATE INDEX IF NOT EXISTS item_facts_entity ON item_facts (lower(entity));
