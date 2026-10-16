@@ -1211,3 +1211,9 @@ ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: s
 .ai-scope-meta i { font-style: normal; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--surface-sunken, #f3f5f8); font-variant-numeric: tabular-nums; }
 .ai-scope-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .ai-scope-note { margin: 10px 0 0; font-size: 11px; color: var(--text-muted, #667085); }
+
+/* Scope card: compact radio aligned with the option's first line (global input styles must not stretch it) */
+.ai-scope-option { align-items: flex-start; gap: 10px; }
+.ai-scope-option input[type="radio"] { appearance: auto; -webkit-appearance: radio; flex: none; width: 15px; height: 15px; min-width: 0; margin: 2px 0 0; padding: 0; border: 0; box-shadow: none; background: none; accent-color: var(--accent, #2f6fed); }
+.ai-scope-option-body { flex: 1 1 auto; min-width: 0; }
+.ai-scope-meta { gap: 6px; }

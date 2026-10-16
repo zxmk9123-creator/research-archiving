@@ -1490,7 +1490,7 @@ function aiScopeCardHtml(plan) {
       <span class="ai-scope-option-body">
         <span class="ai-scope-option-head">${escapeHtml(o.label)}${o.id === plan.recommended ? '<em>추천</em>' : ''}</span>
         <span class="ai-scope-option-detail">${escapeHtml(o.detail)}</span>
-        <span class="ai-scope-meta"><i>AI 호출 ${escapeHtml(o.aiCalls)}</i><i>${escapeHtml(o.tokensText)}</i><i>${escapeHtml(o.seconds)}</i></span>
+        <span class="ai-scope-meta"><i>AI 호출 ${escapeHtml(o.aiCalls)}</i><i>${escapeHtml(o.seconds)}</i></span>
       </span>
     </label>`).join('');
   return `<div class="ai-scope-card" role="group" aria-label="작업 범위 확인">
