@@ -892,6 +892,28 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
 
 // ```chart {json} ``` blocks -> inline SVG (bar/line). Anything malformed
 // is dropped silently so a bad block never breaks the answer.
+// Axis helpers: "nice" round tick steps (1/2/5 x 10^k) and compact Korean
+// number text (1,234 / 12.3만 / 5.4억) so axes never show values like 4027500.
+function niceScale(min, max, count = 4) {
+  const span = max - min || Math.abs(max) || 1;
+  const raw = span / count;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / pow;
+  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.max(Math.ceil(max / step) * step, lo + step);
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v / step) * step);
+  return { lo, hi, ticks };
+}
+function compactNumber(v) {
+  const a = Math.abs(v);
+  const trim = (x) => String(Math.round(x * 10) / 10);
+  if (a >= 1e8) return `${trim(v / 1e8)}억`;
+  if (a >= 1e4) return `${trim(v / 1e4)}만`;
+  return Number(Math.round(v * 100) / 100).toLocaleString('en-US');
+}
+
 function renderChartHtml(jsonText) {
   let c;
   try { c = JSON.parse(jsonText); } catch (_) { return ''; }
@@ -940,8 +962,8 @@ function renderChartHtml(jsonText) {
     let g = '';
     for (let i = 0; i <= 4; i++) {
       const xv = x0 + ((x1 - x0) * i) / 4, yv = y0 + ((y1 - y0) * i) / 4;
-      g += `<line x1="${L}" x2="${W - R}" y1="${py(yv)}" y2="${py(yv)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${py(yv) + 4}" font-size="10" text-anchor="end" fill="currentColor">${fmt(yv)}</text>`
-        + `<text x="${px(xv)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${fmt(xv)}</text>`;
+      g += `<line x1="${L}" x2="${W - R}" y1="${py(yv)}" y2="${py(yv)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${py(yv) + 4}" font-size="10" text-anchor="end" fill="currentColor">${compactNumber(yv)}</text>`
+        + `<text x="${px(xv)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(xv)}</text>`;
     }
     g += `<text x="${(L + W - R) / 2}" y="${H - 6}" font-size="11" text-anchor="middle" fill="currentColor">${escapeHtml(String(c.xLabel || series[0].name))}</text>`
       + `<text x="${L}" y="${T + 2}" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel || series[1].name))}</text>`;
@@ -980,27 +1002,31 @@ function renderChartHtml(jsonText) {
     return wrap(g, '');
   }
 
-  const W = 560, H = 260, R = 12, T = 12;
+  const W = 560, H = 260, R = 16;
+  const T = c.yLabel ? 30 : 18; // headroom for value labels / the unit caption
+  const n = labels.length, n0 = labels.length;
   const horizontal = type === 'hbar';
   const stacked = type === 'stacked' || type === 'area';
-  const L = horizontal ? 96 : 48, B = horizontal ? 24 : 56;
+  const hasSubLine = labels.some((l) => /^(.+?)\s*[(（]/.test(l));
+  const L = horizontal ? 96 : 56;
+  const B = horizontal ? 24 : (n0 > 6 ? 52 : hasSubLine ? 44 : 30) + (c.xLabel ? 16 : 0);
   const sums = labels.map((_, i) => series.reduce((a, s) => a + Math.max(0, s.data[i]), 0));
   const all = series.flatMap((s) => s.data).filter(Number.isFinite);
-  const max = stacked && type === 'stacked' ? Math.max(...sums, 0) : Math.max(...all, 0);
-  const min = stacked ? 0 : Math.min(...all, 0);
+  const rawMax = stacked && type === 'stacked' ? Math.max(...sums, 0) : Math.max(...all, 0);
+  const rawMin = stacked ? 0 : Math.min(...all, 0);
+  const scale = niceScale(rawMin, rawMax);
+  const min = scale.lo, max = scale.hi;
   const span = max - min || 1;
-  const n = labels.length;
   const plotW = W - L - R, plotH = H - T - B;
   // value -> pixel along the value axis; index -> pixel along the category axis
   const val = (v) => (horizontal ? L + plotW * ((v - min) / span) : T + plotH * (1 - (v - min) / span));
   const cat = (i) => (horizontal ? T + (plotH / n) * i : L + (plotW / n) * i);
   const band = (horizontal ? plotH : plotW) / n;
   let g = '';
-  for (let i = 0; i <= 4; i++) {
-    const v = min + (span * i) / 4;
+  for (const v of scale.ticks) {
     g += horizontal
-      ? `<line x1="${val(v)}" x2="${val(v)}" y1="${T}" y2="${H - B}" stroke="currentColor" opacity=".12"/><text x="${val(v)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${fmt(v)}</text>`
-      : `<line x1="${L}" x2="${W - R}" y1="${val(v)}" y2="${val(v)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${val(v) + 4}" font-size="10" text-anchor="end" fill="currentColor">${fmt(v)}</text>`;
+      ? `<line x1="${val(v)}" x2="${val(v)}" y1="${T}" y2="${H - B}" stroke="currentColor" opacity="${v === 0 ? '.35' : '.12'}"/><text x="${val(v)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>`
+      : `<line x1="${L}" x2="${W - R}" y1="${val(v)}" y2="${val(v)}" stroke="currentColor" opacity="${v === 0 ? '.35' : '.12'}"/><text x="${L - 6}" y="${val(v) + 4}" font-size="10" text-anchor="end" fill="currentColor">${compactNumber(v)}</text>`;
   }
   labels.forEach((l, i) => {
     if (horizontal) {
@@ -1042,13 +1068,14 @@ function renderChartHtml(jsonText) {
         const col = colors[si % colors.length];
         if (!Number.isFinite(v)) return;
         const lo = Math.min(a, b), len = Math.abs(a - b);
+        const showVal = !stacked && n * series.length <= 12;
         g += horizontal
-          ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`
-          : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`;
+          ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>${showVal ? `<text x="${Math.max(a, b) + 4}" y="${pos + bw / 2 + 3.5}" font-size="10" fill="currentColor">${compactNumber(v)}</text>` : ''}`
+          : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>${showVal ? `<text x="${pos + bw / 2}" y="${(v >= 0 ? lo : lo + len) + (v >= 0 ? -4 : 11)}" font-size="10" text-anchor="middle" fill="currentColor">${compactNumber(v)}</text>` : ''}`;
       });
     });
   }
-  if (c.yLabel && !horizontal) g += `<text x="${L}" y="${T - 2 > 8 ? T - 2 : 9}" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel))}</text>`;
+  if (c.yLabel && !horizontal) g += `<text x="4" y="12" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel))}</text>`;
   if (c.xLabel) g += `<text x="${(L + W - R) / 2}" y="${H - 4}" font-size="11" text-anchor="middle" fill="currentColor">${escapeHtml(String(c.xLabel))}</text>`;
   return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : '');
 }
