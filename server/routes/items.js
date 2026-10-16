@@ -50,24 +50,10 @@ router.post('/backfill-facts', requireAuth, async (req, res) => {
 // its page. Returns the result for review; stores nothing.
 router.post('/annual-report-trial', requireAuth, async (req, res) => {
   try {
-    const { url, entity } = req.body || {};
-    if (!/^https:\/\//.test(String(url || ''))) return res.status(400).json({ error: 'https url required' });
-    const { fetchPdfBuffer, extractPdfPages } = require('../lib/pdfExtract');
-    const ar = require('../lib/annualReport');
-    const provider = require('../lib/ai/provider');
-    const pages = await extractPdfPages(await fetchPdfBuffer(url));
-    const selected = ar.selectPages(pages);
-    const user = selected.map((p) => `[page ${p.n}]\n${p.text}`).join('\n\n');
-    const result = await provider.callProviderWithFallback({ system: ar.EXTRACTION_SYSTEM, user: `[Company] ${entity || ''}\n\n${user}` });
-    const text = String(result.text || '').replace(/^```(?:json)?/i, '').replace(/```$/, '');
-    let records = [];
-    try { records = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); } catch (_) { /* unparsable */ }
-    const { kept, dropped } = ar.verifyAgainstPages(Array.isArray(records) ? records : [], selected);
-    res.json({
-      totalPages: pages.length, selectedPages: selected.map((p) => ({ n: p.n, score: Math.round(p.score) })),
-      sentChars: user.length, totalChars: pages.reduce((a, p) => a + p.text.length, 0),
-      extracted: records.length, verified: kept.length, dropped, records: kept,
-    });
+    const { url, entity, publishedAt, store } = req.body || {};
+    if (!/^https:\/\//.test(String(url || '')) || !entity) return res.status(400).json({ error: 'https url and entity required' });
+    const { ingestAnnualReport } = require('../lib/annualReportIngest');
+    res.json(await ingestAnnualReport({ url, entity, publishedAt: publishedAt || null, store: store === true }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

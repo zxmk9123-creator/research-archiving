@@ -28,8 +28,8 @@ module.exports = { scorePage, selectPages };
 // Extraction: only the selected pages' text goes to the model; every returned figure must literally
 // occur on the page it cites, otherwise it is discarded.
 const EXTRACTION_SYSTEM = `You extract operating facts of a plantation/palm-oil group from annual-report pages. Respond with ONLY a JSON array.
-Each element: {"segment": "plantation"|"mill"|"refinery"|"oleochemical"|"kernel_crushing"|"group", "scope": "group"|"country"|"site", "location": string|null, "metric": string, "value": number, "unit": string, "fiscal_year": number|null, "page": number}
-Rules: one element per distinct figure stated on a page; copy value and unit EXACTLY as printed (no conversion, no rounding); keep FFB, CPO, PK (palm kernel), planted area (mature/immature/total) and capacities (per hour/day/year) as DIFFERENT metrics; "fiscal_year" is the year the figure refers to (a 5-year table gives one element per year, or at least the latest year); "page" is the page number given in the [page N] header. Never invent a figure.`;
+Each element: {"segment": "plantation"|"mill"|"refinery"|"oleochemical"|"kernel_crushing"|"group", "scope": "group"|"country"|"site", "location": string|null, "metric": string, "value": number, "value_max": number|null, "unit": string, "fiscal_year": number|null, "definition": string|null, "page": number}
+Rules: a RANGE printed as "20 to 120" or "20-120" is ONE element with value=20 and value_max=120 (never two elements); otherwise value_max is null. "definition" = the exact words on the page that define the figure's basis (for example "Weighted Average Hectarage", "as at 30 September 2025", "Mature", "Landbank"); two different area definitions of the same metric are different elements, each with its own definition; null only if the page gives none. One element per distinct figure stated on a page; copy value and unit EXACTLY as printed (no conversion, no rounding); keep FFB, CPO, PK (palm kernel), planted area (mature/immature/total) and capacities (per hour/day/year) as DIFFERENT metrics; "fiscal_year" is the year the figure refers to (a 5-year table gives one element per year, or at least the latest year); "page" is the page number given in the [page N] header. Never invent a figure.`;
 
 function verifyAgainstPages(records, pages) {
   const byN = new Map(pages.map((p) => [p.n, String(p.text).replace(/\s+/g, ' ')]));
@@ -39,8 +39,14 @@ function verifyAgainstPages(records, pages) {
     const text = byN.get(Number(r && r.page));
     const v = Number(r && r.value);
     if (!text || !(v > 0)) { dropped++; continue; }
-    const forms = [v.toLocaleString('en-US'), String(v), v.toFixed(2), v.toFixed(1)];
-    if (forms.some((f) => text.includes(f))) kept.push(r); else dropped++;
+    const forms = (x) => [Number(x).toLocaleString('en-US'), String(x), Number(x).toFixed(2), Number(x).toFixed(1)];
+    const lower = text.toLowerCase();
+    const has = (x) => forms(x).some((f) => text.includes(f));
+    const max = Number(r.value_max);
+    const rangeOk = !(max > 0) || (has(max) && max > v);
+    // a definition the page does not literally contain is discarded (the figure itself may still be right)
+    const definitionOk = !r.definition || lower.includes(String(r.definition).toLowerCase().replace(/\s+/g, ' ').trim());
+    if (has(v) && rangeOk) kept.push(definitionOk ? r : { ...r, definition: null }); else dropped++;
   }
   return { kept, dropped };
 }

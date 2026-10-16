@@ -17,3 +17,26 @@ test('verifyAgainstPages drops figures that are not printed on the cited page', 
   assert.equal(kept.length, 2);
   assert.equal(dropped, 2);
 });
+
+test('verifyAgainstPages: ranges need both ends on the page; unverified definition is dropped, figure kept', () => {
+  const pages = [{ n: 31, text: 'Palm Oil Mills 34 POMs From 20 to 120 FFB mt/hr Weighted Average Hectarage Total planted area 293,427 ha' }];
+  const { kept } = ar.verifyAgainstPages([
+    { page: 31, value: 20, value_max: 120, unit: 'FFB mt/hr', definition: null },
+    { page: 31, value: 20, value_max: 999, unit: 'FFB mt/hr' },
+    { page: 31, value: 293427, unit: 'ha', definition: 'Weighted Average Hectarage' },
+    { page: 31, value: 293427, unit: 'ha', definition: 'Made up basis' },
+  ], pages);
+  assert.equal(kept.length, 3);
+  assert.equal(kept[1].definition, 'Weighted Average Hectarage');
+  assert.equal(kept[2].definition, null);
+});
+
+test('buildReportText states ranges, definitions and pages', () => {
+  const { buildReportText } = require('../server/lib/annualReportIngest');
+  const t = buildReportText('KLK', 2025, [
+    { segment: 'mill', metric: 'capacity', value: 20, value_max: 120, unit: 'FFB mt/hr', page: 31 },
+    { segment: 'plantation', metric: 'total planted area', value: 293427, unit: 'ha', definition: 'Weighted Average Hectarage', page: 36 },
+  ], 'https://x/ar.pdf');
+  assert.match(t, /20~120 FFB mt\/hr/);
+  assert.match(t, /293,427 ha \(기준: Weighted Average Hectarage\) — 보고서 p\.36/);
+});

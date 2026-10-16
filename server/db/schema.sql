@@ -608,6 +608,25 @@ CREATE TABLE IF NOT EXISTS companies (
 
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS segment TEXT;
 
+-- Verified figures extracted from company annual reports (lib/annualReportIngest.js): page + definition kept.
+CREATE TABLE IF NOT EXISTS annual_report_facts (
+  id SERIAL PRIMARY KEY,
+  entity TEXT NOT NULL,
+  fiscal_year INTEGER,
+  segment TEXT,
+  scope TEXT,
+  location TEXT,
+  metric TEXT NOT NULL,
+  value DOUBLE PRECISION NOT NULL,
+  value_max DOUBLE PRECISION,
+  unit TEXT NOT NULL,
+  definition TEXT,
+  page INTEGER,
+  source_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS annual_report_facts_dedupe ON annual_report_facts (entity, COALESCE(fiscal_year, 0), COALESCE(segment, ''), COALESCE(scope, ''), COALESCE(location, ''), metric, COALESCE(definition, ''), source_url);
+
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
