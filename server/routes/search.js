@@ -1160,17 +1160,31 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
         if (signal) signal.removeEventListener('abort', onAbort);
       }
     }
+    let requiredForBuild = required;
     try {
       const rosterDs = await getRoster();
       records = datasetPipeline.canonicalizeEntities(records, rosterDs);
+      // a company question lists COMPANIES: only entities typed 기업 (entity_type) or known roster companies stay
+      if (datasetPipeline.WANTS_COMPANIES.test(question)) {
+        const inRoster = (e) => rosterDs.some((c) => c.names.some((n) => n.length >= 3 && String(e).toLowerCase().includes(n)));
+        const before = records.length;
+        records = records.filter((r) => r.etype === '기업' || inRoster(r.entity));
+        trace.push(`company_filter ${before}->${records.length}`);
+      }
       const scopeDs = subjectScope.forQuestion(question);
       if (scopeDs) {
         const outside = subjectScope.splitRoster(rosterDs, scopeDs).outside;
         records = records.filter((r) => !outside.some((c) => c.names.some((n) => n.length >= 3 && String(r.entity).toLowerCase().startsWith(n))));
       }
     } catch (_) { /* keep names as extracted */ }
+    try {
+      // a roster row that is just another name of a company already in the dataset (e.g. "Kuala Lumpur Kepong Bhd" next to KLK) is not "missing"
+      const rosterRows = await getRoster();
+      const present = rosterRows.filter((c) => records.some((r) => c.names.some((n) => n.length >= 3 && (String(r.entity).toLowerCase().includes(n) || n.includes(String(r.entity).toLowerCase())))));
+      requiredForBuild = required.filter((rq) => !present.some((c) => subjectScope.sameCompany(c, rq)));
+    } catch (_) { /* keep required as is */ }
     trace.push(`before_build records=${records.length} entities=${[...new Set(records.map((r) => r.entity))].join(',')}`);
-    const dataset = datasetPipeline.buildDataset(records, required, { unitTons: req.unitTons, density, topN: req.tableOnly ? req.topN : null, only: req.tableOnly });
+    const dataset = datasetPipeline.buildDataset(records, requiredForBuild, { unitTons: req.unitTons, density, topN: req.tableOnly ? req.topN : null, only: req.tableOnly });
     trace.push(dataset ? 'built' : 'build_returned_null');
     if (dataset) {
       dataset.extraCandidates = extraCandidates;
@@ -1232,7 +1246,8 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     // (and its own unit-conversion remarks: the dataset states the basis itself)
     // (and any sentence claiming a company's figure is missing when the dataset HAS one — the table must not be contradicted)
     const have = (dataset.entities || []).map((n) => String(n).toLowerCase());
-    const contradicts = (l) => /(미공시|명시되지|확인되지|수치가 없|수치 미)/.test(l) && have.some((n) => l.toLowerCase().includes(n));
+    const quantityLine = (l) => /\d[\d,.]*\s*(ha\b|hectares?|헥타르|톤|\bmt\b|tonnes?|만\s*(톤|배럴|갤런)|억|배럴|갤런)/i.test(l) && have.some((n) => l.toLowerCase().includes(n));
+    const contradicts = (l) => quantityLine(l) || /(미공시|명시되지|확인되지|수치가 없|수치 미)/.test(l) && have.some((n) => l.toLowerCase().includes(n));
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l) && !/환산|변환|밀도|conversion|density/i.test(l) && !contradicts(l)).join('\n').trim();
   }
   if (dataset && dataset.only) {

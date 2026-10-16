@@ -52,7 +52,7 @@ const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NA
 function recordsForQuestion(records, question, density = null) {
   const q = String(question || '');
   const historical = freshness.wantsHistorical(q);
-  const wantsCompanies = /(기업|업체|회사|company|companies|producer|생산자)/i.test(q);
+  const wantsCompanies = WANTS_COMPANIES.test(q);
   const wantsMoney = MONEY_Q.test(q);
   const wantsArea = /(면적|식재|헥타르|hectare|planted|landbank)/i.test(q);
   const wantsCap = CAP_Q.test(q);
@@ -79,7 +79,9 @@ function recordsForQuestion(records, question, density = null) {
 // One company, one row: names that differ only by case, spacing, punctuation or a corporate
 // suffix are the same entity; roster aliases (e.g. 에코세레스 / EcoCeres) map to the roster name
 // (a Hangul/Latin pair can only be matched through the roster). Fields of the first record win.
-const CORP_SUFFIX = /(?:\b(?:inc|corp|corporation|co|ltd|llc|plc|gmbh|sa|ag|bv|oyj|asa)\b\.?|주식회사|\(주\)|㈜|유한회사)/gi;
+const CORP_SUFFIX = /(?:\b(?:inc|corp|corporation|co|ltd|limited|llc|plc|gmbh|sa|ag|bv|oyj|asa|bhd|berhad)\b\.?|\bs\.?\s?p\.?\s?a\.?(?=\s|$)|주식회사|\(주\)|㈜|유한회사)/gi;
+// "Phillips 66 Aviation", "Infinium Energy": a roster company name followed only by a generic qualifier is that company.
+const QUALIFIER = /^(aviation|energy|renewables?|oil|group|holdings?|international|refining|biofuels?|fuels?|corp|company|산업|에너지)$/;
 const nameKey = (s) => String(s || '').toLowerCase().replace(CORP_SUFFIX, '').replace(/[^a-z0-9가-힣]/g, '');
 function canonicalizeEntities(records, roster = []) {
   const byKey = new Map();
@@ -88,10 +90,19 @@ function canonicalizeEntities(records, roster = []) {
   return records.map((r) => {
     const k = nameKey(r.entity);
     if (!k) return r;
-    const name = byKey.get(k) || (first.has(k) ? first.get(k) : (first.set(k, r.entity), r.entity));
+    let name = byKey.get(k);
+    if (!name) {
+      // roster key + qualifier word(s)
+      for (const [rk, rn] of byKey) {
+        if (rk.length >= 4 && k.startsWith(rk) && QUALIFIER.test(k.slice(rk.length))) { name = rn; break; }
+      }
+    }
+    name = name || (first.has(k) ? first.get(k) : (first.set(k, r.entity), r.entity));
     return name === r.entity ? r : { ...r, entity: name };
   });
 }
+
+const WANTS_COMPANIES = /(기업|업체|회사|company|companies|producer|생산자)/i;
 
 function isDatasetRequest(req, question) {
   return Boolean(req && (req.wantsChart || req.wantsTable) && METRIC_WORDS.test(String(question || '')));
@@ -371,4 +382,4 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   return { entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };
+module.exports = { WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

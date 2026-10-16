@@ -186,3 +186,14 @@ test('ranking: Top-N companies, one row each (stated total, else site sum, else 
   assert.match(rows[1], /2,000,000/);
   assert.equal(ds.only, true);
 });
+
+test('canonicalizeEntities: S.p.A. suffix and generic qualifiers map to the roster company', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const roster = [
+    { name: 'Eni S.p.A.', rawNames: ['Eni S.p.A.', 'Enilive'] },
+    { name: 'Phillips 66', rawNames: ['Phillips 66'] },
+    { name: 'Infinium', rawNames: ['Infinium'] },
+  ];
+  const out = dp2.canonicalizeEntities([{ entity: 'Eni' }, { entity: 'Eni S.p.A' }, { entity: 'Phillips 66 Aviation' }, { entity: 'Infinium Energy' }, { entity: 'Phillips 667' }], roster).map((r) => r.entity);
+  assert.deepEqual(out, ['Eni S.p.A.', 'Eni S.p.A.', 'Phillips 66', 'Infinium', 'Phillips 667']);
+});

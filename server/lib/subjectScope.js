@@ -42,4 +42,4 @@ function retrievalHint(question, scope) {
   return scope && !/(팜유|palm oil)/i.test(String(question || '')) ? `${question} 팜유 palm oil` : question;
 }
 
-module.exports = { retrievalHint, forQuestion, splitRoster, dropOutOfScopeLines };
+module.exports = { sameCompany, retrievalHint, forQuestion, splitRoster, dropOutOfScopeLines };
