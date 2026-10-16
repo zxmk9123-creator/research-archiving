@@ -1169,3 +1169,9 @@ details.section > *:not(summary) { animation: reveal .18s var(--ease); }
 .ai-chart svg { width: 100%; max-width: 560px; height: auto; color: var(--text-muted, #666); }
 .ai-chart-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
 .ai-chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+
+.ai-answer-sublist { padding-left: 1.4em; margin-top: 4px; }
+ul.ai-answer-list > li::marker { color: currentColor; }
+ul.ai-answer-sublist.ai-depth-1 { list-style: circle; }
+ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: square; font-size: .96em; }
+.ai-answer-heading { margin: var(--sp-3) 0 var(--sp-2); }

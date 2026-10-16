@@ -842,7 +842,7 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
     return block.lines.map((l) => `<h3 class="ai-answer-heading">${renderInlineAnswerText(l.replace(/^#{1,6}\s+/, ''), sources)}</h3>`).join('');
   }
   if (block.type === 'unordered') {
-    return `<ul class="ai-answer-list">${block.lines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`;
+    return renderBulletTree(block.lines, sources);
   }
   // Markdown table: "| 대상 | 적용일 |" style rows the model sometimes
   // produces for comparison data (e.g. a company-size vs. deadline table),
@@ -879,7 +879,7 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
   if (block.type === 'ordered-merged') {
     return `<ol class="ai-answer-list" start="${orderedStart}">${block.items.map((item) => `<li>${renderInlineAnswerText(item.text, sources)}${
       item.subLines.length
-        ? `<ul class="ai-answer-list ai-answer-sublist">${item.subLines.map((l) => `<li>${renderInlineAnswerText(l.replace(/^[-*•]\s+/, ''), sources)}</li>`).join('')}</ul>`
+        ? renderBulletTree(item.subLines, sources, 'ai-answer-list ai-answer-sublist')
         : ''
     }</li>`).join('')}</ol>`;
   }
@@ -932,6 +932,33 @@ function renderChartHtml(jsonText) {
   return `<figure class="ai-chart"><figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${g}</svg>${legend}</figure>`;
 }
 
+// Bullet lines keep their leading indentation; deeper indent => nested <ul>,
+// so the model's visual hierarchy (group -> item -> detail) is preserved.
+function renderBulletTree(lines, sources, rootClass = 'ai-answer-list') {
+  const items = lines.map((l) => ({
+    d: l.match(/^\s*/)[0].replace(/\t/g, '    ').length,
+    t: l.trim().replace(/^[-*•]\s+/, ''),
+  }));
+  const build = (start, indent, depth) => {
+    let out = `<ul class="${rootClass}${depth ? ` ai-answer-sublist ai-depth-${Math.min(depth, 3)}` : ''}">`;
+    let i = start;
+    while (i < items.length && items[i].d >= indent) {
+      const cur = items[i++];
+      let child = '';
+      if (i < items.length && items[i].d > cur.d) [child, i] = build(i, items[i].d, depth + 1);
+      out += `<li>${renderInlineAnswerText(cur.t, sources)}${child}</li>`;
+    }
+    return [`${out}</ul>`, i];
+  };
+  let html = '';
+  let i = 0;
+  while (i < items.length) {
+    const [h, next] = build(i, Math.min(...items.slice(i).map((x) => x.d)), 0);
+    html += h; i = next;
+  }
+  return html;
+}
+
 function renderAnswerHtml(rawAnswer, sources) {
   // Split out chart fences first; an unfinished fence (mid-stream) is hidden.
   const text = String(rawAnswer || '').replace(/```chart[^\n]*\n?(?![\s\S]*```)[\s\S]*$/, '');
@@ -976,7 +1003,7 @@ function renderAnswerHtml(rawAnswer, sources) {
 
     if (type !== currentType) flush();
     currentType = type;
-    current.push(line);
+    current.push(type === 'unordered' ? rawLine.replace(/\s+$/, '') : line);
   }
   flush();
 
