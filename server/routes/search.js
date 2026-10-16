@@ -308,7 +308,7 @@ async function retrieveForTarget(target, otherForms) {
 // `companies` table, with aliases) gets its own slots, ranked by overlap with
 // the question's other terms.
 const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|compan|major|producer|supplier|refiner|player|operator)/i;
-const MAX_WATCHLIST = 24;
+const MAX_WATCHLIST = 40;
 const PER_COMPANY = 2; // roster sweep: fewer rows per company so a long roster stays within the prompt budget
 async function retrieveForWatchlist(otherForms) {
   let companies;
