@@ -7,6 +7,7 @@ const requestCompliance = require('../lib/requestCompliance');
 const datasetPipeline = require('../lib/datasetPipeline');
 const freshness = require('../lib/freshness');
 const subjectScope = require('../lib/subjectScope');
+const annualRecords = require('../lib/annualReportRecords');
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
@@ -1121,6 +1122,20 @@ async function tryBuildDataset(question, candidates, required, signal) {
       }
     } catch (err) {
       console.error('ai-search topic facts failed:', err.message);
+    }
+    // 1c) verified figures from company annual reports (annual_report_facts): FFB/CPO/PK output and planted area
+    try {
+      const annual = await annualRecords.loadAnnualRecords(question, { candidates, baseIndex: candidates.length + extraCandidates.length });
+      const annualFit = datasetPipeline.recordsForQuestion(annual.records, question, density);
+      // enough audited figures of ONE comparable kind: the dataset is built from them alone — news-derived
+      // figures of other meanings (capacity targets, deals) must not be mixed into the same column
+      if (annualFit.length >= 3) {
+        records = annualFit;
+        pending = [];
+        extraCandidates = extraCandidates.concat(annual.items);
+      }
+    } catch (err) {
+      console.error('ai-search annual report facts failed:', err.message);
     }
     if (pending.length) {
       const controller = new AbortController();

@@ -16,13 +16,13 @@
 const nc = require('./numberCheck');
 const freshness = require('./freshness');
 
-const METRIC_WORDS = /(capa|capacity|생산\s*능력|용량|생산량|생산\s*규모|처리량|공급량|출하|물량|수출량|수입량|판매량|소비량|재고|투자액|투자\s*규모|투자금|매출|시장\s*규모|규모)/i;
+const METRIC_WORDS = /(capa|capacity|생산\s*능력|용량|생산량|생산\s*규모|처리량|공급량|출하|물량|수출량|수입량|판매량|소비량|재고|투자액|투자\s*규모|투자금|매출|시장\s*규모|규모|면적|식재|헥타르|hectare|planted)/i;
 const STATUS_RANK = { 가동: 3, 건설중: 2, 계획: 1, 목표: 0 };
 // One state vocabulary on screen (the same words the chart labels use): 현재 / 건설중 / 계획 / 목표.
 const STATUS_LABEL = { 가동: '현재', 건설중: '건설중', 계획: '계획', 목표: '목표' };
 const GROUP_OF = { mass: 'mass', gal: 'volume', bbl: 'volume', liter: 'volume', bpd: 'volume', usd: 'usd', eur: 'eur', krw: 'krw' };
-const GROUP_LABEL = { mass: '톤', volume: '리터', usd: '달러', eur: '유로', krw: '원' };
-const GROUP_PRIORITY = ['mass', 'volume', 'usd', 'eur', 'krw'];
+const GROUP_LABEL = { mass: '톤', volume: '리터', usd: '달러', eur: '유로', krw: '원', area: '헥타르' };
+const GROUP_PRIORITY = ['mass', 'volume', 'usd', 'eur', 'krw', 'area'];
 const LITERS = { gal: 3.785411784, bbl: 158.987, liter: 1, bpd: 158.987 * 365 }; // per unit, per year for b/d
 
 const FUEL_WORDS = /(saf|항공유|jet fuel|디젤|diesel|hvo|바이오디젤|biodiesel|재생\s*연료|renewable (?:diesel|fuel)|biofuel|바이오\s*연료|바이오에탄올|ethanol)/gi;
@@ -53,12 +53,15 @@ function recordsForQuestion(records, question, density = null) {
   const q = String(question || '');
   const historical = freshness.wantsHistorical(q);
   const wantsMoney = MONEY_Q.test(q);
+  const wantsArea = /(면적|식재|헥타르|hectare|planted|landbank)/i.test(q);
   const wantsCap = CAP_Q.test(q);
   const wantsOut = OUT_Q.test(q);
   return records
     .filter((r) => {
       if (!historical && freshness.isOutdated(r.pubAt)) return false; // outdated facts never reach an answer
       if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      if (r.group === 'area') return wantsArea;
+      if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
       if (isMoney) return wantsMoney;
       if (wantsMoney && !wantsCap && !wantsOut) return false; // a money question: quantities of goods are out
