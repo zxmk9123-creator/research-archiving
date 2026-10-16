@@ -24,7 +24,7 @@ const SECTOR_KEYWORD_PATTERNS = {
   '해바라기유': /\bsunflower oil\b|해바라기유/i,
   'UCO': /\bUCO\b|\bused cooking oil\b/i,
   'UCOME': /\bUCOME\b/,
-  'SAF': /\bSAF\b|\bsustainable aviation fuel\b/i,
+  'SAF': /\bSAF\b|\bsustainable aviation fuel\b|지속\s*가능\s*항공유|바이오\s*항공유/i,
   'Tallow': /\btallow\b/i,
   'FAME': /\bFAME\b|\bfatty acid methyl esters?\b/i,
 };

@@ -1160,6 +1160,20 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
         if (signal) signal.removeEventListener('abort', onAbort);
       }
     }
+    // SUBJECT FIT: when the question names a product (SAF, 팜유, ...), a figure counts only if the material it
+    // comes from is about that product — crude-refinery or tanker numbers must never enter a SAF capacity table.
+    {
+      const patterns = Object.values(SECTOR_KEYWORD_PATTERNS).filter((re) => re.test(question));
+      if (patterns.length) {
+        const textOfSource = (r) => {
+          const m = r.source <= candidates.length ? candidates[r.source - 1] : extraCandidates[r.source - candidates.length - 1];
+          return m ? materialText(m) : '';
+        };
+        const before = records.length;
+        records = records.filter((r) => { const t = textOfSource(r); return patterns.some((re) => re.test(t)); });
+        trace.push(`subject_fit ${before}->${records.length}`);
+      }
+    }
     let requiredForBuild = required;
     try {
       const rosterDs = await getRoster();
