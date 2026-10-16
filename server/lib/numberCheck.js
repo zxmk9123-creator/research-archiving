@@ -208,4 +208,12 @@ function guardChartNumbers(chart, candidates, materialText) {
   return { chart: { ...chart, series }, fixed, dropped };
 }
 
-module.exports = { extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };
+// "만 톤" / "kt" / "백만 갤런" -> {mult, cls} (value of one such unit in base units), or null.
+function unitMultiplier(unitText) {
+  const t = String(unitText || '').trim();
+  if (!t) return null;
+  const probe = extractQuantities(`1${/^[가-힣]/.test(t) ? '' : ' '}${t}`)[0];
+  return probe ? { mult: probe.value, cls: probe.cls } : null;
+}
+
+module.exports = { unitMultiplier, extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };
