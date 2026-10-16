@@ -929,3 +929,20 @@ test('chart safety net: parts of one known company are grouped; scenario-like pa
   assert.equal(searchRouter.enrichChartJson(scen, roster).combine, undefined);
   assert.equal(searchRouter.enrichChartJson({ ...chart, combine: 'sum' }, roster).groups, undefined);
 });
+
+test('enforced coverage: companies with supplied materials cannot be omitted from a collective answer (any roster)', () => {
+  const roster = [{ name: 'Alpha Oil', names: ['alpha oil', 'alpha'] }, { name: 'Beta Fuels', names: ['beta fuels', 'beta'] }, { name: 'Gamma', names: ['gamma'] }];
+  const cands = [
+    { title: 'Alpha Oil plans SAF plant', summary: 'Alpha Oil 40 kt capacity', ai_summary: null },
+    { title: 'Beta Fuels expansion', summary: 'Beta Fuels adds 60 kt', ai_summary: null },
+    { title: 'Unrelated', summary: 'palm oil', ai_summary: null },
+  ];
+  assert.deepEqual(searchRouter.requiredCompanies('글로벌 업체별 SAF 능력', cands, roster).map((c) => [c.name, c.indices]), [['Alpha Oil', [1]], ['Beta Fuels', [2]]]);
+  assert.deepEqual(searchRouter.requiredCompanies('팜유 수출 정책', cands, roster), []); // not a collective question
+  const req = searchRouter.requiredCompanies('글로벌 업체별 SAF 능력', cands, roster);
+  assert.match(searchRouter.buildCoverageBlock(req), /Alpha Oil \(자료 1\)[\s\S]*Beta Fuels \(자료 2\)/);
+  // answer mentions Alpha only -> Beta is appended with its own footnote; nothing appended when all present
+  const out = searchRouter.ensureCompanyCoverage('Alpha Oil은 40 kt [1]', req, cands);
+  assert.match(out, /추가 확인된 업체[\s\S]*\*\*Beta Fuels\*\*: Beta Fuels adds 60 kt \[2\]/);
+  assert.equal(searchRouter.ensureCompanyCoverage('Alpha Oil [1] Beta Fuels [2]', req, cands), 'Alpha Oil [1] Beta Fuels [2]');
+});

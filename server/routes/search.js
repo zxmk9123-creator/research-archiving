@@ -308,7 +308,8 @@ async function retrieveForTarget(target, otherForms) {
 // `companies` table, with aliases) gets its own slots, ranked by overlap with
 // the question's other terms.
 const COLLECTIVE_ENTITY_RE = /(업체|기업|회사|정유사|메이저|생산자|공급사|업계|메이커|compan|major|producer|supplier|refiner|player|operator)/i;
-const MAX_WATCHLIST = 12;
+const MAX_WATCHLIST = 24;
+const PER_COMPANY = 2; // roster sweep: fewer rows per company so a long roster stays within the prompt budget
 async function retrieveForWatchlist(otherForms) {
   let companies;
   try {
@@ -335,7 +336,7 @@ async function retrieveForWatchlist(otherForms) {
          ORDER BY ((CASE WHEN (i.summary ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.insight ILIKE ANY($2) OR i.ai_insight ILIKE ANY($2)) THEN 2 ELSE 0 END)
                    + (CASE WHEN i.title ILIKE ANY($2) THEN 1 ELSE 0 END)
                    + (CASE WHEN i.title ILIKE ANY($1) THEN 1 ELSE 0 END)) DESC, i.published_at DESC NULLS LAST
-         LIMIT ${PER_TARGET}`,
+         LIMIT ${PER_COMPANY}`,
         [pats, others, c.id]
       );
       out.push(...rows);
@@ -427,7 +428,7 @@ async function retrieveCandidates(question, history) {
     const known = new Set(baseCovered.map((r) => r.id));
     const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
     baseCovered = baseCovered.concat(fromRoster);
-    ceiling = MAX_TOTAL_CANDIDATES + MAX_WATCHLIST * PER_TARGET - 8;
+    ceiling = MAX_TOTAL_CANDIDATES + 40;
   }
   const targets = await taxonomyTargets(concepts);
   if (!targets.length) return baseCovered.slice(0, ceiling);
@@ -745,6 +746,50 @@ async function verifyCitations(text, candidates, signal) {
 // before ANY output reached the browser, doubling perceived latency on
 // every single request — now it only ever delays this final polish
 // step, never the first visible token (see the streaming path below).
+// Roster = the watchlist companies with every spelling we match them by.
+async function getRoster() {
+  try {
+    const { rows } = await pool.query('SELECT name, aliases FROM companies WHERE watched = true');
+    return rows.map((r) => ({
+      name: r.name,
+      names: Array.from(new Set([r.name, String(r.name).split(/[\s.]+/)[0], ...(r.aliases || [])]
+        .map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))),
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+// ENFORCED COVERAGE (대원칙): when a question is about companies in general, every
+// roster company for which materials were supplied MUST appear in the answer.
+// 1) the prompt carries an explicit mandatory list (with which 자료 mention each);
+// 2) after generation, any company still absent from the text is appended
+//    deterministically from its own material, with a [N] footnote — so the
+//    answer can never silently omit a company that the archive covers.
+function requiredCompanies(question, candidates, roster) {
+  if (!COLLECTIVE_ENTITY_RE.test(String(question || ''))) return [];
+  const texts = candidates.map((m) => `${m.title} ${m.summary || ''} ${m.ai_summary || ''} ${m.insight || ''} ${m.ai_insight || ''}`.toLowerCase());
+  return roster
+    .map((c) => ({ ...c, indices: texts.map((t, i) => (c.names.some((n) => t.includes(n)) ? i + 1 : null)).filter(Boolean) }))
+    .filter((c) => c.indices.length);
+}
+function buildCoverageBlock(required) {
+  if (!required.length) return '';
+  return `\n\n[필수 포함 업체 — 자료가 제공된 업체이므로 표·차트·본문에서 하나도 빠뜨리지 말 것. 해당 항목의 수치가 자료에 없으면 "-" 또는 "미공시"로 표시하고 그 사실을 한 줄로 밝힐 것]\n${required.map((c) => `- ${c.name} (자료 ${c.indices.slice(0, 6).join(', ')})`).join('\n')}`;
+}
+function ensureCompanyCoverage(text, required, candidates) {
+  const low = String(text || '').toLowerCase();
+  const missing = required.filter((c) => !c.names.some((n) => low.includes(n)));
+  if (!missing.length) return text;
+  const bullets = missing.map((c) => {
+    const m = candidates[c.indices[0] - 1];
+    const raw = String(m.ai_summary || m.summary || m.title || '').replace(/\s+/g, ' ').trim();
+    const snippet = raw.length > 150 ? `${raw.slice(0, 150)}…` : raw;
+    return `- **${c.name}**: ${snippet} [${c.indices[0]}]`;
+  });
+  return `${String(text).trimEnd()}\n\n# 추가 확인된 업체 (자료 기준)\n본문에서 다루지 못했으나 자료가 확인된 업체입니다.\n${bullets.join('\n')}`;
+}
+
 // Chart safety net: when the model draws one bar per plant/site of the same
 // company ("Neste 싱가포르", "Neste 로테르담") without asking for them to be
 // combined, group the parts by KNOWN company (watchlist names/aliases) so the
@@ -780,11 +825,7 @@ function enrichChartJson(chart, roster) {
 }
 async function enrichChartBlocks(text) {
   if (!/```chart/.test(text)) return text;
-  let roster = [];
-  try {
-    const { rows } = await pool.query('SELECT name, aliases FROM companies WHERE watched = true');
-    roster = rows.map((r) => ({ name: r.name, names: Array.from(new Set([r.name, String(r.name).split(/[\s.]+/)[0], ...(r.aliases || [])].map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))) }));
-  } catch (_) { return text; }
+  const roster = await getRoster();
   if (!roster.length) return text;
   return text.replace(/```chart[^\n]*\n([\s\S]*?)```/g, (whole, body) => {
     try {
@@ -794,8 +835,9 @@ async function enrichChartBlocks(text) {
   });
 }
 
-async function finalizeAnswer(rawText, candidates, signal) {
-  const text = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
+async function finalizeAnswer(rawText, candidates, signal, required = []) {
+  const verified = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
+  const text = ensureCompanyCoverage(verified, required, candidates);
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -878,7 +920,8 @@ async function handleSearch(req, res, signal) {
     return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
   }
 
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}`;
+  const required = requiredCompanies(question, candidates, await getRoster());
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}`;
 
   if (!streaming) {
     let text;
@@ -898,7 +941,7 @@ async function handleSearch(req, res, signal) {
       return res.status(httpStatus).json({ error: 'AI 응답 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.' });
     }
     if (signal.aborted || res.destroyed) return;
-    const { answer, sources } = await finalizeAnswer(text, candidates, signal);
+    const { answer, sources } = await finalizeAnswer(text, candidates, signal, required);
     if (signal.aborted || res.destroyed) return;
     await recordSearchTelemetry({
       requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
@@ -950,7 +993,7 @@ async function handleSearch(req, res, signal) {
   }
 
   if (signal.aborted || res.destroyed) return;
-  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal);
+  const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required);
   if (signal.aborted || res.destroyed) return;
   sendEvent('done', { answer, insufficient: false, sources });
   res.end();
@@ -964,6 +1007,9 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.requiredCompanies = requiredCompanies;
+module.exports.ensureCompanyCoverage = ensureCompanyCoverage;
+module.exports.buildCoverageBlock = buildCoverageBlock;
 module.exports.normalizeCitationMarkers = normalizeCitationMarkers;
 module.exports.claimOverlapsMaterials = claimOverlapsMaterials;
 module.exports.selectDiverseCandidates = selectDiverseCandidates;
