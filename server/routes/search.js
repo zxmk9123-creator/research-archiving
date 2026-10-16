@@ -514,6 +514,7 @@ Formatting:
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
 - Length (hard rule): keep the whole answer within about 450 Korean words — tables and chart JSON count — or about 700 for a single-company profile. Lead with the answer, then the most decision-relevant facts; merge duplicate materials and cite each fact once. Never try to cover everything: if more material exists than fits, say in one short line what was left out and offer to continue. The answer must always END COMPLETE — never stop mid-sentence, mid-list, mid-table or mid-chart.
 - Comparisons across several targets: show every target the materials give a figure for, side by side with the same fields and the same unit; name in one line any requested target with no usable figure.
+- SUBJECT FIT: list an entity only if the materials tie it to the product/subject the question names (e.g. a palm-oil question lists palm-oil handlers, not producers of an unrelated fuel that merely appear in the archive). If the archive lacks the major players of that subject, say so in one line instead of filling the list with off-subject entities.
 - Charts and tables (only when asked, or when 3+ comparable numbers make one clearly better): tables use Markdown pipe tables with the unit stated once in the header, one number format per column (commas for thousands, a dot for decimals, ranges as "50만~120만 톤"), current/plan/target in separate columns, "-" for no data, "미공시" for undisclosed. A chart is a fenced block \`\`\`chart containing one JSON object {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","labels":[...],"series":[{"name":"...","data":[numbers or null]}]} (hbar for rankings, line for time trends, pie/donut only for shares of one whole, at most 10 items and 4 series). To merge the parts of one company that add up (its plants), use one series with "groups":[company per label] and "combine":"sum" and optional "notes":[detail per label]. Use ONLY figures stated in the materials; put the unit in "unit"; follow with 1-3 sentences of takeaways, each cited.
 - NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with its own scale and unit ("50만 톤" stays "50만 톤", never "5만 톤"; "1.2 Mt" stays "1.2 Mt"). Do not convert between 만/천/백만/억, kt/Mt/톤 or gallons/barrels/tonnes yourself — write each figure in the unit its material uses (when the user asks for one common unit, the system converts and states the basis). A range uses the material's two endpoints. A figure not found in the cited material must not be written.
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
@@ -944,13 +945,19 @@ async function getRoster() {
 // 2) after generation, any company still absent from the text is appended
 //    deterministically from its own material, with a [N] footnote — so the
 //    answer can never silently omit a company that the archive covers.
+const { SECTOR_KEYWORD_PATTERNS } = require('../lib/classificationSanity');
 function requiredCompanies(question, candidates, roster) {
   const intent = classifyIntent(question, roster);
   if (intent.type !== 'collective' && intent.type !== 'peers') return [];
   const scoped = intent.type === 'peers' ? intent.focus : roster; // peers: exactly the companies the user named
   const texts = candidates.map((m) => `${m.title} ${m.summary || ''} ${m.ai_summary || ''} ${m.insight || ''} ${m.ai_insight || ''}`.toLowerCase());
+  // TOPIC BINDING: when the question names a product (팜유, SAF, 대두유 ...), a company is "required"
+  // only through materials that are about that product — a roster company known from another
+  // product line (e.g. SAF-only producers in a palm-oil question) must not be forced in.
+  const subject = Object.values(SECTOR_KEYWORD_PATTERNS).filter((re) => re.test(question));
+  const aboutSubject = (m) => !subject.length || subject.some((re) => re.test(`${m.title} ${m.summary || ''} ${m.ai_summary || ''} ${m.insight || ''} ${m.ai_insight || ''}`));
   return scoped
-    .map((c) => ({ ...c, indices: texts.map((t, i) => (c.names.some((n) => t.includes(n)) ? i + 1 : null)).filter(Boolean) }))
+    .map((c) => ({ ...c, indices: texts.map((t, i) => (aboutSubject(candidates[i]) && c.names.some((n) => t.includes(n)) ? i + 1 : null)).filter(Boolean) }))
     .filter((c) => c.indices.length);
 }
 function buildCoverageBlock(required) {

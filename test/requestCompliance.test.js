@@ -57,7 +57,7 @@ test('unit conversion to tons (stated factors) is accepted as grounded; an unrel
 
 test('plant/facility and completeness questions are collective: company coverage runs for them', () => {
   const roster = [{ name: 'Alpha', names: ['alpha'] }];
-  const cands = [{ title: 'Alpha plant', summary: 'x' }];
+  const cands = [{ title: 'Alpha plant', summary: 'SAF' }];
   assert.equal(searchRouter.requiredCompanies('글로벌 SAF 플랜트 Capa 정리', cands, roster).length, 1);
   assert.equal(searchRouter.requiredCompanies('SAF Capa를 누락없이 알려줘', cands, roster).length, 1);
   assert.equal(searchRouter.requiredCompanies('팜유 수출 정책', cands, roster).length, 0);

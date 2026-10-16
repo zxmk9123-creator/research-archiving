@@ -934,7 +934,7 @@ test('enforced coverage: companies with supplied materials cannot be omitted fro
   const roster = [{ name: 'Alpha Oil', names: ['alpha oil', 'alpha'] }, { name: 'Beta Fuels', names: ['beta fuels', 'beta'] }, { name: 'Gamma', names: ['gamma'] }];
   const cands = [
     { title: 'Alpha Oil plans SAF plant', summary: 'Alpha Oil 40 kt capacity', ai_summary: null },
-    { title: 'Beta Fuels expansion', summary: 'Beta Fuels adds 60 kt', ai_summary: null },
+    { title: 'Beta Fuels expansion', summary: 'Beta Fuels adds 60 kt SAF', ai_summary: null },
     { title: 'Unrelated', summary: 'palm oil', ai_summary: null },
   ];
   assert.deepEqual(searchRouter.requiredCompanies('글로벌 업체별 SAF 능력', cands, roster).map((c) => [c.name, c.indices]), [['Alpha Oil', [1]], ['Beta Fuels', [2]]]);
@@ -943,7 +943,7 @@ test('enforced coverage: companies with supplied materials cannot be omitted fro
   assert.match(searchRouter.buildCoverageBlock(req), /Alpha Oil \(자료 1\)[\s\S]*Beta Fuels \(자료 2\)/);
   // answer mentions Alpha only -> Beta is appended with its own footnote; nothing appended when all present
   const out = searchRouter.ensureCompanyCoverage('Alpha Oil은 40 kt [1]', req, cands);
-  assert.match(out, /추가 확인된 업체[\s\S]*\*\*Beta Fuels\*\*: Beta Fuels adds 60 kt \[2\]/);
+  assert.match(out, /추가 확인된 업체[\s\S]*\*\*Beta Fuels\*\*: Beta Fuels adds 60 kt SAF \[2\]/);
   assert.equal(searchRouter.ensureCompanyCoverage('Alpha Oil [1] Beta Fuels [2]', req, cands), 'Alpha Oil [1] Beta Fuels [2]');
 });
 
@@ -1310,4 +1310,18 @@ test('dropTotalFromSiteChart keeps companies whose names start with Total/All', 
   const { dropTotalFromSiteChart } = require('../server/routes/search');
   const c = { labels: ['A', 'All Nippon Airways', 'Total Energies'], series: [{ name: 's', data: [1, 2, 3] }] };
   assert.equal(dropTotalFromSiteChart(c).labels.length, 3);
+});
+
+test('requiredCompanies binds to the question subject (palm oil question ignores SAF-only evidence)', () => {
+  const { requiredCompanies } = require('../server/routes/search');
+  const roster = [
+    { name: 'LanzaJet', names: ['lanzajet'] },
+    { name: 'Wilmar', names: ['wilmar'] },
+  ];
+  const candidates = [
+    { title: 'LanzaJet ethanol-to-jet SAF plant', summary: 'SAF' },
+    { title: 'Wilmar palm oil refinery expansion', summary: 'palm oil' },
+  ];
+  const out = requiredCompanies('팜유 주요 리파이너리 업체들 숏리스트', candidates, roster);
+  assert.deepEqual(out.map((c) => c.name), ['Wilmar']);
 });
