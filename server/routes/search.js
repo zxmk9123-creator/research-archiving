@@ -745,6 +745,55 @@ async function verifyCitations(text, candidates, signal) {
 // before ANY output reached the browser, doubling perceived latency on
 // every single request — now it only ever delays this final polish
 // step, never the first visible token (see the streaming path below).
+// Chart safety net: when the model draws one bar per plant/site of the same
+// company ("Neste 싱가포르", "Neste 로테르담") without asking for them to be
+// combined, group the parts by KNOWN company (watchlist names/aliases) so the
+// client draws one stacked row per company. Parts whose labels read like
+// scenarios of one quantity (현재/2030/계획/전망...) are never summed.
+const SCENARIO_WORDS = /20\d\d|현재|기존|계획|전망|목표|예정|확장\s*후|target|plan|forecast|current|expected/i;
+function enrichChartJson(chart, roster) {
+  if (!chart || chart.combine || !['bar', 'hbar'].includes(chart.type || 'bar')) return chart;
+  const labels = Array.isArray(chart.labels) ? chart.labels.map(String) : [];
+  if (labels.length < 3 || !Array.isArray(chart.series) || chart.series.length !== 1) return chart;
+  const entityOf = (label) => {
+    const low = label.toLowerCase();
+    let best = null;
+    for (const c of roster) {
+      for (const n of c.names) {
+        if (low.startsWith(n) && (!best || n.length > best.len)) best = { name: c.name, len: n.length };
+      }
+    }
+    return best;
+  };
+  const found = labels.map((l) => entityOf(l));
+  const counts = new Map();
+  found.forEach((f) => { if (f) counts.set(f.name, (counts.get(f.name) || 0) + 1); });
+  const mergeable = new Set();
+  for (const [name, count] of counts) {
+    if (count < 2) continue;
+    const details = labels.filter((l, i) => found[i] && found[i].name === name).map((l, i) => l);
+    if (details.some((l) => SCENARIO_WORDS.test(l))) continue;
+    mergeable.add(name);
+  }
+  if (!mergeable.size) return chart;
+  return { ...chart, combine: 'sum', groups: labels.map((l, i) => (found[i] && mergeable.has(found[i].name) ? found[i].name : l)) };
+}
+async function enrichChartBlocks(text) {
+  if (!/```chart/.test(text)) return text;
+  let roster = [];
+  try {
+    const { rows } = await pool.query('SELECT name, aliases FROM companies WHERE watched = true');
+    roster = rows.map((r) => ({ name: r.name, names: Array.from(new Set([r.name, String(r.name).split(/[\s.]+/)[0], ...(r.aliases || [])].map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))) }));
+  } catch (_) { return text; }
+  if (!roster.length) return text;
+  return text.replace(/```chart[^\n]*\n([\s\S]*?)```/g, (whole, body) => {
+    try {
+      const enriched = enrichChartJson(JSON.parse(body), roster);
+      return `\`\`\`chart\n${JSON.stringify(enriched)}\n\`\`\``;
+    } catch (_) { return whole; }
+  });
+}
+
 async function finalizeAnswer(rawText, candidates, signal) {
   const text = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
   // Citation links are built from the DB rows we actually sent, never from
@@ -756,7 +805,7 @@ async function finalizeAnswer(rawText, candidates, signal) {
   // back to showing every retrieved candidate rather than an empty list.
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
-  const answer = moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text);
+  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text));
   const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
@@ -914,6 +963,7 @@ async function handleSearch(req, res, signal) {
 
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
+module.exports.enrichChartJson = enrichChartJson;
 module.exports.normalizeCitationMarkers = normalizeCitationMarkers;
 module.exports.claimOverlapsMaterials = claimOverlapsMaterials;
 module.exports.selectDiverseCandidates = selectDiverseCandidates;

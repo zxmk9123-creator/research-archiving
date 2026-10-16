@@ -918,3 +918,14 @@ test('P9: a question about companies in general covers every watchlist company (
     restore();
   }
 });
+
+test('chart safety net: parts of one known company are grouped; scenario-like parts and unknown names are left alone', () => {
+  const roster = [{ name: 'Neste', names: ['neste', '네스테'] }, { name: 'Eni', names: ['enilive'] }];
+  const chart = { type: 'hbar', labels: ['Neste 싱가포르', 'Neste 로테르담', 'Chevron Geismar', 'Neste Porvoo'], series: [{ name: 'c', data: [1, 2, 3, 4] }] };
+  const out = searchRouter.enrichChartJson(chart, roster);
+  assert.equal(out.combine, 'sum');
+  assert.deepEqual(out.groups, ['Neste', 'Neste', 'Chevron Geismar', 'Neste']);
+  const scen = { ...chart, labels: ['Enilive 현재', 'Enilive 2030', 'Neste 로테르담'] };
+  assert.equal(searchRouter.enrichChartJson(scen, roster).combine, undefined);
+  assert.equal(searchRouter.enrichChartJson({ ...chart, combine: 'sum' }, roster).groups, undefined);
+});
