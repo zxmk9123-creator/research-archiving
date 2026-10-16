@@ -748,8 +748,9 @@ function trimToCompleteBlock(text) {
       const prev = lines.slice(0, -1).reverse().find((l) => /^\s*\|/.test(l));
       if (!/\|\s*$/.test(last) || (prev && cells(last) < cells(prev))) { lines.pop(); continue; } // half a table row
     }
-    if (terminal.test(last) || /^#{1,6}\s/.test(last.trim()) || last.trim().length < 40) break;
-    const cut = last.search(/[.!?。다요](?=[^.!?。다요]*$)/); // last sentence end inside the line
+    if (terminal.test(last) || /^#{1,6}\s/.test(last.trim()) || (/^\s*(?:[-*•]|\d+[.)])\s/.test(last) && last.trim().length < 40)) break; // a short list item may legitimately lack a period
+    let cut = -1; // last real sentence end inside the line (a 다/요 only counts at a word boundary)
+    for (const m of last.matchAll(/[.!?。](?=\s|$)|[다요](?=[\s.]|$)/g)) cut = m.index;
     if (cut > 0) { lines[lines.length - 1] = last.slice(0, cut + 1); break; }
     lines.pop();
   }
