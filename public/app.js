@@ -897,21 +897,32 @@ function renderChartHtml(jsonText) {
   try { c = JSON.parse(jsonText); } catch (_) { return ''; }
   const labels = Array.isArray(c.labels) ? c.labels.slice(0, 12).map(String) : [];
   const series = (Array.isArray(c.series) ? c.series : []).slice(0, 4)
-    .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map(Number) }))
-    .filter((s) => s.data.length && s.data.every(Number.isFinite));
+    .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map((v) => (v === null || v === '' ? NaN : Number(v))) }))
+    .filter((s) => s.data.some(Number.isFinite));
   if (labels.length < 2 || !series.length) return '';
   const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut'].includes(c.type) ? c.type : 'bar';
   const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
   const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
   const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
-  // Single-series category charts: colour by owning entity ("groups", or the
-  // label text before "(" / first space), so one company's items share a colour.
-  const groupOf = (l, i) => String((Array.isArray(c.groups) && c.groups[i]) || l.split(/[(（]/)[0].trim().split(/\s+/)[0] || l);
-  const grouped = series.length === 1 && ['bar', 'hbar'].includes(type) && !(type === 'pie');
-  const groupNames = grouped ? Array.from(new Set(labels.map(groupOf))) : [];
-  // Only when an entity actually repeats (or groups were given); plain one-bar-per-category charts keep one colour.
-  const useGroups = grouped && groupNames.length > 1 && (groupNames.length < labels.length || Array.isArray(c.groups));
-  const barColor = (si, i) => colors[(useGroups ? groupNames.indexOf(groupOf(labels[i], i)) : si) % colors.length];
+  // Single-series bar whose labels are "Entity(detail)" with repeating entities
+  // (or explicit "groups"): merge each entity into ONE cluster, with the detail
+  // (현재/2030/시나리오) as the series — same detail = same colour everywhere.
+  if (['bar', 'hbar'].includes(type) && series.length === 1) {
+    const split = labels.map((l, i) => {
+      const m = l.match(/^(.*?)\s*[(（]([^)）]*)[)）]?\s*$/);
+      const entity = String((Array.isArray(c.groups) && c.groups[i]) || (m && m[1]) || l).trim();
+      const detail = (m && m[2] && m[2].trim()) || series[0].name || '값';
+      return { entity, detail };
+    });
+    const entities = Array.from(new Set(split.map((x) => x.entity)));
+    const details = Array.from(new Set(split.map((x) => x.detail)));
+    if (entities.length < labels.length && details.length > 1 && details.length <= 4) {
+      const data = details.map(() => entities.map(() => NaN));
+      split.forEach((x, i) => { data[details.indexOf(x.detail)][entities.indexOf(x.entity)] = series[0].data[i]; });
+      labels.splice(0, labels.length, ...entities);
+      series.splice(0, series.length, ...details.map((d, k) => ({ name: d, data: data[k] })));
+    }
+  }
   const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
   const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 260" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
@@ -949,7 +960,7 @@ function renderChartHtml(jsonText) {
   const stacked = type === 'stacked' || type === 'area';
   const L = horizontal ? 96 : 48, B = horizontal ? 24 : 56;
   const sums = labels.map((_, i) => series.reduce((a, s) => a + Math.max(0, s.data[i]), 0));
-  const all = series.flatMap((s) => s.data);
+  const all = series.flatMap((s) => s.data).filter(Number.isFinite);
   const max = stacked && type === 'stacked' ? Math.max(...sums, 0) : Math.max(...all, 0);
   const min = stacked ? 0 : Math.min(...all, 0);
   const span = max - min || 1;
@@ -999,7 +1010,8 @@ function renderChartHtml(jsonText) {
         let a = base, b = val(v);
         if (stacked) { a = val(cum[i]); cum[i] += Math.max(0, v); b = val(cum[i]); }
         const pos = cat(i) + off;
-        const col = barColor(si, i);
+        const col = colors[si % colors.length];
+        if (!Number.isFinite(v)) return;
         const lo = Math.min(a, b), len = Math.abs(a - b);
         g += horizontal
           ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`
@@ -1007,7 +1019,7 @@ function renderChartHtml(jsonText) {
       });
     });
   }
-  return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : (useGroups ? legendOf(groupNames) : ''));
+  return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : '');
 }
 
 // Bullet lines keep their leading indentation; deeper indent => nested <ul>,
