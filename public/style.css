@@ -1183,6 +1183,6 @@ ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: s
 .ai-tt.show { opacity: 1; transform: none; }
 .ai-tt-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
 .ai-tt-head i { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--accent, #2f6fed); }
-.ai-tt-value { margin-top: 2px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.ai-tt-value { margin-top: 3px; padding-left: 15px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ai-tt-note { margin-top: 4px; color: var(--text-muted, #667085); }
 .ai-tt-foot { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border, #e3e6ea); color: var(--text-muted, #667085); font-variant-numeric: tabular-nums; }

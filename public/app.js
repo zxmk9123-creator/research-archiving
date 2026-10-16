@@ -901,7 +901,9 @@ function niceScale(min, max, count = 4) {
   const f = raw / pow;
   const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
   const lo = Math.floor(min / step) * step;
-  const hi = Math.max(Math.ceil(max / step) * step, lo + step);
+  // Always leave visible headroom above the largest value (>= 15%), so no bar touches the top.
+  let hi = Math.max(Math.ceil(max / step) * step, lo + step);
+  while (max > 0 && hi < max * 1.15) hi += step;
   const ticks = [];
   for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v / step) * step);
   return { lo, hi, ticks };
@@ -924,7 +926,8 @@ function renderChartHtml(jsonText) {
   if (labels.length < 2 || !series.length) return '';
   const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut', 'scatter'].includes(c.type) ? c.type : 'bar';
   const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
-  const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
+  // Numbers are shown with thousands commas everywhere (tooltips included): 1,200,000 / 1,234.5
+  const fmt = (v) => escapeHtml(Number(Math.round(v * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }));
   const uSfx = c.unit ? ` ${c.unit}` : '';
   const sName = (s) => (series.length > 1 && s.name ? ` · ${s.name}` : '');
   const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
