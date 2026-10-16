@@ -886,8 +886,60 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
   return `<p class="ai-answer-p">${block.lines.map((l) => renderInlineAnswerText(l, sources)).join('<br>')}</p>`;
 }
 
+// ```chart {json} ``` blocks -> inline SVG (bar/line). Anything malformed
+// is dropped silently so a bad block never breaks the answer.
+function renderChartHtml(jsonText) {
+  let c;
+  try { c = JSON.parse(jsonText); } catch (_) { return ''; }
+  const labels = Array.isArray(c.labels) ? c.labels.slice(0, 12).map(String) : [];
+  const series = (Array.isArray(c.series) ? c.series : []).slice(0, 4)
+    .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map(Number) }))
+    .filter((s) => s.data.length && s.data.every(Number.isFinite));
+  if (labels.length < 2 || !series.length) return '';
+  const W = 560, H = 260, L = 48, R = 12, T = 12, B = 56;
+  const all = series.flatMap((s) => s.data);
+  const max = Math.max(...all, 0), min = Math.min(...all, 0);
+  const span = max - min || 1;
+  const y = (v) => T + (H - T - B) * (1 - (v - min) / span);
+  const step = (W - L - R) / labels.length;
+  const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6'];
+  const isLine = c.type === 'line';
+  let g = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = min + (span * i) / 4;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${y(v) + 4}" font-size="10" text-anchor="end" fill="currentColor">${escapeHtml(String(Math.round(v * 100) / 100))}</text>`;
+  }
+  labels.forEach((l, i) => {
+    const x = L + step * (i + 0.5);
+    const t = l.length > 10 ? `${l.slice(0, 9)}…` : l;
+    g += `<text x="${x}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor" transform="rotate(${labels.length > 6 ? 30 : 0} ${x} ${H - B + 14})">${escapeHtml(t)}</text>`;
+  });
+  series.forEach((s, si) => {
+    const col = colors[si % colors.length];
+    if (isLine) {
+      const pts = s.data.map((v, i) => `${L + step * (i + 0.5)},${y(v)}`);
+      g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.join(' ')}"/>` + s.data.map((v, i) => `<circle cx="${L + step * (i + 0.5)}" cy="${y(v)}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${v}</title></circle>`).join('');
+    } else {
+      const bw = (step * 0.7) / series.length;
+      g += s.data.map((v, i) => {
+        const x = L + step * (i + 0.15) + bw * si;
+        const y0 = y(Math.max(0, min)), y1 = y(v);
+        return `<rect x="${x}" y="${Math.min(y0, y1)}" width="${bw}" height="${Math.abs(y0 - y1)}" fill="${col}"><title>${escapeHtml(labels[i])}: ${v}</title></rect>`;
+      }).join('');
+    }
+  });
+  const legend = series.length > 1 ? `<div class="ai-chart-legend">${series.map((s, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(s.name)}</span>`).join('')}</div>` : '';
+  return `<figure class="ai-chart"><figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${g}</svg>${legend}</figure>`;
+}
+
 function renderAnswerHtml(rawAnswer, sources) {
-  const normalized = normalizeAnswerMarkdown(rawAnswer).trim();
+  // Split out chart fences first; an unfinished fence (mid-stream) is hidden.
+  const text = String(rawAnswer || '').replace(/```chart[^\n]*\n?(?![\s\S]*```)[\s\S]*$/, '');
+  if (/```chart/.test(text)) {
+    const parts = text.split(/```chart[^\n]*\n?([\s\S]*?)```/);
+    return parts.map((p, i) => (i % 2 ? renderChartHtml(p) : (p.trim() ? renderAnswerHtml(p, sources) : ''))).join('');
+  }
+  const normalized = normalizeAnswerMarkdown(text).trim();
   const lines = normalized.split('\n');
   const rawBlocks = [];
   let current = [];
@@ -1035,6 +1087,7 @@ function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources) {
   aiSearchHistory.push({ role: 'assistant', content: answer });
   bodyEl.innerHTML = `
     ${renderAnswerHtml(answer, sources)}
+    <button type="button" class="ai-copy-btn" title="답변 복사" aria-label="답변 복사" data-answer="${escapeHtml(String(answer || '').replace(/```chart[\s\S]*?```/g, '').trim())}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
     ${aiSearchSourcesHtml(sources)}
   `;
   // On a retry, this turn wasn't recorded the first time around (only a
@@ -3538,4 +3591,21 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     }
   };
+});
+
+// Delegated: works for freshly rendered and replayed (outerHTML) turns.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest && e.target.closest('.ai-copy-btn');
+  if (!btn) return;
+  const text = btn.dataset.answer || '';
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) { /* ignore */ }
+    ta.remove();
+  }
+  btn.classList.add('copied');
+  setTimeout(() => btn.classList.remove('copied'), 1500);
 });
