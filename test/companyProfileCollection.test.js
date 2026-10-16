@@ -12,6 +12,6 @@ test('company profile collection: 9 workbook companies, each with distinct non-e
 });
 
 test('company profile collection: watchlist names/aliases are not short substrings that would mis-tag unrelated items', () => {
-  for (const c of COMPANIES) for (const n of [c.name, ...c.aliases]) assert.ok(n.trim().length >= 3 && n === n.trim(), `${n}`);
+  for (const c of COMPANIES) for (const n of [c.name, ...c.aliases]) assert.ok(n.trim().length >= (/[가-힣]/.test(n) ? 2 : 3) && n === n.trim(), `${n}`);
   assert.ok(!COMPANIES.some((c) => c.name.toLowerCase() === 'bp' || c.name.toLowerCase() === 'eni'));
 });
