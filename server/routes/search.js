@@ -389,6 +389,7 @@ Formatting:
   3. Build it readable: always set a specific "title" (what, where, when), the "unit", and axis names "xLabel"/"yLabel" when the axes are not obvious; put the unit in "yLabel" (e.g. "만 톤") and do NOT set "xLabel" when the category names are self-explanatory (never generic words like "항목", "구분", "범주", "값"); use "xLabel" only for a real axis such as "연도"; all bars in one chart must share the same unit and the same kind of measure (do not mix volume and price); keep labels short; at most 12 categories and 4 series; do not add decoration.
   4. Interpret it: right after the chart or table write 1-3 sentences of takeaways (the highest/lowest, the trend or gap, anything notable), each with [N]; do not claim causes the materials do not state; mention data gaps or comparability caveats (different years, units, definitions).
 - Visuals: when the user asks for a table/chart/graph, or when numeric comparisons across 3+ items/periods would be clearer visually, include one. Tables use standard Markdown pipe tables. Charts use a fenced block exactly like \`\`\`chart followed by one-line-or-multi-line JSON {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","xLabel":"...","yLabel":"...","labels":["..."],"series":[{"name":"...","data":[numbers]}]} and a closing \`\`\`. When several bars belong to ONE entity and ADD UP (a company's plants/sites, regions, product lines — e.g. Neste Rotterdam + Neste Singapore capacity), do NOT draw them as separate bars: send a single series with one entry per part, "labels" like "Neste 로테르담", a parallel "groups" array naming the entity ("Neste") — identical spelling for every part of that entity — "combine":"sum", and an optional parallel "notes" array with a short detail per part (status, year, plan vs operating; shown on hover). The chart then draws one row per entity, parts as differently coloured segments, with the total at the end. Use this only for additive quantities of the same unit and basis (capacity, volume, investment); keep at most 10 entities. When several values belong to one entity (e.g. a company's capacity now vs 2030, or cost by scenario), MERGE them into ONE cluster per entity: make the entities the "labels" and the detail (현재, 2030년, 시나리오 A ...) the "series", with identical series names for every entity (max 4) and null for a missing value. Never list one bar per entity-detail pair. (Writing labels as "Entity(detail)" is also merged automatically, but the labels/series form is preferred.) Different details of the same entity are NOT additive, so use "bar"/"hbar" (never "stacked") for them. When the user asks to compare MULTIPLE targets (e.g. "식용유지들의 생산량 비교" = palm, soybean, rapeseed, sunflower oil), never chart just one of them: build ONE chart with every target the materials give numbers for as separate series (max 4, most-covered first), using a "line" chart over the shared periods (years) as labels; use null where a target has no figure for a period. If targets lack a common period, use a "bar" chart of the same year or the latest comparable figure per target, and say so in one sentence. Always list in text which requested targets had no usable data instead of silently dropping them. For "scatter": "labels" are the point names, series[0].data are the X values, series[1].data the Y values (same length, both numeric, name the series after the X and Y variables). Pick the type by the data: "line" for a time trend; "area" for cumulative/volume over time; "bar" to compare categories (or a few periods); "hbar" for rankings or long labels; "stacked" for composition of totals across categories/periods (one series per component); "pie"/"donut" ONLY for shares of ONE whole that sum to roughly 100% (single series, max 8 slices). Use several series (max 4) only when they share the same unit and labels. Use ONLY numbers stated in the supplied materials (never estimate or invent; omit the chart if fewer than 3 real data points), keep it to 12 labels and 4 series at most, and cite the source [N] in a sentence right after the chart or table.
+- Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
 - If the supplied materials contain NOTHING relevant to the question, say so explicitly in Korean (e.g. "현재 보유한 자료로는 답변하기에 근거가 부족합니다.") instead of guessing or filling gaps with outside knowledge.
@@ -441,6 +442,24 @@ const INSUFFICIENT_MESSAGE = '현재 보유한 Research Center 자료로는 이 
 // own [N] markers — never trusted from prose alone. Returns the distinct,
 // in-range indices (1-based, matching buildMaterialsBlock's 자료 N) in the
 // order they first appear, so citation order drives display order too.
+// Footnote losses seen with many candidates: the model writes markers in
+// shapes the [N] matcher never recognised — "[1, 2]", "[1-3]", "[자료 3]" —
+// so they were neither linked nor counted as cited, and it copies the prompt's
+// own "[이전 답변]" label. Normalise all of these to plain [N][N] runs (or drop
+// the label) BEFORE anything else reads the text.
+function normalizeCitationMarkers(text) {
+  return String(text || '')
+    .replace(/\[\s*이전\s*(?:답변|질문)\s*\]/g, '')
+    .replace(/\[\s*(?:자료|출처|source|ref)\s*\.?\s*(\d{1,2})\s*\]/gi, '[$1]')
+    .replace(/\[\s*(?:자료|출처|source|ref)?\s*\.?\s*(\d{1,2})\s*[-–~]\s*(\d{1,2})\s*\]/gi, (w, a, b) => {
+      const lo = Number(a), hi = Number(b);
+      if (hi < lo || hi - lo > 9) return w;
+      return Array.from({ length: hi - lo + 1 }, (_, i) => `[${lo + i}]`).join('');
+    })
+    .replace(/\[\s*(?:자료|출처|source|ref)?\s*\.?\s*(\d{1,2}(?:\s*[,，、]\s*(?:자료\s*)?\d{1,2})+)\s*\]/gi, (w, list) =>
+      list.split(/[,，、]/).map((x) => `[${x.replace(/\D/g, '')}]`).join(''));
+}
+
 function extractCitedIndices(text, maxIndex) {
   const seen = new Set();
   const ordered = [];
@@ -503,13 +522,37 @@ function splitClaimLines(text, maxIndex) {
 // claims at once instead of one call per claim.
 const VERIFICATION_SYSTEM_PROMPT = `You check whether a claim is genuinely supported by the material(s) cited for it — not just topically related to the same general subject, but actually stating what the claim says. A claim about biofuel policy citing a material that is only about food-price inflation, for example, is NOT supported even though both are oils & fats topics.
 For each numbered claim below, with the material(s) cited for it, decide whether those materials genuinely support the claim.
-Respond with ONLY a JSON array of the claim numbers that are NOT supported by their cited material(s) — e.g. [2,5] — or [] if every claim is supported. No other text, no explanation.`;
+Be conservative: flag a claim ONLY when the cited material clearly does not state it or contradicts it. A claim that restates, paraphrases, translates (Korean/English), or summarizes numbers, names or facts found anywhere in the cited material (title, summary or insight) IS supported; so is a table row or list item built from it. When unsure, treat the claim as supported.\nRespond with ONLY a JSON array of the claim numbers that are NOT supported by their cited material(s) — e.g. [2,5] — or [] if every claim is supported. No other text, no explanation.`;
+
+// Everything the model was shown for a material (title, summary, insight, both
+// AI fields) — the verifier used to see only the summary, so a claim drawn from
+// the insight or a figure only in the title was judged "unsupported" and lost
+// its footnote.
+function materialText(m) {
+  return [m.title, m.summary, m.ai_summary, m.insight, m.ai_insight].filter(Boolean).join(' ');
+}
+
+// Cheap guard against verifier over-flagging: a claim that shares a number or
+// at least two content terms with one of its cited materials is concretely
+// grounded there, whatever a noisy yes/no judgement said.
+function claimOverlapsMaterials(claimLine, indices, candidates) {
+  const claim = claimLine.replace(/\[\d{1,2}\]/g, '').toLowerCase();
+  const hay = indices.map((i) => materialText(candidates[i - 1] || {})).join(' ').toLowerCase();
+  // Shared TOPIC words alone are not grounding (a title match is exactly the
+  // topical-overlap case verification exists for): terms must appear in the
+  // material's body fields, numbers anywhere.
+  const body = indices.map((i) => { const m = candidates[i - 1] || {}; return [m.summary, m.ai_summary, m.insight, m.ai_insight].filter(Boolean).join(' '); }).join(' ').toLowerCase();
+  const numbers = (claim.match(/\d[\d,.]*/g) || []).map((n) => n.replace(/[,.]$/, '')).filter((n) => n.replace(/\D/g, '').length >= 2);
+  if (numbers.some((n) => hay.includes(n))) return true;
+  const terms = Array.from(new Set((claim.match(/[a-z가-힣]{2,}/g) || []).map((t) => stemKorean(t)).filter((t) => t.length >= 2 && !isQuestionFraming(t))));
+  return terms.filter((t) => body.includes(t)).length >= 2;
+}
 
 function buildVerificationPrompt(claims, candidates) {
   return claims.map((c, i) => {
     const materialsText = c.indices.map((idx) => {
       const m = candidates[idx - 1];
-      return `자료 ${idx}: ${m.summary || m.ai_summary || m.insight || m.ai_insight || '(내용 없음)'}`;
+      return `자료 ${idx}: ${materialText(m)}`;
     }).join('\n');
     const claimText = c.line.replace(/\[\d{1,2}\]/g, '').trim();
     return `주장 ${i + 1}: "${claimText}"\n인용된 자료:\n${materialsText}`;
@@ -600,7 +643,8 @@ async function verifyCitations(text, candidates, signal) {
       if (!unsupported.length) return text;
       let corrected = text;
       for (const n of unsupported) {
-        const { line } = claims[n - 1];
+        const { line, indices } = claims[n - 1];
+        if (claimOverlapsMaterials(line, indices, candidates)) continue; // grounded: keep the footnote
         corrected = corrected.replace(line, line.replace(/\[\d{1,2}\]/g, '').trim());
       }
       return corrected;
@@ -620,7 +664,7 @@ async function verifyCitations(text, candidates, signal) {
 // every single request — now it only ever delays this final polish
 // step, never the first visible token (see the streaming path below).
 async function finalizeAnswer(rawText, candidates, signal) {
-  const text = await verifyCitations(rawText, candidates, signal);
+  const text = await verifyCitations(normalizeCitationMarkers(rawText), candidates, signal);
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones
@@ -788,6 +832,8 @@ async function handleSearch(req, res, signal) {
 
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
+module.exports.normalizeCitationMarkers = normalizeCitationMarkers;
+module.exports.claimOverlapsMaterials = claimOverlapsMaterials;
 module.exports.selectDiverseCandidates = selectDiverseCandidates;
 module.exports.resolveRetrievalQuery = resolveRetrievalQuery;
 module.exports.buildMaterialsBlock = buildMaterialsBlock;

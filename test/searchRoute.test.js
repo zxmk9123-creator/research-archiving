@@ -864,3 +864,15 @@ test('SYSTEM_PROMPT: layout discipline (conclusion first, no duplicated data lis
   assert.match(src, /Layout discipline for data answers/);
   assert.match(src, /AT MOST 10 bars\/points/);
 });
+
+test('citation markers: [1, 2] / [1-3] / [자료 3] are normalised and [이전 답변] is dropped', () => {
+  const n = searchRouter.normalizeCitationMarkers;
+  assert.equal(n('A [1, 2]. B [1-3]. C [자료 3]. D [이전 답변] E [자료 1, 2]'), 'A [1][2]. B [1][2][3]. C [3]. D  E [1][2]');
+  assert.equal(n('범위 [1-30]'), '범위 [1-30]'); // not a plausible range: untouched
+});
+
+test('citation verification guard: a flagged claim keeps its footnote when it shares numbers or body terms with the cited material', () => {
+  const cands = [{ title: 'x', summary: 'Neste plans 1.2 Mt SAF in Rotterdam by 2027', insight: null }];
+  assert.equal(searchRouter.claimOverlapsMaterials('로테르담 2027년 1.2 Mt 증설 [1]', [1], cands), true);
+  assert.equal(searchRouter.claimOverlapsMaterials('팜유 가격이 상승했다 [1]', [1], cands), false);
+});
