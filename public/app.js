@@ -900,40 +900,103 @@ function renderChartHtml(jsonText) {
     .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map(Number) }))
     .filter((s) => s.data.length && s.data.every(Number.isFinite));
   if (labels.length < 2 || !series.length) return '';
-  const W = 560, H = 260, L = 48, R = 12, T = 12, B = 56;
+  const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut'].includes(c.type) ? c.type : 'bar';
+  const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
+  const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
+  const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
+  const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
+  const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 260" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
+  const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
+
+  if (type === 'pie' || type === 'donut') {
+    const data = series[0].data.map((v) => Math.max(0, v));
+    const total = data.reduce((a, b) => a + b, 0);
+    if (!total) return '';
+    const cx = 130, cy = 130, r = 105, ri = type === 'donut' ? 58 : 0;
+    let a0 = -Math.PI / 2;
+    let g = '';
+    data.forEach((v, i) => {
+      if (!v) return;
+      const frac = v / total;
+      const a1 = a0 + frac * 2 * Math.PI;
+      const P = (rad, a) => `${cx + rad * Math.cos(a)} ${cy + rad * Math.sin(a)}`;
+      const large = frac > 0.5 ? 1 : 0;
+      const d = frac >= 0.9999
+        ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} Z`
+        : ri
+          ? `M ${P(r, a0)} A ${r} ${r} 0 ${large} 1 ${P(r, a1)} L ${P(ri, a1)} A ${ri} ${ri} 0 ${large} 0 ${P(ri, a0)} Z`
+          : `M ${cx} ${cy} L ${P(r, a0)} A ${r} ${r} 0 ${large} 1 ${P(r, a1)} Z`;
+      g += `<path d="${d}" fill="${colors[i % colors.length]}" stroke="var(--surface, #fff)" stroke-width="1.5"><title>${escapeHtml(labels[i])}: ${fmt(v)} (${fmt(frac * 100)}%)</title></path>`;
+      a0 = a1;
+    });
+    labels.forEach((l, i) => {
+      const y = 22 + i * 19;
+      g += `<rect x="290" y="${y - 10}" width="11" height="11" rx="2" fill="${colors[i % colors.length]}"/><text x="308" y="${y}" font-size="12" fill="currentColor">${escapeHtml(trunc(l, 22))} · ${fmt((data[i] / total) * 100)}%</text>`;
+    });
+    return wrap(g, '');
+  }
+
+  const W = 560, H = 260, R = 12, T = 12;
+  const horizontal = type === 'hbar';
+  const stacked = type === 'stacked' || type === 'area';
+  const L = horizontal ? 96 : 48, B = horizontal ? 24 : 56;
+  const sums = labels.map((_, i) => series.reduce((a, s) => a + Math.max(0, s.data[i]), 0));
   const all = series.flatMap((s) => s.data);
-  const max = Math.max(...all, 0), min = Math.min(...all, 0);
+  const max = stacked && type === 'stacked' ? Math.max(...sums, 0) : Math.max(...all, 0);
+  const min = stacked ? 0 : Math.min(...all, 0);
   const span = max - min || 1;
-  const y = (v) => T + (H - T - B) * (1 - (v - min) / span);
-  const step = (W - L - R) / labels.length;
-  const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6'];
-  const isLine = c.type === 'line';
+  const n = labels.length;
+  const plotW = W - L - R, plotH = H - T - B;
+  // value -> pixel along the value axis; index -> pixel along the category axis
+  const val = (v) => (horizontal ? L + plotW * ((v - min) / span) : T + plotH * (1 - (v - min) / span));
+  const cat = (i) => (horizontal ? T + (plotH / n) * i : L + (plotW / n) * i);
+  const band = (horizontal ? plotH : plotW) / n;
   let g = '';
   for (let i = 0; i <= 4; i++) {
     const v = min + (span * i) / 4;
-    g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${y(v) + 4}" font-size="10" text-anchor="end" fill="currentColor">${escapeHtml(String(Math.round(v * 100) / 100))}</text>`;
+    g += horizontal
+      ? `<line x1="${val(v)}" x2="${val(v)}" y1="${T}" y2="${H - B}" stroke="currentColor" opacity=".12"/><text x="${val(v)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${fmt(v)}</text>`
+      : `<line x1="${L}" x2="${W - R}" y1="${val(v)}" y2="${val(v)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${val(v) + 4}" font-size="10" text-anchor="end" fill="currentColor">${fmt(v)}</text>`;
   }
   labels.forEach((l, i) => {
-    const x = L + step * (i + 0.5);
-    const t = l.length > 10 ? `${l.slice(0, 9)}…` : l;
-    g += `<text x="${x}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor" transform="rotate(${labels.length > 6 ? 30 : 0} ${x} ${H - B + 14})">${escapeHtml(t)}</text>`;
-  });
-  series.forEach((s, si) => {
-    const col = colors[si % colors.length];
-    if (isLine) {
-      const pts = s.data.map((v, i) => `${L + step * (i + 0.5)},${y(v)}`);
-      g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.join(' ')}"/>` + s.data.map((v, i) => `<circle cx="${L + step * (i + 0.5)}" cy="${y(v)}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${v}</title></circle>`).join('');
+    if (horizontal) {
+      g += `<text x="${L - 6}" y="${cat(i) + band / 2 + 4}" font-size="10" text-anchor="end" fill="currentColor">${escapeHtml(trunc(l, 14))}</text>`;
     } else {
-      const bw = (step * 0.7) / series.length;
-      g += s.data.map((v, i) => {
-        const x = L + step * (i + 0.15) + bw * si;
-        const y0 = y(Math.max(0, min)), y1 = y(v);
-        return `<rect x="${x}" y="${Math.min(y0, y1)}" width="${bw}" height="${Math.abs(y0 - y1)}" fill="${col}"><title>${escapeHtml(labels[i])}: ${v}</title></rect>`;
-      }).join('');
+      const x = cat(i) + band / 2;
+      g += `<text x="${x}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor" transform="rotate(${n > 6 ? 30 : 0} ${x} ${H - B + 14})">${escapeHtml(trunc(l, 10))}</text>`;
     }
   });
-  const legend = series.length > 1 ? `<div class="ai-chart-legend">${series.map((s, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(s.name)}</span>`).join('')}</div>` : '';
-  return `<figure class="ai-chart"><figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${g}</svg>${legend}</figure>`;
+  const base = val(Math.max(0, min));
+  if (type === 'line' || type === 'area') {
+    const cum = labels.map(() => 0);
+    series.forEach((s, si) => {
+      const col = colors[si % colors.length];
+      const top = s.data.map((v, i) => { const t = type === 'area' ? (cum[i] += Math.max(0, v)) : v; return [cat(i) + band / 2, val(t)]; });
+      if (type === 'area') {
+        const bottom = s.data.map((v, i) => [cat(i) + band / 2, val(cum[i] - Math.max(0, v))]).reverse();
+        g += `<polygon fill="${col}" fill-opacity=".55" points="${top.concat(bottom).map((p) => p.join(',')).join(' ')}"/>`;
+      }
+      g += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${top.map((p) => p.join(',')).join(' ')}"/>`
+        + s.data.map((v, i) => `<circle cx="${top[i][0]}" cy="${top[i][1]}" r="3" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></circle>`).join('');
+    });
+  } else {
+    const cum = labels.map(() => 0);
+    series.forEach((s, si) => {
+      const col = colors[si % colors.length];
+      const bw = stacked ? band * 0.6 : (band * 0.7) / series.length;
+      s.data.forEach((v, i) => {
+        const off = stacked ? band * 0.2 : band * 0.15 + bw * si;
+        let a = base, b = val(v);
+        if (stacked) { a = val(cum[i]); cum[i] += Math.max(0, v); b = val(cum[i]); }
+        const pos = cat(i) + off;
+        const lo = Math.min(a, b), len = Math.abs(a - b);
+        g += horizontal
+          ? `<rect x="${lo}" y="${pos}" width="${len}" height="${bw}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`
+          : `<rect x="${pos}" y="${lo}" width="${bw}" height="${len}" fill="${col}"><title>${escapeHtml(labels[i])}: ${fmt(v)}</title></rect>`;
+      });
+    });
+  }
+  return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : '');
 }
 
 // Bullet lines keep their leading indentation; deeper indent => nested <ul>,
