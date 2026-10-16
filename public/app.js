@@ -900,7 +900,7 @@ function renderChartHtml(jsonText) {
     .map((s) => ({ name: String(s.name || ''), data: (Array.isArray(s.data) ? s.data : []).slice(0, labels.length).map((v) => (v === null || v === '' ? NaN : Number(v))) }))
     .filter((s) => s.data.some(Number.isFinite));
   if (labels.length < 2 || !series.length) return '';
-  const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut'].includes(c.type) ? c.type : 'bar';
+  const type = ['bar', 'hbar', 'stacked', 'line', 'area', 'pie', 'donut', 'scatter'].includes(c.type) ? c.type : 'bar';
   const colors = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d', '#c98a3a', '#5a63d6', '#3a9e9e', '#b05a3a'];
   const fmt = (v) => escapeHtml(String(Math.round(v * 100) / 100));
   const trunc = (l, n) => (l.length > n ? `${l.slice(0, n - 1)}…` : l);
@@ -926,6 +926,31 @@ function renderChartHtml(jsonText) {
   const caption = `<figcaption>${escapeHtml(String(c.title || ''))}${c.unit ? ` <small>(${escapeHtml(String(c.unit))})</small>` : ''}</figcaption>`;
   const wrap = (svg, legend) => `<figure class="ai-chart">${caption}<svg viewBox="0 0 560 260" role="img" aria-label="${escapeHtml(String(c.title || '차트'))}">${svg}</svg>${legend}</figure>`;
   const legendOf = (items) => `<div class="ai-chart-legend">${items.map((n, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(n)}</span>`).join('')}</div>`;
+
+  if (type === 'scatter') {
+    if (series.length < 2) return '';
+    const xs = series[0].data, ys = series[1].data;
+    const pts = labels.map((l, i) => ({ l, x: xs[i], y: ys[i] })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    if (pts.length < 3) return '';
+    const W = 560, H = 260, L = 52, R = 16, T = 12, B = 44;
+    const ext = (arr) => { const lo = Math.min(...arr), hi = Math.max(...arr); const pad = (hi - lo || 1) * 0.08; return [lo - pad, hi + pad]; };
+    const [x0, x1] = ext(pts.map((p) => p.x)), [y0, y1] = ext(pts.map((p) => p.y));
+    const px = (v) => L + (W - L - R) * ((v - x0) / (x1 - x0));
+    const py = (v) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
+    let g = '';
+    for (let i = 0; i <= 4; i++) {
+      const xv = x0 + ((x1 - x0) * i) / 4, yv = y0 + ((y1 - y0) * i) / 4;
+      g += `<line x1="${L}" x2="${W - R}" y1="${py(yv)}" y2="${py(yv)}" stroke="currentColor" opacity=".12"/><text x="${L - 6}" y="${py(yv) + 4}" font-size="10" text-anchor="end" fill="currentColor">${fmt(yv)}</text>`
+        + `<text x="${px(xv)}" y="${H - B + 14}" font-size="10" text-anchor="middle" fill="currentColor">${fmt(xv)}</text>`;
+    }
+    g += `<text x="${(L + W - R) / 2}" y="${H - 6}" font-size="11" text-anchor="middle" fill="currentColor">${escapeHtml(String(c.xLabel || series[0].name))}</text>`
+      + `<text x="${L}" y="${T + 2}" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel || series[1].name))}</text>`;
+    pts.forEach((p, i) => {
+      g += `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="5" fill="${colors[i % colors.length]}" fill-opacity=".85"><title>${escapeHtml(p.l)}: (${fmt(p.x)}, ${fmt(p.y)})</title></circle>`
+        + (pts.length <= 12 ? `<text x="${px(p.x) + 7}" y="${py(p.y) - 6}" font-size="10" fill="currentColor">${escapeHtml(trunc(p.l, 14))}</text>` : '');
+    });
+    return wrap(g, '');
+  }
 
   if (type === 'pie' || type === 'donut') {
     const data = series[0].data.map((v) => Math.max(0, v));
@@ -1023,6 +1048,8 @@ function renderChartHtml(jsonText) {
       });
     });
   }
+  if (c.yLabel && !horizontal) g += `<text x="${L}" y="${T - 2 > 8 ? T - 2 : 9}" font-size="11" fill="currentColor">${escapeHtml(String(c.yLabel))}</text>`;
+  if (c.xLabel) g += `<text x="${(L + W - R) / 2}" y="${H - 4}" font-size="11" text-anchor="middle" fill="currentColor">${escapeHtml(String(c.xLabel))}</text>`;
   return wrap(g, series.length > 1 ? legendOf(series.map((s) => s.name)) : '');
 }
 
