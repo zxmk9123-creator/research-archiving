@@ -175,6 +175,9 @@ function guardLine(line, pools) {
     }
     out = out.slice(0, q.start) + replacement + out.slice(q.end);
   }
+  // A model-derived figure in parentheses ("(연간 약 …)") that could not be grounded is
+  // dropped together with its parenthesis instead of leaving a visible warning mid-sentence.
+  if (flagged) out = out.replace(/\s*[(（][^()（）]*⚠원문 수치 확인 필요[^()（）]*[)）]/g, '');
   return { line: out, fixed, flagged };
 }
 

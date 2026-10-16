@@ -48,7 +48,7 @@ async function recordSearchTelemetry(fields) {
 }
 
 // Bounded candidate set — never send the whole table to the LLM.
-const MAX_CANDIDATES = 16;
+const MAX_CANDIDATES = 12;
 // Minimal conversation context: the last few turns, not persisted anywhere
 // (the client holds them in memory only, see renderHome()'s aiSearchHistory).
 const MAX_HISTORY_TURNS = 3;
@@ -246,7 +246,7 @@ async function conceptDocFrequency(forms) {
 // pure rank. Order stays by relevance. A row's language is judged from its
 // title (Hangul share of letters).
 const CANDIDATE_POOL = 60;
-const MIN_PER_LANGUAGE = 5;
+const MIN_PER_LANGUAGE = 4;
 const RELEVANCE_FLOOR_RATIO = 0.35;
 function languageOf(row) {
   const letters = String(row.title || '').match(/\p{L}/gu) || [];
@@ -275,10 +275,10 @@ function selectDiverseCandidates(rows, max = MAX_CANDIDATES) {
 // to its child sectors, and each member gets its own small retrieval slot —
 // otherwise one member's articles fill the whole candidate list and the answer
 // (and any chart) covers a single target.
-const MAX_TARGETS = 8;
-const PER_TARGET = 3;
+const MAX_TARGETS = 6;
+const PER_TARGET = 2;
 // Hard ceiling on what reaches the model after all coverage additions (prompt size/latency bound).
-const MAX_TOTAL_CANDIDATES = 28;
+const MAX_TOTAL_CANDIDATES = 24;
 // A concept present in at most this many Published items is a "specific" subject (an entity), not a topic word.
 const SPECIFIC_DOCFREQ = 250;
 async function taxonomyTargets(concepts) {
@@ -426,7 +426,7 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
     .map((forms, i) => ({ forms, df: docFreqs[i] }))
     .filter((c) => c.df > 0 && c.df <= SPECIFIC_DOCFREQ && c.forms[0].length >= 3)
     .sort((a, b) => a.df - b.df)
-    .slice(0, MAX_TARGETS);
+    .slice(0, 4);
   if (specific.length >= 2) {
     for (const c of specific) {
       const have = base.filter((r) => c.forms.some((f) => textOf(r).includes(f.toLowerCase()))).length;
@@ -445,7 +445,7 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
     const known = new Set(baseCovered.map((r) => r.id));
     const fromRoster = (await retrieveForWatchlist(nonGeneric)).filter((r) => !known.has(r.id) && known.add(r.id));
     baseCovered = baseCovered.concat(fromRoster);
-    ceiling = MAX_TOTAL_CANDIDATES + 40;
+    ceiling = MAX_TOTAL_CANDIDATES + 24;
   }
   const targets = await taxonomyTargets(concepts);
   if (!targets.length) return baseCovered.slice(0, ceiling);
@@ -480,19 +480,10 @@ Formatting:
 - If the answer has multiple top-level numbered sections (e.g. "1. 공급 측면...", "2. 관세·비용 요인..."), number them sequentially through the ENTIRE answer — never restart at "1." for a later section. A plain "-" paragraph inserted between numbered sections does not reset the count; the next numbered section continues from where the numbering left off (e.g. after "2.", the next section is "3.", not "1." again).
 - Citations are REQUIRED, not optional: after every sentence that states a fact, add [N] where N is the 자료 번호 (e.g. 자료 2 -> [2]) that sentence is actually based on. Place [N] AFTER the sentence's closing punctuation, never before it — write "...정책이 변경되었다. [1]", never "...정책이 변경되었다 [1]." Use multiple markers like [1][3] if a sentence draws on more than one. Never cite a 자료 번호 that isn't in the supplied materials, and never cite one you didn't actually use for that sentence.
 - Never use LaTeX or math markup (no dollar-sign math spans, no backslash commands, no _ or ^ subscript syntax) — write chemical formulas and units in plain text or Unicode, e.g. CO₂, H₂, m³.
-- Thoroughness protocol (quality over brevity; spend the extra effort): before writing, silently read EVERY supplied 자료 one by one and note each fact, figure (with its unit, year and scope), entity, date and claim it contains that bears on the question. Then answer from the union of all of them, not from the first few: for comparison, ranking and data questions every 자료 that contains something relevant must be used and cited at least once, and several materials must not be blurred into one vague sentence when they give distinct figures or cases. EXCEPTION — a single-subject overview ("X에 대해 알려줘", "X 개요", "X 업체 정리"): never walk through the materials one by one and never cite every 자료; write a structured profile, merge duplicates and cite only the 1-3 best 자료 per statement. When materials disagree (different numbers, years, definitions), show both with their [N] and say they differ instead of picking one silently. Give concrete specifics (names, numbers, dates, places) over generalities, and when the materials cover only some of what was asked (e.g. only some of the requested commodities, companies or years), state exactly which parts are covered and which are not.
-- Comparison and data requests across several targets (commodities, companies, countries, years): first assemble, from ALL materials, a complete set of every available data point per target and period; present it as a Markdown table (rows = targets, columns = periods or measures, "-" for no data, a [N] in or right after each row); then, if a chart is useful or was requested, build it from exactly that set, covering every target that has any usable number — never reduce the comparison to one target because it has the most data. If the supplied materials hold fewer than 3 data points for a requested target, still list it in the table with what exists.
-- Layout discipline for data answers (the answer is read in a narrow panel; a wall of text or a cramped chart is a failure): (1) open with ONE or TWO sentences stating the main conclusion; (2) then the chart or table — never repeat the same data point-by-point as a long bullet list as well: when a chart or table carries the numbers, the text must not re-list them (at most 3-5 bullets for what the chart cannot show, e.g. caveats, definitions, key differences); (3) a chart shows AT MOST 10 bars/points — rank by value and keep the top 10 (say "상위 10개" in the title), put the remainder only in the table (EXCEPTION: when the user asks for completeness — 누락 없이/전체/모든/전수 — show every item, up to 30 bars, no top-N); (4) category labels are short (<= 14 characters, "회사 거점" like "Neste 로테르담"; no parentheses with explanations, no units inside labels); (5) one chart = one unit and one kind of measure; if the data mix units (톤, 억 갤런, b/d, m³), convert ONLY when the materials give the conversion, otherwise make separate charts per unit or show the mixed values in a table; (6) the table holds the full detail (all targets, all periods, notes like "계획"/"가동"/"미공시"), the chart holds only the comparable core; (7) finish with 2-4 short insight bullets, each with [N].
-- Visualization process (follow in order whenever you produce a table or chart):
-  1. Prepare the data: gather only figures stated in the materials; put them in one consistent unit and one consistent period basis (state any conversion in one sentence, and never convert with outside numbers); use null for a missing value; drop items with no usable number and say so.
-  2. Choose the chart by the question: bar/hbar = compare a quantity across categories (e.g. sales or capacity by company; sort rankings in descending order); line = change over time (prices, production by year); scatter = the relationship between two numeric variables across items (e.g. capacity vs investment per plant) — needs at least 5 points, otherwise use a table or bar; stacked/pie/donut/area as described below. If no chart type fits the data honestly, use a table or plain text instead.
-  3. Build it readable: always set a specific "title" (what, where, when), the "unit", and axis names "xLabel"/"yLabel" when the axes are not obvious; put the unit in "yLabel" (e.g. "만 톤") and do NOT set "xLabel" when the category names are self-explanatory (never generic words like "항목", "구분", "범주", "값"); use "xLabel" only for a real axis such as "연도"; all bars in one chart must share the same unit and the same kind of measure (do not mix volume and price); keep labels short; at most 12 categories and 4 series; do not add decoration.
-  4. Interpret it: right after the chart or table write 1-3 sentences of takeaways (the highest/lowest, the trend or gap, anything notable), each with [N]; do not claim causes the materials do not state; mention data gaps or comparability caveats (different years, units, definitions).
-- Visuals: when the user asks for a table/chart/graph, or when numeric comparisons across 3+ items/periods would be clearer visually, include one. Tables use standard Markdown pipe tables. Charts use a fenced block exactly like \`\`\`chart followed by one-line-or-multi-line JSON {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","xLabel":"...","yLabel":"...","labels":["..."],"series":[{"name":"...","data":[numbers]}]} and a closing \`\`\`. When several bars belong to ONE entity and ADD UP (a company's plants/sites, regions, product lines — e.g. Neste Rotterdam + Neste Singapore capacity), do NOT draw them as separate bars: send a single series with one entry per part, "labels" like "Neste 로테르담", a parallel "groups" array naming the entity ("Neste") — identical spelling for every part of that entity — "combine":"sum", and an optional parallel "notes" array with a short detail per part (status, year, plan vs operating; shown on hover). The chart then draws one row per entity, parts as differently coloured segments, with the total at the end. Use this only for additive quantities of the same unit and basis (capacity, volume, investment); keep at most 10 entities. When several values belong to one entity (e.g. a company's capacity now vs 2030, or cost by scenario), MERGE them into ONE cluster per entity: make the entities the "labels" and the detail (현재, 2030년, 시나리오 A ...) the "series", with identical series names for every entity (max 4) and null for a missing value. Never list one bar per entity-detail pair. (Writing labels as "Entity(detail)" is also merged automatically, but the labels/series form is preferred.) Different details of the same entity are NOT additive, so use "bar"/"hbar" (never "stacked") for them. When the user asks to compare MULTIPLE targets (e.g. "식용유지들의 생산량 비교" = palm, soybean, rapeseed, sunflower oil), never chart just one of them: build ONE chart with every target the materials give numbers for as separate series (max 4, most-covered first), using a "line" chart over the shared periods (years) as labels; use null where a target has no figure for a period. If targets lack a common period, use a "bar" chart of the same year or the latest comparable figure per target, and say so in one sentence. Always list in text which requested targets had no usable data instead of silently dropping them. For "scatter": "labels" are the point names, series[0].data are the X values, series[1].data the Y values (same length, both numeric, name the series after the X and Y variables). Pick the type by the data: "line" for a time trend; "area" for cumulative/volume over time; "bar" to compare categories (or a few periods); "hbar" for rankings or long labels; "stacked" for composition of totals across categories/periods (one series per component); "pie"/"donut" ONLY for shares of ONE whole that sum to roughly 100% (single series, max 8 slices). Use several series (max 4) only when they share the same unit and labels. Use ONLY numbers stated in the supplied materials (never estimate or invent; omit the chart if fewer than 3 real data points), keep it to 12 labels and 4 series at most, and cite the source [N] in a sentence right after the chart or table.
-- COMPLETENESS REQUESTS ("누락 없이", "전체", "모든", "전수", "all"): the user wants every item, so do NOT truncate to a top-N and do NOT leave an item out because its unit, year or detail differs; chart and tabulate EVERY plant/company the materials give a figure for (up to 30 chart bars), most capacity first, and list in one final line any item that has no usable figure. An item that cannot be shown is a failure, not a choice.
-- UNIT UNIFICATION REQUESTS (e.g. "톤 단위로 통일"): convert EVERY item to the requested unit with these fixed factors and say so in one line under the chart ("환산 기준: ..."): 1 kt = 1,000 톤; 1 Mt = 1,000,000 톤; 1 갤런(gal) = 0.003028 톤 (SAF/재생연료 밀도 0.8 kg/L 가정); 1 배럴(bbl) = 0.1272 톤; 1 리터 = 0.0008 톤; 1 m³ = 0.8 톤; b/d(일 배럴) x 365 x 0.1272 톤/년 (가동률 100% 가정). For converted items keep the original figure and unit in the table or in "notes" (e.g. "원문 340백만 갤런, 약 103만 톤"). When the user asks for 톤 the chart "unit" is "톤" with plain ton values (e.g. 1200000), not "만 톤". Never drop an item merely because its source unit is gallons or barrels.
-- Table rules (figures must be directly comparable down each column): put the unit ONCE in the column header or give every cell in that column the same unit — never mix 톤 / kt / Mt / 갤런 / 배럴 in one column; use one consistent number format per column (same decimal places, thousands commas like 1,200, a dot for decimals — never 1,2 or 1.200 for 1.2; ranges as "50만~120만 톤"); put different measures (현재 vs 계획 vs 목표, 연도별 값) in SEPARATE columns, not in one cell; write "-" for no data and "미공시" for undisclosed; the figure in a table row must be the same figure the chart shows for that entity.
-- NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with the material's own scale and unit — "50만 톤" stays "50만 톤" (never "5만 톤"), "1.2 Mt" stays "1.2 Mt", "340 million gallons" stays "340 million gallons". Do not convert between 만/천/백만/억, kt/Mt/톤, or gallons/barrels/tonnes yourself; if a comparison needs one common unit, give the converted value only when the materials state it, otherwise show each figure in its original unit side by side. A range uses the material's two stated endpoints ("50만~120만 톤", not "5만~12만 톤"). Count digits and zeros twice before writing; a figure that cannot be found in the cited material must not be written at all. Chart data must use the same figures (scaled consistently to the chart's unit).
+- Length (hard rule): keep the whole answer within about 450 Korean words — tables and chart JSON count — or about 700 for a single-company profile. Lead with the answer, then the most decision-relevant facts; merge duplicate materials and cite each fact once. Never try to cover everything: if more material exists than fits, say in one short line what was left out and offer to continue. The answer must always END COMPLETE — never stop mid-sentence, mid-list, mid-table or mid-chart.
+- Comparisons across several targets: show every target the materials give a figure for, side by side with the same fields and the same unit; name in one line any requested target with no usable figure.
+- Charts and tables (only when asked, or when 3+ comparable numbers make one clearly better): tables use Markdown pipe tables with the unit stated once in the header, one number format per column (commas for thousands, a dot for decimals, ranges as "50만~120만 톤"), current/plan/target in separate columns, "-" for no data, "미공시" for undisclosed. A chart is a fenced block \`\`\`chart containing one JSON object {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","labels":[...],"series":[{"name":"...","data":[numbers or null]}]} (hbar for rankings, line for time trends, pie/donut only for shares of one whole, at most 10 items and 4 series). To merge the parts of one company that add up (its plants), use one series with "groups":[company per label] and "combine":"sum" and optional "notes":[detail per label]. Use ONLY figures stated in the materials; put the unit in "unit"; follow with 1-3 sentences of takeaways, each cited.
+- NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with its own scale and unit ("50만 톤" stays "50만 톤", never "5만 톤"; "1.2 Mt" stays "1.2 Mt"). Do not convert between 만/천/백만/억, kt/Mt/톤 or gallons/barrels/tonnes yourself unless the user asked for one unit — then convert with: 1 kt = 1,000톤; 1 Mt = 1,000,000톤; 1 갤런 = 0.003028톤; 1 배럴 = 0.1272톤; b/d x 365 x 0.1272톤/년, and say "환산 기준" in one line. A range uses the material's two endpoints. A figure not found in the cited material must not be written.
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
 - Do not use any other citation style (no Markdown links, no raw URLs, no footnotes) — only the bracketed 자료 번호.
 Rules:
@@ -526,7 +517,7 @@ function truncateField(text, maxChars) {
 // ~40% fewer tokens with the best-ranked evidence intact. onlyWithQuantities keeps
 // the original 자료 numbers but lists only materials that state a capacity-type figure
 // (used by the dataset extraction call, which only needs those).
-const FULL_MATERIALS = 16;
+const FULL_MATERIALS = 12;
 const TAIL_SUMMARY_CHARS = 380;
 const TAIL_INSIGHT_CHARS = 200;
 const CAPACITY_CLASSES = new Set(['mass', 'gal', 'bbl', 'bpd', 'liter']);
@@ -735,6 +726,59 @@ function withTimeout(promise, ms, onTimeout) {
 // Fails open (changes nothing) on any error, timeout, or unparseable
 // response: this is a quality layer on the base answer, never allowed to
 // block or break it.
+// NEVER SHOW A CUT-OFF ANSWER. If the provider reports it hit the output limit (the
+// provider appends a visible notice), the notice is stripped and the answer is either
+// CONTINUED once (a short, bounded call that only finishes what was cut) or, failing
+// that, trimmed back to its last complete sentence/row/block. The user never sees
+// "답변이 길이 제한으로 잘렸습니다".
+const TRUNCATION_NOTICE_RE = /\n*⚠ 답변이 길이 제한으로[\s\S]*$/;
+const CONTINUE_SYSTEM = 'You finish an answer that was cut off. Output ONLY the remaining text that completes it — do not repeat anything already written. Keep it under 150 Korean words, keep the same language, formatting and [N] citation style, use only facts from the supplied materials, and close any open list, table or code block. If the answer is already complete enough, output a single short closing sentence.';
+
+function trimToCompleteBlock(text) {
+  let t = String(text || '').trimEnd();
+  const fences = (t.match(/```/g) || []).length;
+  if (fences % 2 === 1) t = t.slice(0, t.lastIndexOf('```')).trimEnd();
+  let lines = t.split('\n');
+  const terminal = /[.!?。다요음함임됨죠)\]|`*]\s*$/;
+  while (lines.length) {
+    const last = lines[lines.length - 1];
+    if (!last.trim()) { lines.pop(); continue; }
+    if (/^\s*\|/.test(last)) {
+      const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').length;
+      const prev = lines.slice(0, -1).reverse().find((l) => /^\s*\|/.test(l));
+      if (!/\|\s*$/.test(last) || (prev && cells(last) < cells(prev))) { lines.pop(); continue; } // half a table row
+    }
+    if (terminal.test(last) || /^#{1,6}\s/.test(last.trim()) || last.trim().length < 40) break;
+    const cut = last.search(/[.!?。다요](?=[^.!?。다요]*$)/); // last sentence end inside the line
+    if (cut > 0) { lines[lines.length - 1] = last.slice(0, cut + 1); break; }
+    lines.pop();
+  }
+  return lines.join('\n').trimEnd();
+}
+
+async function completeTruncatedAnswer(partial, candidates, signal) {
+  try {
+    const cited = extractCitedIndices(partial, candidates.length).slice(0, 8);
+    const materials = cited.map((i) => `자료 ${i} — ${candidates[i - 1].title}\n${truncateField(candidates[i - 1].summary || candidates[i - 1].ai_summary || '', 320)}`).join('\n\n');
+    const tail = partial.slice(-2500);
+    const result = await withTimeout(
+      callHedged({ system: CONTINUE_SYSTEM, user: `[Materials]\n${materials}\n\n[Answer so far]\n${tail}` }, { signal, hedgeAfterMs: 8000 }),
+      40000,
+      () => { throw new Error('continuation timed out'); }
+    );
+    let cont = String(result.text || '').replace(TRUNCATION_NOTICE_RE, '').trim().slice(0, 1500);
+    if (!cont) throw new Error('empty continuation');
+    const probe = partial.slice(-40);
+    const at = cont.indexOf(probe);
+    if (probe.length >= 20 && at >= 0) cont = cont.slice(at + probe.length).trimStart(); // model repeated the tail
+    console.log('ai-search truncation_repaired mode=continued');
+    return trimToCompleteBlock(`${partial}${/\s$/.test(partial) || /^[\n.,)\]]/.test(cont) ? '' : ' '}${cont}`);
+  } catch (err) {
+    console.log(`ai-search truncation_repaired mode=trimmed (${err.message})`);
+    return trimToCompleteBlock(partial);
+  }
+}
+
 // Answer cache: the same question over the same evidence set returns the finished
 // answer instantly (follow-ups with history are never cached). Keyed by the question
 // and the candidate ids, so newly published/changed material changes the key.
@@ -880,7 +924,10 @@ function buildCoverageBlock(required) {
 }
 function ensureCompanyCoverage(text, required, candidates) {
   const low = String(text || '').toLowerCase();
-  const missing = required.filter((c) => !c.names.some((n) => low.includes(n)));
+  const named = (c) => c.indices.some((i) => c.names.some((n) => String(candidates[i - 1].title || '').toLowerCase().includes(n)));
+  // only companies with a material that names them in its TITLE are appended — a passing
+  // mention in a body is not evidence worth adding to the answer
+  const missing = required.filter((c) => !c.names.some((n) => low.includes(n)) && named(c));
   if (!missing.length) return text;
   const bullets = missing.map((c) => {
     // the material that names the company in its TITLE first, then the sentence around the name
@@ -984,8 +1031,23 @@ async function tryBuildDataset(question, candidates, required, signal) {
   }
 }
 
+// Free-tier models occasionally leak a few characters of another script into Korean prose
+// ("재생 디زل"). Those characters are removed unless the supplied materials contain them.
+const STRAY_SCRIPT_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u0900-\u097F\u0E00-\u0E7F\u0400-\u04FF]+/g;
+function stripStrayScripts(text, candidates) {
+  const t = String(text || '');
+  if (!/[가-힣]/.test(t) || !STRAY_SCRIPT_RE.test(t)) return t;
+  STRAY_SCRIPT_RE.lastIndex = 0;
+  const known = candidates.map(materialText).join(' ');
+  return t.replace(STRAY_SCRIPT_RE, (m) => (known.includes(m) ? m : ''));
+}
+
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false, datasetExpected = false } = {}) {
-  let modelText = normalizeCitationMarkers(rawText);
+  let rawBody = String(rawText || '');
+  if (TRUNCATION_NOTICE_RE.test(rawBody)) {
+    rawBody = await completeTruncatedAnswer(rawBody.replace(TRUNCATION_NOTICE_RE, '').trimEnd(), candidates, signal);
+  }
+  let modelText = stripStrayScripts(normalizeCitationMarkers(rawBody), candidates);
   if (dataset) {
     // The system draws the table and chart; drop any the model still wrote.
     modelText = modelText.replace(/```chart[\s\S]*?```/g, '').split('\n').filter((l) => !/^\s*\|/.test(l)).join('\n').trim();
@@ -1121,7 +1183,8 @@ async function handleSearch(req, res, signal) {
   if (!confirmed) {
     const materialsChars = buildMaterialsBlock(candidates).length;
     const assessment = workloadPlan.assessWorkload({
-      question, candidates, required, systemChars: SYSTEM_PROMPT.length, materialsChars,
+      question, candidates, required, expectLong: /(상세|자세히|종합|보고서|리포트|심층|모두|전부|전체|전수|누락)/.test(question) && candidates.length >= 20 && intent.type !== 'entity',
+      systemChars: SYSTEM_PROMPT.length, materialsChars,
       extractionChars: buildMaterialsBlock(candidates, { onlyWithQuantities: true }).length,
       quickMaterialsChars: buildMaterialsBlock(candidates.slice(0, workloadPlan.QUICK_CANDIDATES)).length,
     });
@@ -1240,6 +1303,8 @@ async function handleSearch(req, res, signal) {
 module.exports = router;
 module.exports.extractConcepts = extractConcepts;
 module.exports.enrichChartJson = enrichChartJson;
+module.exports.trimToCompleteBlock = trimToCompleteBlock;
+module.exports.stripStrayScripts = stripStrayScripts;
 module.exports.dropNearDuplicates = dropNearDuplicates;
 module.exports.callHedged = callHedged;
 module.exports.answerCacheKey = answerCacheKey;

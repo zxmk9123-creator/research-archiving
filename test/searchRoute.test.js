@@ -798,7 +798,7 @@ test('P4: candidate selection keeps Korean and non-Korean relevant rows (any top
   const en = Array.from({ length: 24 }, (_, i) => ({ id: i, title: `English article ${i}`, relevance_score: 5 - i * 0.1 }));
   const ko = [{ id: 100, title: '국내 메가프로젝트 소식', relevance_score: 3 }, { id: 101, title: '국내 정책 동향', relevance_score: 2.5 }];
   const out = selectDiverseCandidates([...en, ...ko]);
-  assert.equal(out.length, 16);
+  assert.equal(out.length, 12);
   assert.ok(out.some((r) => r.id === 100) && out.some((r) => r.id === 101));
   assert.deepEqual(out.map((r) => r.relevance_score), [...out.map((r) => r.relevance_score)].sort((a, b) => b - a));
   // irrelevant Korean rows (below floor) are not forced in
@@ -843,7 +843,7 @@ test('P7: a parent-sector term is expanded to its member sectors, each retrieved
     await withServer(async (base) => {
       await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '식용유지 생산량을 그래프로 비교분석해줘' }) });
     });
-    const perTarget = calls.filter((c) => c.text.includes('LIMIT 3'));
+    const perTarget = calls.filter((c) => c.text.includes('LIMIT 2'));
     assert.deepEqual(perTarget.map((c) => c.params[0]), ['%팜유%', '%대두유%']);
     // visualization/analysis request words are framing, not topic keywords
     const main = calls.find((c) => c.text.includes('LIMIT 60'));
@@ -853,17 +853,17 @@ test('P7: a parent-sector term is expanded to its member sectors, each retrieved
   }
 });
 
-test('SYSTEM_PROMPT: carries the thoroughness and multi-target data-assembly protocols', () => {
-  const src = require('fs').readFileSync(require.resolve('../server/routes/search.js'), 'utf8');
-  assert.match(src, /Thoroughness protocol/);
-  assert.match(src, /Comparison and data requests across several targets/);
+test('SYSTEM_PROMPT: compact — a hard length rule that forces a complete ending, number fidelity, and chart/table format', () => {
+  const p = searchRouter.SYSTEM_PROMPT;
+  assert.match(p, /Length \(hard rule\)/);
+  assert.match(p, /END COMPLETE/);
+  assert.match(p, /NUMBER FIDELITY/);
+  assert.match(p, /"combine":"sum"/);
+  // the bloated protocols were rolled back (the system enforces these in code instead)
+  for (const gone of ['Thoroughness protocol', 'Layout discipline for data answers', 'COMPLETENESS REQUESTS', 'UNIT UNIFICATION REQUESTS', 'Visualization process']) assert.ok(!p.includes(gone), gone);
+  assert.ok(p.length < 9500, `prompt length ${p.length}`);
 });
 
-test('SYSTEM_PROMPT: layout discipline (conclusion first, no duplicated data list, top-10 charts, short labels, one unit)', () => {
-  const src = require('fs').readFileSync(require.resolve('../server/routes/search.js'), 'utf8');
-  assert.match(src, /Layout discipline for data answers/);
-  assert.match(src, /AT MOST 10 bars\/points/);
-});
 
 test('citation markers: [1, 2] / [1-3] / [자료 3] are normalised and [이전 답변] is dropped', () => {
   const n = searchRouter.normalizeCitationMarkers;
@@ -881,14 +881,14 @@ test('P8: each specific subject of a multi-subject question gets its own retriev
   const { calls, restore } = mockPool([
     ['SELECT count(*)', () => ({ rows: [{ cnt: 20 }] })],
     ['FROM sectors p JOIN sectors c', () => ({ rows: [] })],
-    ['LIMIT 3', () => ({ rows: [] })],
+    ['LIMIT 2', () => ({ rows: [] })],
     ['FROM items i', () => ({ rows: [] })],
   ]);
   try {
     await withServer(async (base) => {
       await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'Neste, Eni, Chevron의 생산능력 비교' }) });
     });
-    const perSubject = calls.filter((c) => c.text.includes('LIMIT 3')).map((c) => c.params[0]);
+    const perSubject = calls.filter((c) => c.text.includes('LIMIT 2')).map((c) => c.params[0]);
     for (const w of ['%neste%', '%eni%', '%chevron%']) assert.ok(perSubject.includes(w), `${w} needs its own slot`);
   } finally {
     restore();
@@ -1146,4 +1146,52 @@ test('"Neste 업체에 대해 알려줘": a focused company profile — profile 
     restore();
     restoreProvider();
   }
+});
+
+test('truncation: the provider notice is never shown — the answer is continued once, or trimmed to its last complete block', async () => {
+  const NOTICE = '\n\n⚠ 답변이 길이 제한으로 인해 중간에 잘렸습니다. 더 좁은 질문으로 다시 물어보시면 전체 답변을 받을 수 있습니다.';
+  const cands = [{ id: 1, title: 'Neste', summary: 'Neste 싱가포르 연 100만 톤 SAF', source_name: 's' }];
+  const cut = '# 개요\nNeste는 SAF 선도 기업이다. [1]\n- 싱가포르 연 100만 톤 SAF를 생산하며 이는 세계 최대 규모이고 아시아 공급의 핵심이므로 향후 확장이';
+  // 1) continuation succeeds
+  let restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) return { text: '[]', provider: 'p' };
+    return { text: ' 기대된다. [1]', provider: 'p' };
+  });
+  try {
+    const { answer } = await searchRouter.finalizeAnswer(cut + NOTICE, cands, undefined, [], '', null);
+    assert.ok(!answer.includes('길이 제한'));
+    assert.match(answer, /확장이 기대된다\./);
+  } finally { restoreProvider(); }
+  // 2) continuation fails -> trimmed back to the last complete sentence, still no notice
+  restoreProvider = mockProvider(async ({ system }) => {
+    if (system === searchRouter.VERIFICATION_SYSTEM_PROMPT) return { text: '[]', provider: 'p' };
+    throw new Error('provider down');
+  });
+  try {
+    const { answer } = await searchRouter.finalizeAnswer(cut + NOTICE, cands, undefined, [], '', null);
+    assert.ok(!answer.includes('길이 제한'));
+    assert.ok(!answer.includes('향후 확장이'));
+    assert.match(answer, /Neste는 SAF 선도 기업이다\./);
+  } finally { restoreProvider(); }
+});
+
+test('trimToCompleteBlock: drops half a table row, an unfinished chart fence and a cut-off sentence', () => {
+  const t = searchRouter.trimToCompleteBlock;
+  assert.equal(t('문장 하나다.\n| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 |'), '문장 하나다.\n| a | b |\n| --- | --- |\n| 1 | 2 |');
+  assert.equal(t('요약이다.\n```chart\n{"type":"bar","labels":["a'), '요약이다.');
+  assert.equal(t('첫 문장이다. 두 번째 문장은 길어지다가 끊기는 부분이 있어서 이렇게'), '첫 문장이다.');
+  assert.equal(t('# 제목\n- 짧은 항목 [1]'), '# 제목\n- 짧은 항목 [1]');
+});
+
+test('stray foreign-script characters are removed from Korean prose unless the materials contain them', () => {
+  const s = searchRouter.stripStrayScripts;
+  assert.equal(s('재생 디زل, SAF', [{ title: 't', summary: 'x' }]), '재생 디, SAF');
+  assert.equal(s('Роснефть와 협력', [{ title: 'Роснефть', summary: 'x' }]), 'Роснефть와 협력');
+  assert.equal(s('plain english text', []), 'plain english text');
+});
+
+test('a grounded-less derived figure in parentheses is dropped with its parenthesis, not shown as a warning', () => {
+  const nc = require('../server/lib/numberCheck');
+  const r = nc.guardAnswerNumbers('일일 48,000배럴 (연간 약 999만 톤) 가동 [1]', [{ summary: 'Martinez 48,000 b/d capacity' }], () => [1], (m) => m.summary);
+  assert.equal(r.text, '일일 48,000배럴 가동 [1]');
 });

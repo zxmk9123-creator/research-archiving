@@ -14,11 +14,11 @@ const tokens = (chars) => Math.round(chars / CHARS_PER_TOKEN);
 const round100 = (n) => Math.round(n / 100) * 100;
 const human = (n) => (n >= 10000 ? `약 ${(n / 10000).toFixed(1).replace(/\.0$/, '')}만` : `약 ${n.toLocaleString('en-US')}`);
 
-function assessWorkload({ question, candidates, required = [], systemChars = 0, materialsChars = 0, extractionChars = 0, quickMaterialsChars = 0 }) {
+function assessWorkload({ question, candidates, required = [], expectLong = false, systemChars = 0, materialsChars = 0, extractionChars = 0, quickMaterialsChars = 0 }) {
   const req = rc.parseRequest(question);
   const dataset = dp.isDatasetRequest(req, question);
   const sweep = required.length >= 3 && req.completeness;
-  const heavy = dataset || sweep;
+  const heavy = dataset || sweep || expectLong;
   if (!heavy) return { heavy: false };
 
   const genIn = tokens(systemChars + materialsChars) + 400;
@@ -53,7 +53,9 @@ function assessWorkload({ question, candidates, required = [], systemChars = 0, 
       title: '작업 범위를 확인해 주세요',
       reason: dataset
         ? '여러 업체의 수치를 모아 단위를 통일하고 표·차트로 만드는 큰 작업입니다.'
-        : '관심 기업 전체를 대상으로 하는 큰 작업입니다.',
+        : sweep
+          ? '관심 기업 전체를 대상으로 하는 큰 작업입니다.'
+          : '답변이 길어질 수 있는 요청입니다. 중간에 끊기지 않도록 범위를 먼저 정합니다.',
       scope: {
         question,
         materials: candidates.length,
