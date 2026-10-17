@@ -1365,3 +1365,31 @@ test('classification card: only open dimensions are asked, narrow requests get n
   assert.deepEqual(cs.applyToRecords(recs, { status: 'plan' }).map((r) => r.entity), ['Neste']);
   assert.deepEqual(cs.applyToRecords(recs, { unit: 'site' }).map((r) => r.entity), ['DGD']);
 });
+
+test('conversation context: a follow-up inherits sector, card answers and the previous table companies; its own statements win', () => {
+  const cs = require('../server/lib/classificationScope');
+  const ctx = cs.sanitizeContext({ subject: 'SAF', classification: { unit: 'operator', status: 'current', kind: 'company', evil: 1 }, entities: ['Neste', 'Eni S.p.A.', 7] });
+  assert.deepEqual(ctx.entities, ['Neste', 'Eni S.p.A.']);
+  assert.equal(ctx.classification.evil, undefined);
+  // plain follow-up: everything inherited, card not re-asked
+  let c = cs.carry(ctx, '그럼 상위 5개만 다시 보여줘');
+  assert.equal(c.cardAnswered, true);
+  assert.deepEqual(c.choices, { unit: 'operator', status: 'current', kind: 'company', subject: 'SAF' });
+  // the new question fixes the status itself -> that dimension is not inherited
+  c = cs.carry(ctx, '그럼 2027년 계획 값은?');
+  assert.equal(c.choices.status, undefined);
+  assert.equal(c.choices.unit, 'operator');
+  // a question that names another sector keeps its own subject
+  c = cs.carry(ctx, '팜유 업체는?');
+  assert.equal(c.choices.subject, undefined);
+  // no previous context -> nothing carried
+  assert.deepEqual(cs.carry(null, 'x'), { choices: null, cardAnswered: false });
+  assert.equal(cs.refersBack('그 업체들의 면적도 알려줘'), true);
+  assert.equal(cs.refersBack('Neste의 생산능력'), false);
+  // next context: dataset entities replace the old focus; classification accumulates
+  const next = cs.nextContext(ctx, { question: '글로벌 SAF Top3', choices: { status: 'plan' }, datasetEntities: ['Neste', 'Eni S.p.A.', 'Chevron'] });
+  assert.equal(next.subject, 'SAF');
+  assert.equal(next.classification.status, 'plan');
+  assert.equal(next.classification.unit, 'operator');
+  assert.deepEqual(next.entities, ['Neste', 'Eni S.p.A.', 'Chevron']);
+});

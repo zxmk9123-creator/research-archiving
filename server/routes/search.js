@@ -1102,7 +1102,7 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
 // Quantitative visualization requests: build the verified dataset (table + chart)
 // in code (see lib/datasetPipeline.js). Null on any failure -> normal generation.
 const DATASET_TIMEOUT_MS = 75000;
-async function tryBuildDataset(question, candidates, required, signal, trace = [], choices = null) {
+async function tryBuildDataset(question, candidates, required, signal, trace = [], choices = null, focusEntities = []) {
   const req = requestCompliance.parseRequest(question);
   if (!datasetPipeline.isDatasetRequest(req, question)) { trace.push('not_dataset_request'); return null; }
   try {
@@ -1215,6 +1215,11 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       requiredForBuild = required.filter((rq) => !present.some((c) => subjectScope.sameCompany(c, rq)));
     } catch (_) { /* keep required as is */ }
     records = classificationScope.applyToRecords(records, choices);
+    if (focusEntities.length) {
+      // "그 업체들만": the follow-up keeps to the companies of the previous table
+      const keep = focusEntities.map((e) => String(e).toLowerCase());
+      records = records.filter((r) => keep.some((k) => String(r.entity).toLowerCase().includes(k) || k.includes(String(r.entity).toLowerCase())));
+    }
     trace.push(`before_build records=${records.length} entities=${[...new Set(records.map((r) => r.entity))].join(',')}`);
     const dataset = datasetPipeline.buildDataset(records, requiredForBuild, { unitTons: req.unitTons, density, topN: req.tableOnly && !(choices && choices.unit === 'site') ? req.topN : null, only: req.tableOnly && !(choices && choices.unit === 'site') });
     trace.push(dataset ? 'built' : 'build_returned_null');
@@ -1372,12 +1377,18 @@ async function handleSearch(req, res, signal) {
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
-  const confirmed = scope.confirmed === true || classification !== null;
+  // CONVERSATION CONTEXT: a follow-up inherits the sector, the card answers and the companies of the previous
+  // table (structured values kept by the client between turns), unless it states that dimension itself.
+  const prevContext = isFollowup ? classificationScope.sanitizeContext(req.body.context) : null;
+  const carried = classificationScope.carry(prevContext, question);
+  const choices = classification !== null || carried.choices ? { ...(carried.choices || {}), ...(classification || {}) } : null;
+  const referencedEntities = prevContext && prevContext.entities.length && classificationScope.refersBack(question) ? prevContext.entities : [];
+  const confirmed = scope.confirmed === true || classification !== null || carried.cardAnswered;
   const quick = confirmed && scope.mode === 'quick';
 
   let candidates;
   try {
-    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${classification && classification.subject ? ` ${classification.subject}` : ''}`, req.body.history, { light: quick });
+    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick });
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
@@ -1440,7 +1451,7 @@ async function handleSearch(req, res, signal) {
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
-  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${classification ? JSON.stringify(classification) : ''}`);
+  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
     await recordSearchTelemetry({
@@ -1448,9 +1459,10 @@ async function handleSearch(req, res, signal) {
       candidateCount: candidates.length, sourceCount: cached.sources.length, provider: 'cache',
       isFollowup, questionFingerprint: fingerprint, streamed: streaming,
     });
-    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, sources: cached.sources });
+    const cachedContext = classificationScope.nextContext(prevContext, { question, choices, focusEntities: intent.focus.map((c) => c.name) });
+    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, sources: cached.sources, context: cachedContext });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, sources: cached.sources })}\n\n`);
+    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, sources: cached.sources, context: cachedContext })}\n\n`);
     return res.end();
   }
   // Heavy requests are confirmed with the user before any AI work starts.
@@ -1478,7 +1490,8 @@ async function handleSearch(req, res, signal) {
     if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
   }
   const datasetTrace = [];
-  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, classification);
+  const nextContextFor = (dataset) => classificationScope.nextContext(prevContext, { question, choices, datasetEntities: dataset && dataset.entities, focusEntities: intent.focus.map((c) => c.name) });
+  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, choices, intent.focus.length ? [] : referencedEntities);
   datasetPromise.catch(() => {});
   const onlyBlock = requestCompliance.parseRequest(question).tableOnly
     ? '\n\n[출력 형식: 사용자가 도표(표)만 요청했다. 표 하나와 한 줄 주석 외에는 쓰지 않는다. 해설·배경·전략·부록·추가 업체 목록은 쓰지 않는다.]'
@@ -1494,7 +1507,7 @@ async function handleSearch(req, res, signal) {
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(classification)}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
@@ -1524,7 +1537,7 @@ async function handleSearch(req, res, signal) {
       candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
       isFollowup, questionFingerprint: fingerprint, streamed: false,
     });
-    return res.json({ answer, insufficient: false, sources, ...(req.body.debug === true ? { trace: datasetTrace } : {}) });
+    return res.json({ answer, insufficient: false, sources, context: nextContextFor(dataset), ...(req.body.debug === true ? { trace: datasetTrace } : {}) });
   }
 
   // --- Streaming path ---
@@ -1587,7 +1600,7 @@ async function handleSearch(req, res, signal) {
   const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
-  sendEvent('done', { answer, insufficient: false, sources });
+  sendEvent('done', { answer, insufficient: false, sources, context: nextContextFor(dataset) });
   res.end();
   await recordSearchTelemetry({
     requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,

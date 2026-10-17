@@ -778,6 +778,9 @@ function initHomeCarouselDragReorder() {
 // page -> back to Home) rather than resetting on every visit. A hard page
 // reload clears it naturally, since module state doesn't survive that.
 let aiSearchHistory = [];
+// Structured conversation context returned by the server (sector, card answers, companies of the last table)
+// and sent back with the next question, so a follow-up inherits what it does not restate.
+let aiSearchContext = null;
 // Rendered turn HTML kept alongside aiSearchHistory so the visible Q&A
 // thread can be restored on the next renderHome(), not just the history
 // array the API call uses for context.
@@ -1402,7 +1405,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ question, history: aiSearchHistory, ...(scope ? { scope } : {}) }),
+      body: JSON.stringify({ question, history: aiSearchHistory, ...(aiSearchContext ? { context: aiSearchContext } : {}), ...(scope ? { scope } : {}) }),
     });
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -1417,6 +1420,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
         bodyEl.innerHTML = body.plan.kind === 'classification' ? aiClassificationCardHtml(body.plan) : aiScopeCardHtml(body.plan);
         return;
       }
+      if (body.context) aiSearchContext = body.context;
       finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources);
       return;
     }
@@ -1462,6 +1466,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
           streamEl.innerHTML = renderAnswerHtml(rawText, null);
           followGrowingAnswer();
         } else if (eventName === 'done') {
+          if (data.context) aiSearchContext = data.context;
           finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
           // Bypasses the throttle for this last call — the polished swap
           // can change the answer's final height, so this makes sure its
@@ -1559,6 +1564,7 @@ function bindAiSearchForm() {
   if (resetBtn) {
     resetBtn.onclick = () => {
       aiSearchHistory = [];
+      aiSearchContext = null;
       aiSearchTurnsHtml = [];
       resultEl.innerHTML = '';
       resetBtn.disabled = true;

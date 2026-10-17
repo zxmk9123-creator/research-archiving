@@ -110,4 +110,48 @@ function describeChoices(choices) {
   return p.length ? `\n\n[사용자가 확인한 분류 기준 — ${p.join(' · ')}. 이 기준을 벗어난 항목은 쓰지 않는다.]` : '';
 }
 
-module.exports = { detectAmbiguity, buildGroups, sanitizeChoices, applyToRecords, describeChoices };
+// ---- conversation context -----------------------------------------------------------------
+// Structured memory of the conversation, owned by the server, carried by the client between turns:
+//   subject (sector), classification (the card answers), entities (companies of the last table/answer).
+// A follow-up inherits what it does not itself state — never by re-reading old answer text.
+const CTX_UNITS = ['operator', 'owner', 'site'];
+function sanitizeContext(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const strs = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.length <= 80).slice(0, 30) : []);
+  return {
+    subject: typeof raw.subject === 'string' && raw.subject.length <= 40 ? raw.subject : null,
+    classification: sanitizeChoices(raw.classification) || {},
+    entities: strs(raw.entities),
+  };
+}
+
+// Words that point back at the previous table / list ("그 업체들", "위 표", "이 중에서").
+const REFERS_BACK = /(그\s*(중|업체|기업|회사|표|목록|리스트|순위|수치|결과|데이터)|이\s*(중|업체|기업|회사|표|목록|리스트|순위)|위\s*(표|목록|업체|기업|순위|결과)|해당\s*(업체|기업|회사|표)|이들|그들|방금|앞서|같은\s*(업체|기업|회사)|동일한\s*(업체|기업|회사))/;
+const refersBack = (q) => REFERS_BACK.test(String(q || ''));
+
+// What a follow-up inherits: the card answers (unless this question fixes that dimension itself) and the
+// sector. cardAnswered = the user already answered the card in this conversation, so it is not asked again.
+function carry(prev, question) {
+  const q = String(question || '');
+  if (!prev) return { choices: null, cardAnswered: false };
+  const choices = { ...prev.classification };
+  if (STATUS_FIXED.test(q)) delete choices.status;
+  if (UNIT_FIXED.test(q)) delete choices.unit;
+  if (KIND_FIXED.test(q)) delete choices.kind;
+  const namesSector = Object.values(SECTOR_KEYWORD_PATTERNS).some((re) => re.test(q));
+  if (!namesSector && prev.subject && !choices.subject) choices.subject = prev.subject;
+  const cardAnswered = Boolean(prev.classification && (prev.classification.unit || prev.classification.status || prev.classification.kind));
+  return { choices: Object.keys(choices).length ? choices : null, cardAnswered };
+}
+
+function nextContext(prev, { question, choices, datasetEntities, focusEntities }) {
+  const q = String(question || '');
+  const matched = Object.entries(SECTOR_KEYWORD_PATTERNS).find(([, re]) => re.test(q));
+  return {
+    subject: (choices && choices.subject) || (matched ? matched[0] : null) || (prev && prev.subject) || null,
+    classification: { ...((prev && prev.classification) || {}), ...(choices || {}) },
+    entities: (datasetEntities && datasetEntities.length ? datasetEntities : focusEntities && focusEntities.length ? focusEntities : (prev && prev.entities) || []).slice(0, 30),
+  };
+}
+
+module.exports = { sanitizeContext, refersBack, carry, nextContext, detectAmbiguity, buildGroups, sanitizeChoices, applyToRecords, describeChoices };
