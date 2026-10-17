@@ -10,6 +10,8 @@ const COMPANY_WORDS = /(기업|업체|회사|생산자|메이저|company|compani
 const BROAD_WORDS = /(글로벌|전\s*세계|세계|주요|상위|top\s*\d+|전체|모든|전수|순위|비교|리스트|목록|global|worldwide|leading|ranking)/i;
 const UNIT_FIXED = /(거점별|플랜트별|설비별|공장별|사업장별|모회사|지주|소유\s*기준|지분|운영사|운영\s*법인|법인\s*기준|기업별|업체별|회사별)/i;
 const STATUS_FIXED = /(현재|가동|운영\s*중|건설|계획|목표|예정|전망|20[2-4]\d\s*년|향후|미래|\bcurrent\b|planned|target)/i;
+const PRODUCT_FIXED = /(SAF\s*전용|SAF만|항공유\s*전용|재생\s*디젤|HVO|바이오\s*디젤|재생\s*연료\s*전체|바이오\s*연료\s*전체|전체\s*재생\s*연료|renewable diesel)/i;
+const CAPACITY_WORDS = /(capa|capacity|생산\s*능력|생산량|용량)/i;
 const KIND_FIXED = /(기관|국가|정부|협회|기업만|업체만|회사만)/i;
 
 // Each group: the user's choice is sent back as classification[group.id].
@@ -33,6 +35,17 @@ function buildGroups(question, { sectors = [], entityTypes = [] } = {}) {
         { id: 'site', label: '플랜트(거점) 단위', detail: '기업으로 묶지 않고 설비별로 나열' },
       ],
       default: 'operator',
+    });
+  }
+  // SAF plants usually make renewable diesel too: is the capacity wanted SAF only, or all renewable fuels?
+  if (SECTOR_KEYWORD_PATTERNS.SAF.test(q) && CAPACITY_WORDS.test(q) && !PRODUCT_FIXED.test(q)) {
+    groups.push({
+      id: 'product', label: '제품 범위 (SAF 전용 / 재생연료 전체)', hint: '한 플랜트의 생산능력에는 SAF와 재생디젤(HVO)이 함께 잡히는 경우가 많습니다.',
+      options: [
+        { id: 'saf', label: 'SAF 전용', detail: '지속가능항공유로 밝혀진 용량만. 제품 범위가 확인되지 않은 값은 제외합니다. 기본값' },
+        { id: 'all', label: '재생연료 전체 (SAF + 재생디젤·HVO 포함)', detail: '플랜트가 만드는 재생연료 총 용량' },
+      ],
+      default: 'saf',
     });
   }
   if (!STATUS_FIXED.test(q)) {
@@ -77,7 +90,7 @@ function detectAmbiguity(question, ctx = {}) {
   };
 }
 
-const ALLOWED = { unit: ['operator', 'owner', 'site'], status: ['current', 'plan', 'both'], kind: ['company', 'all'] };
+const ALLOWED = { unit: ['operator', 'owner', 'site'], status: ['current', 'plan', 'both'], kind: ['company', 'all'], product: ['saf', 'all'] };
 function sanitizeChoices(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
@@ -94,6 +107,14 @@ function applyToRecords(records, choices) {
   if (choices.status === 'current') out = out.filter((r) => r.status === '가동');
   else if (choices.status === 'plan') out = out.filter((r) => PLAN_STATUS.has(r.status));
   if (choices.kind === 'company') out = out.filter((r) => r.etype !== '기관' && r.etype !== '국가');
+  if (choices.product === 'saf' || choices.product === 'all') {
+    // product scope: only applied when enough facts carry a product label (older facts are labelled by re-extraction)
+    const labelled = out.filter((r) => r.product);
+    if (labelled.length >= 3) {
+      const keep = choices.product === 'saf' ? new Set(['saf']) : new Set(['saf', 'renewable_diesel', 'biofuel_total']);
+      out = out.filter((r) => r.product && keep.has(r.product));
+    }
+  }
   if (choices.unit === 'owner') out = out.map((r) => (r.parent ? { ...r, entity: r.parent } : r));
   if (choices.unit === 'site') out = out.filter((r) => r.site);
   return out;
@@ -106,6 +127,7 @@ function describeChoices(choices) {
   if (choices.subject) p.push(`분야: ${choices.subject}`);
   if (choices.unit) p.push({ operator: '집계 단위: 운영 법인', owner: '집계 단위: 소유 모회사', site: '집계 단위: 플랜트(거점)' }[choices.unit]);
   if (choices.status) p.push({ current: '시점: 현재 가동', plan: '시점: 건설·계획·목표', both: '시점: 현재와 계획을 구분' }[choices.status]);
+  if (choices.product) p.push({ saf: '제품 범위: SAF 전용', all: '제품 범위: 재생연료 전체' }[choices.product]);
   if (choices.kind) p.push({ company: '대상: 기업만', all: '대상: 기관·국가 포함' }[choices.kind]);
   return p.length ? `\n\n[사용자가 확인한 분류 기준 — ${p.join(' · ')}. 이 기준을 벗어난 항목은 쓰지 않는다.]` : '';
 }
@@ -138,6 +160,7 @@ function carry(prev, question) {
   if (STATUS_FIXED.test(q)) delete choices.status;
   if (UNIT_FIXED.test(q)) delete choices.unit;
   if (KIND_FIXED.test(q)) delete choices.kind;
+  if (PRODUCT_FIXED.test(q)) delete choices.product;
   const namesSector = Object.values(SECTOR_KEYWORD_PATTERNS).some((re) => re.test(q));
   if (!namesSector && prev.subject && !choices.subject) choices.subject = prev.subject;
   const cardAnswered = Boolean(prev.classification && (prev.classification.unit || prev.classification.status || prev.classification.kind));

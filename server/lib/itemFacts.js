@@ -20,14 +20,27 @@ const limitFactsCall = createLimiter(1, 4000);
 const textOf = (item) => [item.title, item.summary, item.ai_summary, item.insight, item.ai_insight].filter(Boolean).join(' ');
 const hasQuantity = (text) => nc.extractQuantities(text).some((q) => QUANTITY_GROUPS.has(q.cls));
 
-async function storeFacts(itemId, records) {
-  for (const r of records) {
-    await pool.query(
-      `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       ON CONFLICT (item_id, entity, COALESCE(site,''), status, grp, amount) DO NOTHING`,
-      [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null]
-    );
+// replace = true (re-extraction): the item's old rows are swapped for the new ones in ONE transaction, so a failed
+// run never leaves the item without facts.
+async function storeFacts(itemId, records, { replace = false } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (replace && records.length) await client.query('DELETE FROM item_facts WHERE item_id = $1', [itemId]);
+    for (const r of records) {
+      await client.query(
+        `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         ON CONFLICT (item_id, entity, COALESCE(site,''), status, grp, amount) DO NOTHING`,
+        [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null, r.product || null]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
@@ -36,7 +49,7 @@ async function markStatus(itemId, status) {
 }
 
 // Extracts, verifies and stores the facts of ONE item. Never throws.
-async function extractFactsForItem(item) {
+async function extractFactsForItem(item, { replace = false } = {}) {
   try {
     const text = textOf(item);
     if (!hasQuantity(text)) { await markStatus(item.id, 'none'); return { status: 'none', facts: 0 }; }
@@ -46,7 +59,7 @@ async function extractFactsForItem(item) {
       user: dp.buildExtractionUser('이 자료에 명시된 모든 수량(생산능력, 생산량, 물량, 투자액 등)을 추출하라.', block),
     }));
     const records = dp.verifyRecords(dp.parseRecords(result.text).map((r) => ({ ...r, source: 1 })), [item], textOf, { density: null });
-    await storeFacts(item.id, records);
+    await storeFacts(item.id, records, { replace });
     await markStatus(item.id, records.length ? 'done' : 'none');
     return { status: records.length ? 'done' : 'none', facts: records.length };
   } catch (err) {
@@ -67,13 +80,13 @@ async function loadFactRecords(candidates) {
   if (!ids.length) return { records: [], statusById: new Map() };
   const { rows: statuses } = await pool.query('SELECT id, facts_status FROM items WHERE id = ANY($1)', [ids]);
   const statusById = new Map(statuses.map((r) => [r.id, r.facts_status]));
-  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent FROM item_facts WHERE item_id = ANY($1)', [ids]);
+  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product FROM item_facts WHERE item_id = ANY($1)', [ids]);
   const indexById = new Map(candidates.map((c, i) => [c.id, i + 1]));
   const pubById = new Map(candidates.map((c) => [c.id, c.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
     group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null,
-    etype: r.entity_type, country: r.country, parent: r.parent, tons: null,
+    etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, tons: null,
   }));
   return { records, statusById };
 }
@@ -106,33 +119,39 @@ async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, ma
   );
   if (!items.length) return { records: [], items: [] };
   const { rows } = await pool.query(
-    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent FROM item_facts WHERE item_id = ANY($1)',
+    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product FROM item_facts WHERE item_id = ANY($1)',
     [items.map((i) => i.id)]
   );
   const indexById = new Map(items.map((it, k) => [it.id, baseIndex + k + 1]));
   const pubById = new Map(items.map((it) => [it.id, it.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
-    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, tons: null,
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, tons: null,
   }));
   return { records, items };
 }
 
 // Backfill: facts for already-published items, newest first, resumable (facts_status IS NULL).
 const backfillStatus = { running: false, startedAt: null, finishedAt: null, total: 0, done: 0, withFacts: 0, none: 0, errors: 0 };
-async function runBackfill({ limit = 300 } = {}) {
+// mode 'product': re-extracts items whose stored facts have no product label yet (replacing them transactionally).
+async function runBackfill({ limit = 300, mode = 'new' } = {}) {
   if (backfillStatus.running) return { started: false, reason: 'already_running' };
   const { rows } = await pool.query(
-    `SELECT id, title, summary, ai_summary, insight, ai_insight FROM items
-     WHERE status = 'Published' AND facts_status IS NULL
-     ORDER BY published_at DESC NULLS LAST, id DESC LIMIT $1`,
+    mode === 'product'
+      ? `SELECT i.id, i.title, i.summary, i.ai_summary, i.insight, i.ai_insight FROM items i
+          WHERE i.status = 'Published' AND EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id)
+            AND NOT EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id AND f.product IS NOT NULL)
+          ORDER BY i.published_at DESC NULLS LAST, i.id DESC LIMIT $1`
+      : `SELECT id, title, summary, ai_summary, insight, ai_insight FROM items
+          WHERE status = 'Published' AND facts_status IS NULL
+          ORDER BY published_at DESC NULLS LAST, id DESC LIMIT $1`,
     [Math.min(Number(limit) || 300, 2000)]
   );
   Object.assign(backfillStatus, { running: true, startedAt: new Date().toISOString(), finishedAt: null, total: rows.length, done: 0, withFacts: 0, none: 0, errors: 0 });
   (async () => {
     try {
       for (const item of rows) {
-        const r = await extractFactsForItem(item);
+        const r = await extractFactsForItem(item, { replace: mode === 'product' });
         backfillStatus.done++;
         if (r.status === 'done') backfillStatus.withFacts++;
         else if (r.status === 'none') backfillStatus.none++;

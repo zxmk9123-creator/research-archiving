@@ -8,8 +8,11 @@ const dp = require('../server/lib/datasetPipeline');
 function mockPool(handler) {
   const original = pool.query;
   const calls = [];
+  const originalConnect = pool.connect;
   pool.query = async (text, params) => { calls.push({ text, params }); return handler(text, params) || { rows: [], rowCount: 0 }; };
-  return { calls, restore: () => { pool.query = original; } };
+  // a transaction client routes through the same recorder (BEGIN / COMMIT included)
+  pool.connect = async () => ({ query: (text, params) => pool.query(text, params), release: () => {} });
+  return { calls, restore: () => { pool.query = original; pool.connect = originalConnect; } };
 }
 function mockProvider(fn) {
   const original = provider.callProviderWithFallback;
@@ -110,4 +113,28 @@ test('loadFactsByTopic: the whole archive\'s stored facts for a topic, numbered 
     assert.deepEqual(calls[0].params[1], [1, 2]);
     assert.deepEqual((await itemFacts.loadFactsByTopic([], {})).records, []);
   } finally { restore(); }
+});
+
+test('extractFactsForItem with replace: old rows are deleted only inside a transaction that also inserts the new ones', async () => {
+  const { calls, restore } = mockPool(() => ({ rows: [] }));
+  const restoreProvider = mockProvider(async () => ({ text: JSON.stringify([
+    { entity: 'Neste', site: '로테르담', metric: '생산능력', value: 120, unit: '만 톤', period: '연간', status: '계획', year: 2026, product: 'saf', source: 1 },
+  ]) }));
+  try {
+    const r = await itemFacts.extractFactsForItem(item(), { replace: true });
+    assert.deepEqual([r.status, r.facts], ['done', 1]);
+    const order = calls.map((c) => c.text.split(/\s+/)[0] + (c.text.includes('DELETE FROM item_facts') ? ':del' : c.text.includes('INSERT INTO item_facts') ? ':ins' : ''));
+    assert.ok(order.indexOf('BEGIN') < order.indexOf('DELETE:del') && order.indexOf('DELETE:del') < order.indexOf('INSERT:ins') && order.indexOf('INSERT:ins') < order.indexOf('COMMIT'), order.join(','));
+    const insert = calls.find((c) => c.text.includes('INSERT INTO item_facts'));
+    assert.equal(insert.params[13], 'saf'); // product stored
+  } finally { restore(); restoreProvider(); }
+});
+
+test('extractFactsForItem with replace: a run that yields no records keeps the old facts', async () => {
+  const { calls, restore } = mockPool(() => ({ rows: [] }));
+  const restoreProvider = mockProvider(async () => ({ text: '[]' }));
+  try {
+    await itemFacts.extractFactsForItem(item(), { replace: true });
+    assert.ok(!calls.some((c) => c.text.includes('DELETE FROM item_facts')));
+  } finally { restore(); restoreProvider(); }
 });

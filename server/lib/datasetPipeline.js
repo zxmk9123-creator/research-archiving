@@ -46,6 +46,7 @@ const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|
 const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
 // Industry bodies / agencies are sources of estimates, not producers: never charted as a company
 // unless the question names them. Unlabelled (older) facts fall back to a name list.
+const PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total', 'other']);
 const ENTITY_TYPES = new Set(['기업', '기관', '국가', '기타']);
 const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|EU|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
 const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NAME.test(String(r.entity || '').trim()));
@@ -167,7 +168,7 @@ function isDatasetRequest(req, question) {
 }
 
 const EXTRACTION_SYSTEM = `You extract a structured dataset from supplied materials. Respond with ONLY a JSON array — no prose, no code fences.
-Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "entity_type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "source": number}
+Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "product": "saf"|"renewable_diesel"|"biofuel_total"|"other", "entity_type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "source": number}
 Rules:
 - Extract the quantity the QUESTION asks about (for example production capacity, output volume, shipments, trade volume, investment amount). One element per distinct figure that a material STATES for an entity's plant/site/segment (or for the entity as a whole when no site is given, site=null). Cover EVERY entity and EVERY site the materials give a figure for; never skip an item because of its unit (gallons, barrels, b/d, currency are all fine).
 - "metric" is a short Korean label of the quantity (e.g. "생산능력", "생산량", "투자액").
@@ -176,6 +177,7 @@ Rules:
 - TIME (critical): "status" is 가동 (operating NOW), 건설중 (under construction), 계획 (planned), 목표 (target). A figure that is true today is 가동 with the year it was reported if stated; a figure for a future date ("by 2027", "2026년 완공") is 계획 or 목표 with year = that future year. "year" is the year the figure refers to (not the article year), null only if truly unstated. Record the present value and each future value as SEPARATE elements — never merge a current and a future figure.
 - "source" is the 자료 number the figure comes from.
 - "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.
+- "product" = what the quantity is the capacity/output OF: saf = sustainable aviation fuel only (SAF / 지속가능항공유 / bio-jet); renewable_diesel = renewable diesel / HVO / biodiesel only; biofuel_total = all renewable fuels together (SAF plus renewable diesel, or a combined "renewable fuels" figure, or unspecified biofuel); other = anything else (ethanol, crude, feedstock, palm oil ...). When one plant states both a total and a SAF share, they are TWO elements.
 - "entity_type": 기업 = a company or its plant operator; 기관 = an industry body, agency, regulator, NGO, research house or exchange (IATA, ICAO, IEA, USDA, EU, ISCC...) that merely reports/estimates a figure; 국가 = a country/region; 기타 otherwise. "country" = the country (Korean) where the entity is headquartered (or the country itself for 국가), null if not stated or not certain. "parent" = the owning group when the entity is a subsidiary/JV named so in the material, else null.`;
 
 function buildExtractionUser(question, materialsBlock) {
@@ -271,7 +273,7 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, etype: ENTITY_TYPES.has(r.entity_type) ? r.entity_type : null, country: clean(r.country) || null, parent: clean(r.parent) || null, pubAt: candidates[source - 1].published_at || null,
+      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, etype: ENTITY_TYPES.has(r.entity_type) ? r.entity_type : null, product: PRODUCTS.has(r.product) ? r.product : null, country: clean(r.country) || null, parent: clean(r.parent) || null, pubAt: candidates[source - 1].published_at || null,
       tons: group === 'mass' ? amount : group === 'volume' && density ? (amount * density) / 1000 : null,
       original: `${Number(r.value).toLocaleString('en-US')} ${unit}${r.period === '일일' && cls !== 'bpd' ? '/일' : ''}`.trim(),
     });
@@ -344,6 +346,8 @@ const newerCurrent = (a, b) => (asOfYear(a) - asOfYear(b)) || (pubTime(a) - pubT
 const furtherFuture = (a, b) => ((a.year || 0) - (b.year || 0)) || (pubTime(a) - pubTime(b)) || (a.amount - b.amount);
 
 // requiredNames: roster entities that have supplied materials; any without a record gets an explicit "미공시" row.
+const PRODUCT_LABEL = { saf: 'SAF 전용', renewable_diesel: '재생디젤', biofuel_total: '재생연료 전체' };
+
 // RANKING ("Top10 기업의 생산능력만 도표로"): one row per COMPANY, the largest first. A company's own stated total
 // is used when there is one, otherwise its current site figures are summed (and the row says so); a company with no
 // current figure is ranked by its furthest plan/target and labelled as such. Nothing else is written.
@@ -364,7 +368,7 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     let entry = null;
     if (totals.length) {
       const t = totals[0];
-      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}${t.partners ? ` · 합작 중복 제외: ${t.partners.join(', ')}` : ''}`, sources: [t.source], country: t.country, reliability: currentReliability(t) };
+      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · ${PRODUCT_LABEL[t.product] ? `${PRODUCT_LABEL[t.product]} · ` : ''}원문 ${t.original}${t.partners ? ` · 합작 중복 제외: ${t.partners.join(', ')}` : ''}`, sources: [t.source], country: t.country, reliability: currentReliability(t) };
     } else if (siteRows.length) {
       const sum = siteRows.reduce((a, r) => a + valueOf(r), 0);
       const rel = siteRows.map((r) => currentReliability(r));

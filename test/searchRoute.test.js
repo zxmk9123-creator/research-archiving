@@ -1072,7 +1072,7 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
       const cls = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
       assert.equal(cls.needsConfirmation, true);
       assert.equal(cls.plan.kind, 'classification'); // broad + owner/status open -> the classification card comes first
-      assert.deepEqual(cls.plan.groups.map((g) => g.id), ['unit', 'status']);
+      assert.deepEqual(cls.plan.groups.map((g) => g.id), ['unit', 'product', 'status']);
       const card = await post({ question: '현재 가동 중인 SAF 업체별 생산능력을 그래프로 정리해줘' });
       assert.equal(card.needsConfirmation, true);
       assert.equal(providerCalls, 0);
@@ -1352,7 +1352,7 @@ test('classification card: only open dimensions are asked, narrow requests get n
   const cs = require('../server/lib/classificationScope');
   const ctx = { sectors: [{ name: 'SAF', count: 300 }], entityTypes: [{ type: '기업', count: 100 }], isDataset: true, intentType: 'collective' };
   const card = cs.detectAmbiguity('글로벌 SAF 플랜트 Capacity 기준 Top10 기업의 생산능력만 도표로', { ...ctx, req: { topN: 10 } });
-  assert.deepEqual(card.groups.map((g) => g.id), ['unit', 'status', 'kind']);
+  assert.deepEqual(card.groups.map((g) => g.id), ['unit', 'product', 'status', 'kind']);
   assert.equal(cs.detectAmbiguity('Neste 업체에 대해 알려줘', { ...ctx, intentType: 'entity', req: {} }), null);
   assert.equal(cs.detectAmbiguity('현재 가동 중인 SAF 업체별 생산능력 표', { ...ctx, req: {} }), null);
   assert.deepEqual(cs.sanitizeChoices({ unit: 'owner', status: 'bogus', subject: 'SAF', x: 1 }), { unit: 'owner', subject: 'SAF' });
@@ -1429,4 +1429,24 @@ test('search has no concurrency cap: many simultaneous requests are all answered
     restore();
     restoreProvider();
   }
+});
+
+test('product scope: card asks SAF-only vs all renewable fuels for SAF capacity questions; the choice is enforced when facts carry a label', () => {
+  const cs = require('../server/lib/classificationScope');
+  const ctx = { sectors: [{ name: 'SAF', count: 300 }], entityTypes: [], isDataset: true, intentType: 'collective', req: { topN: 10 } };
+  const card = cs.detectAmbiguity('글로벌 SAF 플랜트 Capacity 기준 Top10 기업의 생산능력만 도표로', ctx);
+  assert.ok(card.groups.some((g) => g.id === 'product' && g.options.map((o) => o.id).join() === 'saf,all'));
+  assert.ok(!(cs.detectAmbiguity('글로벌 재생디젤 플랜트 Capacity Top10 기업', ctx) || { groups: [] }).groups.some((g) => g.id === 'product'));
+  assert.deepEqual(cs.sanitizeChoices({ product: 'saf', bogus: 'x' }), { product: 'saf' });
+  const recs = ['saf', 'saf', 'renewable_diesel', 'biofuel_total', null].map((p, i) => ({ entity: `E${i}`, product: p, status: '가동', etype: '기업' }));
+  assert.deepEqual(cs.applyToRecords(recs, { product: 'saf' }).map((r) => r.entity), ['E0', 'E1']);
+  assert.deepEqual(cs.applyToRecords(recs, { product: 'all' }).map((r) => r.entity), ['E0', 'E1', 'E2', 'E3']);
+  // too few labelled facts (older, not yet re-extracted): the filter is not applied rather than emptying the table
+  const unlabeled = recs.map((r, i) => (i < 2 ? r : { ...r, product: null }));
+  assert.equal(cs.applyToRecords(unlabeled, { product: 'saf' }).length, 5);
+  assert.match(cs.describeChoices({ product: 'saf' }), /SAF 전용/);
+  // the follow-up keeps the product unless it states one
+  const ctx2 = cs.sanitizeContext({ classification: { product: 'saf', status: 'current' } });
+  assert.equal(cs.carry(ctx2, '그럼 상위 5개만').choices.product, 'saf');
+  assert.equal(cs.carry(ctx2, '그럼 재생디젤 포함 전체로').choices.product, undefined);
 });
