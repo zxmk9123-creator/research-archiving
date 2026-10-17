@@ -197,3 +197,30 @@ test('canonicalizeEntities: S.p.A. suffix and generic qualifiers map to the rost
   const out = dp2.canonicalizeEntities([{ entity: 'Eni' }, { entity: 'Eni S.p.A' }, { entity: 'Phillips 66 Aviation' }, { entity: 'Infinium Energy' }, { entity: 'Phillips 667' }], roster).map((r) => r.entity);
   assert.deepEqual(out, ['Eni S.p.A.', 'Eni S.p.A.', 'Phillips 66', 'Infinium', 'Phillips 667']);
 });
+
+test('mergeJointVentures: the same facility under a venture and its owner counts once; unrelated equal figures stay', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const base = { status: '가동', year: 2025, group: 'volume', amount: 4.5e9, original: '12억 갤런', basis: '직접', metric: '생산능력' };
+  const texts = {
+    1: 'Diamond Green Diesel, a joint venture of Valero and Darling, runs Port Arthur at 1.2 billion gallons',
+    2: 'Valero Energy renewable diesel via Diamond Green Diesel: 1.2 billion gallons',
+    3: 'Eni plans a plant with 1.2 billion gallons capacity',
+  };
+  const recs = [
+    { ...base, entity: 'Diamond Green Diesel', site: 'Port Arthur', source: 1 },
+    { ...base, entity: 'Valero Energy', site: null, source: 2 },
+    { ...base, entity: 'Eni S.p.A.', site: null, source: 3 },
+  ];
+  const out = dp2.mergeJointVentures(recs, (r) => texts[r.source]);
+  assert.deepEqual(out.records.map((r) => r.entity).sort(), ['Diamond Green Diesel', 'Eni S.p.A.']);
+  assert.deepEqual(out.records.find((r) => r.entity === 'Diamond Green Diesel').partners, ['Valero Energy']);
+  assert.equal(out.dropped, 1);
+  // different sites are different facilities even with the same figure
+  const two = dp2.mergeJointVentures([
+    { ...base, entity: 'A Co', site: 'X', source: 1 }, { ...base, entity: 'B Co', site: 'Y', source: 1 },
+  ], () => 'A Co and B Co both operate plants');
+  assert.equal(two.records.length, 2);
+  // the table says so
+  const ds = dp2.buildDataset([out.records.find((r) => r.entity === 'Diamond Green Diesel'), { ...base, entity: 'Neste', site: null, source: 3, amount: 1.5e6, group: 'mass', original: '150만 톤', tons: 1.5e6 }, { ...base, entity: 'Chevron', site: null, source: 3, amount: 1e6, group: 'mass', original: '100만 톤', tons: 1e6 }], [], { topN: 3, only: true });
+  assert.ok(ds, 'dataset built');
+});

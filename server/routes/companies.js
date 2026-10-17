@@ -42,4 +42,18 @@ router.delete('/:id', requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
+// Alias repair (lib/aliasEnrichment.js): grounded Korean/English spellings; duplicate roster rows folded into the tagged company.
+let aliasJob = { running: false, result: null };
+router.post('/enrich-aliases', requireAuth, async (req, res) => {
+  if (aliasJob.running) return res.status(409).json({ error: 'already running' });
+  aliasJob = { running: true, result: null };
+  const lib = require('../lib/aliasEnrichment');
+  lib.enrichAliases().then((r) => { aliasJob = { running: false, result: r }; }).catch((e) => { aliasJob = { running: false, result: { error: e.message } }; });
+  res.status(202).json({ started: true });
+});
+router.get('/enrich-aliases/status', requireAuth, (req, res) => res.json(aliasJob));
+router.post('/merge-duplicates', requireAuth, async (req, res) => {
+  res.json(await require('../lib/aliasEnrichment').mergeDuplicateRoster());
+});
+
 module.exports = router;

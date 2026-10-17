@@ -102,6 +102,43 @@ function canonicalizeEntities(records, roster = []) {
   });
 }
 
+// JOINT VENTURES: one physical facility is often reported under the venture AND each of its owners ("Diamond Green
+// Diesel 12억 갤런" next to "Valero Energy 12억 갤런"). Records that state the SAME figure (status, year, unit group,
+// amount) for entities that refer to each other in their own source text (and have compatible sites) are one facility:
+// the entity most associated with the facility (a stated site, else most self-mentions) keeps the row, the others are
+// dropped and remembered as `partners`, so a ranking or a sum never counts the facility twice.
+const firstToken = (name) => String(name || '').toLowerCase().split(/[\s.(]+/).find((w) => w.length >= 3) || String(name || '').toLowerCase();
+function mergeJointVentures(records, textOfSource) {
+  const keyOf = (r) => `${r.status}|${r.year || 0}|${r.group}|${Math.round(r.amount)}`;
+  const groups = new Map();
+  records.forEach((r, i) => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); });
+  const drop = new Set();
+  const partnersOf = new Map();
+  for (const idxs of groups.values()) {
+    const ents = [...new Set(idxs.map((i) => records[i].entity))];
+    if (ents.length < 2) continue;
+    const text = new Map(ents.map((e) => [e, idxs.filter((i) => records[i].entity === e).map((i) => String(textOfSource(records[i]) || '')).join(' ').toLowerCase()]));
+    const sites = new Map(ents.map((e) => [e, new Set(idxs.filter((i) => records[i].entity === e).map((i) => records[i].site || ''))]));
+    const compatible = (a, b) => [...sites.get(a)].some((sa) => [...sites.get(b)].some((sb) => !sa || !sb || sa.toLowerCase() === sb.toLowerCase()));
+    const related = (a, b) => compatible(a, b) && (text.get(a).includes(firstToken(b)) || text.get(b).includes(firstToken(a)));
+    const parent = new Map(ents.map((e) => [e, e]));
+    const find = (e) => (parent.get(e) === e ? e : find(parent.get(e)));
+    for (let x = 0; x < ents.length; x++) for (let y = x + 1; y < ents.length; y++) if (related(ents[x], ents[y])) parent.set(find(ents[x]), find(ents[y]));
+    const comps = new Map();
+    for (const e of ents) { const root = find(e); if (!comps.has(root)) comps.set(root, []); comps.get(root).push(e); }
+    for (const members of comps.values()) {
+      if (members.length < 2) continue;
+      const score = (e) => (idxs.some((i) => records[i].entity === e && records[i].site) ? 1000 : 0) + (text.get(e).split(firstToken(e)).length - 1);
+      const rep = members.slice().sort((a, b) => score(b) - score(a))[0];
+      const others = members.filter((e) => e !== rep);
+      partnersOf.set(rep, [...(partnersOf.get(rep) || []), ...others]);
+      idxs.forEach((i) => { if (others.includes(records[i].entity)) drop.add(i); });
+    }
+  }
+  const merged = records.filter((_, i) => !drop.has(i)).map((r) => (partnersOf.has(r.entity) ? { ...r, partners: [...new Set(partnersOf.get(r.entity))] } : r));
+  return { records: merged, dropped: drop.size };
+}
+
 const WANTS_COMPANIES = /(기업|업체|회사|company|companies|producer|생산자)/i;
 
 function isDatasetRequest(req, question) {
@@ -288,7 +325,7 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     let entry = null;
     if (totals.length) {
       const t = totals[0];
-      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}`, sources: [t.source], country: t.country };
+      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}${t.partners ? ` · 합작 중복 제외: ${t.partners.join(', ')}` : ''}`, sources: [t.source], country: t.country };
     } else if (siteRows.length) {
       const sum = siteRows.reduce((a, r) => a + valueOf(r), 0);
       entry = { entity, value: sum, state: `현재 ${asOfCell(siteRows.sort((a, b) => newerCurrent(b, a))[0])}`, how: `거점 합산 ${siteRows.length}곳 (${siteRows.map((r) => r.site).join(' + ')})`, sources: siteRows.map((r) => r.source), country: siteRows[0].country };
@@ -339,7 +376,7 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   const lines = [
     `| 대상 | 거점·범위 | 상태 | 기준 | 수치 (${unitLabel}) | 원문 표기 | 출처 |`,
     '| --- | --- | --- | --- | --- | --- | --- |',
-    ...sorted.map((r) => `| ${r.entity}${r.country ? ` (${r.country})` : ''} | ${r.site || '전사 합계'} | ${stateOf(r)} | ${asOfCell(r)} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''} | [${r.source}] |`),
+    ...sorted.map((r) => `| ${r.entity}${r.country ? ` (${r.country})` : ''} | ${r.site || '전사 합계'} | ${stateOf(r)} | ${asOfCell(r)} | ${cellOf(r)} | ${r.original}${r.basis !== '직접' ? ` → ${r.basis}` : ''}${r.partners ? ` · 합작 중복 제외: ${r.partners.join(', ')}` : ''} | [${r.source}] |`),
   ];
   for (const name of requiredNames) {
     const key = name.name.toLowerCase();
@@ -382,4 +419,4 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   return { entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };
+module.exports = { mergeJointVentures, WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

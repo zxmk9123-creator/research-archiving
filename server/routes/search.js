@@ -1186,6 +1186,10 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
         if (signal) signal.removeEventListener('abort', onAbort);
       }
     }
+    const textOfSrc = (r) => {
+      const m = r.source <= candidates.length ? candidates[r.source - 1] : extraCandidates[r.source - candidates.length - 1];
+      return m ? materialText(m) : '';
+    };
     // SUBJECT FIT: when the question names a product (SAF, 팜유, ...), a figure counts only if the material it
     // comes from is about that product — crude-refinery or tanker numbers must never enter a SAF capacity table.
     {
@@ -1224,6 +1228,12 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       const present = rosterRows.filter((c) => records.some((r) => c.names.some((n) => n.length >= 3 && (String(r.entity).toLowerCase().includes(n) || n.includes(String(r.entity).toLowerCase())))));
       requiredForBuild = required.filter((rq) => !present.some((c) => subjectScope.sameCompany(c, rq)));
     } catch (_) { /* keep required as is */ }
+    {
+      // one facility reported under a venture and its owners is counted once (see mergeJointVentures)
+      const jv = datasetPipeline.mergeJointVentures(records, textOfSrc);
+      if (jv.dropped) trace.push(`jv_merged ${jv.dropped}`);
+      records = jv.records;
+    }
     records = classificationScope.applyToRecords(records, choices);
     if (focusEntities.length) {
       // "그 업체들만": the follow-up keeps to the companies of the previous table
