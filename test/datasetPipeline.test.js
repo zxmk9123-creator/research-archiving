@@ -224,3 +224,15 @@ test('mergeJointVentures: the same facility under a venture and its owner counts
   const ds = dp2.buildDataset([out.records.find((r) => r.entity === 'Diamond Green Diesel'), { ...base, entity: 'Neste', site: null, source: 3, amount: 1.5e6, group: 'mass', original: '150만 톤', tons: 1.5e6 }, { ...base, entity: 'Chevron', site: null, source: 3, amount: 1e6, group: 'mass', original: '100만 톤', tons: 1e6 }], [], { topN: 3, only: true });
   assert.ok(ds, 'dataset built');
 });
+
+test('mergeJointVentures: the venture (parent recorded) stays, its owner is the dropped partner', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const base = { status: '가동', year: 2025, group: 'volume', amount: 4.5e9, original: '12억 갤런', basis: '직접', site: null };
+  const texts = { 1: 'Valero Energy said Valero renewable diesel from Diamond Green Diesel, a Valero and Darling joint venture, is 1.2 billion gallons. Valero Valero', 2: 'Diamond Green Diesel 합작 법인은 12억 갤런 생산능력' };
+  const out = dp2.mergeJointVentures([
+    { ...base, entity: 'Valero Energy', source: 1 },
+    { ...base, entity: 'Diamond Green Diesel', source: 2, parent: 'Valero' },
+  ], (r) => texts[r.source]);
+  assert.deepEqual(out.records.map((r) => r.entity), ['Diamond Green Diesel']);
+  assert.deepEqual(out.records[0].partners, ['Valero Energy']);
+});

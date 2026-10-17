@@ -10,10 +10,14 @@ const provider = require('./ai/provider');
 const SYSTEM = 'For each company give the other names it is commonly written with in Korean and English news (Korean transliterations, short forms, former names, brand names). Respond with ONLY a JSON array of {"name": string, "aliases": [string]}. Use the exact input name in "name". Only well-known real spellings; an empty list when unsure.';
 
 const escapeLike = (s) => String(s).replace(/[\\%_]/g, (c) => `\\${c}`);
+// ordinary words that are also (part of) company names: never an alias on their own
+const COMMON_WORDS = new Set(['total', 'energy', 'global', 'group', 'international', 'holdings', 'company', 'petroleum', 'refining', 'fuels', 'oil', 'renewable', 'renewables', 'green', 'world', 'national', 'united', 'power', 'bio', 'biofuel', 'biofuels', 'sustainable', 'aviation']);
 const plausible = (a) => {
   const t = String(a || '').trim();
-  if (/[가-힣]/.test(t)) return t.length >= 2 && t.length <= 30;
-  return t.length >= 3 && t.length <= 40 && /[A-Za-z]/.test(t);
+  if (/[가-힣]/.test(t)) return t.length >= 3 && t.length <= 30;
+  // Latin aliases shorter than 5 letters ('Eni', 'Total', 'GAR', 'SOP') match inside other words wherever the roster is
+  // matched by substring, so they are never stored; exact-name matching already folds 'Eni' into 'Eni S.p.A.'.
+  return t.length >= 5 && t.length <= 40 && /[A-Za-z]/.test(t) && !COMMON_WORDS.has(t.toLowerCase());
 };
 const parseReply = (text) => {
   const raw = String(text || '').replace(/^```(?:json)?/i, '').replace(/```\s*$/, '');
@@ -77,4 +81,19 @@ async function mergeDuplicateRoster() {
   return { merged };
 }
 
-module.exports = { enrichAliases, mergeDuplicateRoster, plausible, parseReply, sameCompany };
+// Removes the named aliases (case-insensitive) from the named companies; used to undo weak aliases stored earlier.
+async function pruneAliases(items) {
+  const removed = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || typeof it.company !== 'string' || !Array.isArray(it.aliases)) continue;
+    const drop = it.aliases.map((a) => String(a).toLowerCase());
+    const r = await pool.query(
+      `UPDATE companies SET aliases = ARRAY(SELECT a FROM unnest(aliases) a WHERE lower(a) <> ALL($2::text[])) WHERE name = $1 RETURNING name`,
+      [it.company, drop]
+    );
+    if (r.rowCount) removed.push({ company: it.company, aliases: it.aliases });
+  }
+  return { removed };
+}
+
+module.exports = { pruneAliases, enrichAliases, mergeDuplicateRoster, plausible, parseReply, sameCompany };

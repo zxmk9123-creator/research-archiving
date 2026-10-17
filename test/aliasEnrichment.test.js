@@ -5,6 +5,8 @@ const ae = require('../server/lib/aliasEnrichment');
 test('plausible alias: Korean 2-30 chars, Latin 3-40 chars with a letter; junk rejected', () => {
   assert.equal(ae.plausible('인피니엄'), true);
   assert.equal(ae.plausible('Infinium Energy'), true);
+  for (const weak of ['Eni', 'Total', 'GAR', 'TBL', 'SOP']) assert.equal(ae.plausible(weak), false, weak);
+  assert.equal(ae.plausible('인피'), false);
   assert.equal(ae.plausible('인'), false);
   assert.equal(ae.plausible('AB'), false);
   assert.equal(ae.plausible('12345'), false);

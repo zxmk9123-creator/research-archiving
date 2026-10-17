@@ -52,6 +52,9 @@ router.post('/enrich-aliases', requireAuth, async (req, res) => {
   res.status(202).json({ started: true });
 });
 router.get('/enrich-aliases/status', requireAuth, (req, res) => res.json(aliasJob));
+router.post('/prune-aliases', requireAuth, async (req, res) => {
+  res.json(await require('../lib/aliasEnrichment').pruneAliases(req.body && req.body.items));
+});
 router.post('/merge-duplicates', requireAuth, async (req, res) => {
   res.json(await require('../lib/aliasEnrichment').mergeDuplicateRoster());
 });

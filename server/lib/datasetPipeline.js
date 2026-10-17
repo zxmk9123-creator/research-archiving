@@ -128,7 +128,9 @@ function mergeJointVentures(records, textOfSource) {
     for (const e of ents) { const root = find(e); if (!comps.has(root)) comps.set(root, []); comps.get(root).push(e); }
     for (const members of comps.values()) {
       if (members.length < 2) continue;
-      const score = (e) => (idxs.some((i) => records[i].entity === e && records[i].site) ? 1000 : 0) + (text.get(e).split(firstToken(e)).length - 1);
+      // the operating entity of the facility: a stated site, a recorded parent (it is the subsidiary / venture), a "합작/JV" tag next to its name, then most self-mentions
+      const jvTag = (e) => new RegExp(`${firstToken(e).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]{0,40}(합작|joint venture|\\bJV\\b)`, 'i').test(text.get(e)) ? 300 : 0;
+      const score = (e) => (idxs.some((i) => records[i].entity === e && records[i].site) ? 1000 : 0) + (idxs.some((i) => records[i].entity === e && records[i].parent) ? 500 : 0) + jvTag(e) + (text.get(e).split(firstToken(e)).length - 1);
       const rep = members.slice().sort((a, b) => score(b) - score(a))[0];
       const others = members.filter((e) => e !== rep);
       partnersOf.set(rep, [...(partnersOf.get(rep) || []), ...others]);
