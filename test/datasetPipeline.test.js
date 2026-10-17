@@ -309,3 +309,17 @@ test('mergeJointVentures: amounts within 5% (unit conversion / rounding) are the
   ], (r) => texts[r.source]);
   assert.equal(far.records.length, 2);
 });
+
+test('recordsForQuestion: airlines and CO2-equivalent figures never enter a capacity table', () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const base = { status: '계획', year: 2030, group: 'mass', site: null, source: 1, pubAt: new Date().toISOString() };
+  const recs = [
+    { ...base, entity: 'Delta', amount: 70863, original: '2,340 만 갤런', metric: '생산능력' },
+    { ...base, entity: 'United Airlines', amount: 10, original: '10 만 톤', metric: '생산능력' },
+    { ...base, entity: 'Neste', amount: 100000, original: '100,000 톤', metric: '생산능력' },
+    { ...base, entity: 'Infinium', amount: 212000, original: '212,000 metric tons of CO2-equivalent', metric: '생산능력' },
+  ];
+  const out = dp.recordsForQuestion(recs, '글로벌 SAF 생산능력 도표', null).map((r) => r.entity);
+  assert.deepEqual(out, ['Neste']);
+  assert.equal(dp.recordsForQuestion(recs, 'SAF 탄소 감축 생산능력', null).some((r) => r.entity === 'Infinium'), true);
+});

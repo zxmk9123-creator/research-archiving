@@ -53,6 +53,10 @@ const PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total', 'other']);
 const ENTITY_TYPES = new Set(['기업', '기관', '국가', '기타']);
 const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|EU|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
 const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NAME.test(String(r.entity || '').trim()));
+// Airlines / end buyers are not producers; emission-equivalent figures ("tons of CO2e") are not goods quantities.
+const AIRLINE_NAME = /(airlines?|airways|aviation group|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
+const EMISSION_Q = /(탄소|배출|감축|co2|carbon|emission|ghg)/i;
+const EMISSION_UNIT = /(co2|co₂|carbon dioxide|tco2|이산화탄소|탄소\s*(배출|감축)|ghg)/i;
 function recordsForQuestion(records, question, density = null, { level = 'company' } = {}) {
   const q = String(question || '');
   const historical = freshness.wantsHistorical(q);
@@ -68,6 +72,10 @@ function recordsForQuestion(records, question, density = null, { level = 'compan
       if (wantsCompanies && (wantsCap || wantsOut) && NON_PRODUCER.has(r.role) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       // a company question lists companies: countries and other non-company entities (entity_type) are out
       if (level === 'company' && wantsCompanies && (r.etype === '국가' || r.etype === '기관') && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      if (level === 'company' && (wantsCap || wantsOut) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) {
+        if (r.role === 'consumer' || (!r.role && AIRLINE_NAME.test(String(r.entity || '')))) return false;
+      }
+      if ((wantsCap || wantsOut) && !EMISSION_Q.test(q) && EMISSION_UNIT.test(`${r.original || ''} ${r.metric || ''} ${r.basis || ''}`)) return false;
       if (r.group === 'area') return wantsArea;
       if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
