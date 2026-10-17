@@ -32,3 +32,15 @@ test('normalizeUrl treats tracking/www/fragment/trailing-slash variants as one U
   for (const v of ['https://www.example.com/a/report/', 'https://example.com/a/report?utm_source=x&fbclid=1', 'https://example.com/a/report#top']) assert.equal(normalizeUrl(v), base);
   assert.notEqual(normalizeUrl('https://example.com/a/report?id=2'), base);
 });
+
+test('verify set: fixed queries per weak row, not added to the watchlist', () => {
+  const { VERIFY_COMPANIES } = require('../server/lib/companyProfileCollection');
+  assert.ok(VERIFY_COMPANIES.length >= 8);
+  for (const c of VERIFY_COMPANIES) {
+    assert.equal(c.verify, true);
+    const q = buildQueries(c);
+    assert.ok(q.length >= 1 && q.every((x) => typeof x === 'string' && x.length > 10), c.name);
+    assert.equal(q, c.queries); // no template expansion
+  }
+  assert.ok(VERIFY_COMPANIES.filter((c) => c.noRoster).map((c) => c.name).includes('Renewable Fuels LLC'));
+});

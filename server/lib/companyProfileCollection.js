@@ -42,6 +42,20 @@ const PALM_COMPANIES = [
   { name: 'Sarawak Oil Palms', qname: 'Sarawak Oil Palms Berhad', aliases: ['Sarawak Oil Palms', 'Sarawak Oil Palms Berhad', 'SOPB'], extra: ['Sarawak Oil Palms Berhad planted area mills FFB CPO production'] },
 ];
 
+// Third one-off set: VERIFICATION of the capacity table's weak rows (undated, old or unit-ambiguous figures). Fixed,
+// targeted queries instead of templates; `noRoster` entities are searched but not added to the watchlist.
+const VERIFY_COMPANIES = [
+  { name: 'Phillips 66', verify: true, queries: ['Phillips 66 Rodeo Renewed 2025 renewable fuels capacity barrels per day SAF', 'Phillips 66 Rodeo Renewed sustainable aviation fuel 10,000 barrels per day 2026', 'Phillips 66 Humber SAF co-processing capacity 2025'] },
+  { name: 'TotalEnergies', verify: true, queries: ['TotalEnergies Grandpuits biorefinery SAF capacity 2025 tonnes per year', 'TotalEnergies SAF production capacity 2026 La Mede Oudalle Antwerp', 'TotalEnergies SAF 2030 target 1.5 Mt production capacity operating 2026'] },
+  { name: 'Diamond Green Diesel', verify: true, queries: ['Diamond Green Diesel Port Arthur SAF capacity 2026 million gallons', 'Diamond Green Diesel total renewable diesel capacity 2025 1.2 billion gallons Valero Darling'] },
+  { name: 'Eni S.p.A.', verify: true, queries: ['Enilive biorefining capacity 2025 million tonnes SAF 2026', 'Enilive Gela Venice Livorno biorefinery capacity tonnes per year 2026'] },
+  { name: 'Chevron', verify: true, queries: ['Chevron Geismar renewable diesel capacity 2025 barrels per day', 'Chevron renewable fuels capacity 2026 SAF'] },
+  { name: 'Renewable Fuels LLC', verify: true, noRoster: true, queries: ['Bakersfield Renewable Fuels refinery capacity barrels per day 2025', 'Bakersfield renewable diesel SAF plant capacity million gallons 2026'] },
+  { name: 'PT.ARC', verify: true, noRoster: true, queries: ['포스코인터내셔널 PT ARC 발릭파판 팜오일 정제 SAF 원료 연산 50만톤 2026', 'GS칼텍스 포스코인터내셔널 인도네시아 바이오원료 정제 공장 가동 2026'] },
+  { name: 'SK에너지', verify: true, queries: ['SK에너지 울산 SAF 생산 설비 투자 생산능력 2026', 'SK에너지 지속가능항공유 연간 생산능력 톤 2026'] },
+  { name: '에코세레스', verify: true, queries: ['에코세레스 SAF 생산능력 연산 톤 2026 장자강 조호르'] },
+];
+
 const TEMPLATES = [
   (n) => `${n} sustainable aviation fuel SAF capacity production sites`,
   (n) => `${n} SAF investment expansion plan capex`,
@@ -53,11 +67,13 @@ const TEMPLATES = [
 const status = { running: false, startedAt: null, finishedAt: null, total: 0, done: 0, current: null, totals: { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0 }, failedQueries: 0, perCompany: {} };
 
 function buildQueries(company) {
+  if (company.queries) return company.queries;
   return [...(company.palm ? PALM_TEMPLATES : TEMPLATES).map((t) => t(company.qname || company.name)), ...company.extra];
 }
 
 async function ensureSetup(list = COMPANIES) {
   for (const c of list) {
+    if (c.verify) continue; // verification queries search existing / unlisted names; the watchlist is left alone
     await pool.query(
       `INSERT INTO companies (name, aliases, watched, segment) VALUES ($1, $2, true, $3)
        ON CONFLICT (name) DO UPDATE SET aliases = (SELECT ARRAY(SELECT DISTINCT unnest(companies.aliases || EXCLUDED.aliases))), watched = true, segment = COALESCE(EXCLUDED.segment, companies.segment)`,
@@ -77,7 +93,7 @@ async function ensureSetup(list = COMPANIES) {
 
 async function runCompanyProfileCollection({ only, set } = {}) {
   if (status.running) return { started: false, reason: 'already_running' };
-  const pool_ = set === 'palm' ? PALM_COMPANIES.map((c) => ({ ...c, palm: true })) : COMPANIES;
+  const pool_ = set === 'palm' ? PALM_COMPANIES.map((c) => ({ ...c, palm: true })) : set === 'verify' ? VERIFY_COMPANIES : COMPANIES;
   const companies = pool_.filter((c) => !only || only.includes(c.name));
   Object.assign(status, { running: true, startedAt: new Date().toISOString(), finishedAt: null, done: 0, current: null, failedQueries: 0, perCompany: {}, totals: { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0 } });
   status.total = companies.reduce((a, c) => a + buildQueries(c).length, 0);
@@ -113,4 +129,4 @@ async function runCompanyProfileCollection({ only, set } = {}) {
   return { started: true, total: status.total };
 }
 
-module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, buildQueries };
+module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, VERIFY_COMPANIES, buildQueries };
