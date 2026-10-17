@@ -168,7 +168,7 @@ test('ranking: Top-N companies, one row each (stated total, else site sum, else 
   const req = rc.parseRequest(q);
   assert.equal(req.topN, 3);
   assert.equal(req.tableOnly, true);
-  const r = (entity, amount, extra = {}) => ({ entity, site: null, status: '가동', year: 2025, source: 1, group: 'mass', amount, basis: '직접', original: `${amount} 톤`, tons: amount, metric: '생산능력', etype: '기업', ...extra });
+  const r = (entity, amount, extra = {}) => ({ entity, site: null, status: '가동', year: new Date().getFullYear(), source: 1, group: 'mass', amount, basis: '직접', original: `${amount} 톤`, tons: amount, metric: '생산능력', etype: '기업', ...extra });
   const recs = [
     r('Neste', 1000000, { site: 'Rotterdam' }), r('Neste', 1000000, { site: 'Singapore' }),
     r('Neste', 6800000, { status: '목표', year: 2027 }),
@@ -200,7 +200,7 @@ test('canonicalizeEntities: S.p.A. suffix and generic qualifiers map to the rost
 
 test('mergeJointVentures: the same facility under a venture and its owner counts once; unrelated equal figures stay', () => {
   const dp2 = require('../server/lib/datasetPipeline');
-  const base = { status: '가동', year: 2025, group: 'volume', amount: 4.5e9, original: '12억 갤런', basis: '직접', metric: '생산능력' };
+  const base = { status: '가동', year: new Date().getFullYear(), group: 'volume', amount: 4.5e9, original: '12억 갤런', basis: '직접', metric: '생산능력' };
   const texts = {
     1: 'Diamond Green Diesel, a joint venture of Valero and Darling, runs Port Arthur at 1.2 billion gallons',
     2: 'Valero Energy renewable diesel via Diamond Green Diesel: 1.2 billion gallons',
@@ -250,4 +250,24 @@ test('dedupeSameFacility: one plant under several labels counts once; different 
   assert.equal(dp2.dedupeSameFacility([r('Gela 공장'), r('Gela 공장', { amount: 6e5 }), r('Gela 공장', { status: '계획' })]).records.length, 3);
   // another entity is never merged here
   assert.equal(dp2.dedupeSameFacility([r('Gela 공장'), r('Gela 공장', { entity: 'Eni' })]).records.length, 2);
+});
+
+test('ranking: undated or old "current" figures take no position and are listed apart', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const Y = new Date().getFullYear();
+  const r = (entity, amount, extra = {}) => ({ entity, site: null, status: '가동', year: Y, source: 1, group: 'mass', amount, basis: '직접', original: `${amount} 톤`, tons: amount, metric: '생산능력', etype: '기업', ...extra });
+  const recs = [
+    r('Fresh A', 3e6), r('Fresh B', 2e6),
+    r('NoDate Co', 9e6, { year: null }),                       // undated: no year, no publication date
+    r('Old Co', 8e6, { year: Y - 3 }),                         // dated 3 years ago, no recent report
+    r('Reported Later', 1e6, { year: Y - 3, pubAt: new Date().toISOString().slice(0, 10) }), // old figure year, but reported now
+  ];
+  const ds = dp2.buildDataset(recs, [], { topN: 5, only: true });
+  const main = ds.table.split('\n').slice(2);
+  assert.deepEqual(main.map((l) => l.split('|')[2].trim()), ['Fresh A', 'Fresh B', 'Reported Later']);
+  assert.match(main[2], /· .*발표/); // the report year is shown next to the figure year
+  assert.deepEqual(ds.unsafe.sort(), ['NoDate Co', 'Old Co']);
+  assert.match(ds.markdown, /시점 불명·오래된 값/);
+  assert.match(ds.markdown, /\| NoDate Co .*시점 불명/);
+  assert.match(ds.markdown, /\| Old Co .*오래됨/);
 });

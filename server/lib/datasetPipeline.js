@@ -295,7 +295,25 @@ function chartBasis(records, { unitTons = false, density = null } = {}) {
   return { group, valueIn: (r) => valueIn(r, group) };
 }
 
-const asOfCell = (r) => (r.year ? `${r.year}년` : yearOf(r.pubAt) ? `${yearOf(r.pubAt)}년 발표` : '-');
+const asOfCell = (r) => {
+  const pub = yearOf(r.pubAt);
+  if (r.year && pub && pub > r.year) return `${r.year}년 · ${pub}년 발표`; // a figure for year X, reported later
+  return r.year ? `${r.year}년` : pub ? `${pub}년 발표` : '-';
+};
+
+// How old is the EVIDENCE for a "current" figure: when the source reported it (published), else the end of the year it
+// is dated to; null = undated. A current figure whose evidence is undated or older than MAX_AGE_DAYS is not a safe
+// basis for a ranking position.
+function evidenceTime(r) {
+  const t = pubTime(r);
+  if (t) return t;
+  return r.year ? new Date(r.year, 11, 31).getTime() : null;
+}
+function currentReliability(r, now = Date.now()) {
+  const t = evidenceTime(r);
+  if (t === null) return 'undated';
+  return (now - t) / 86400000 > freshness.MAX_AGE_DAYS ? 'old' : 'ok';
+}
 
 // ---- time and scope ---------------------------------------------------------------
 const yearOf = (d) => { const t = d ? new Date(d) : null; return t && !Number.isNaN(t.getTime()) ? t.getFullYear() : 0; };
@@ -346,10 +364,11 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     let entry = null;
     if (totals.length) {
       const t = totals[0];
-      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}${t.partners ? ` · 합작 중복 제외: ${t.partners.join(', ')}` : ''}`, sources: [t.source], country: t.country };
+      entry = { entity, value: valueOf(t), state: `현재 ${asOfCell(t)}`, how: `전사 공시 · 원문 ${t.original}${t.partners ? ` · 합작 중복 제외: ${t.partners.join(', ')}` : ''}`, sources: [t.source], country: t.country, reliability: currentReliability(t) };
     } else if (siteRows.length) {
       const sum = siteRows.reduce((a, r) => a + valueOf(r), 0);
-      entry = { entity, value: sum, state: `현재 ${asOfCell(siteRows.sort((a, b) => newerCurrent(b, a))[0])}`, how: `거점 합산 ${siteRows.length}곳 (${siteRows.map((r) => r.site).join(' + ')})`, sources: siteRows.map((r) => r.source), country: siteRows[0].country };
+      const rel = siteRows.map((r) => currentReliability(r));
+      entry = { entity, value: sum, state: `현재 ${asOfCell(siteRows.sort((a, b) => newerCurrent(b, a))[0])}`, how: `거점 합산 ${siteRows.length}곳 (${siteRows.map((r) => r.site).join(' + ')})`, sources: siteRows.map((r) => r.source), country: siteRows[0].country, reliability: rel.includes('undated') ? 'undated' : rel.includes('old') ? 'old' : 'ok' };
     } else {
       const fut = recs.filter((r) => isFuture(r, nowYear)).sort((a, b) => furtherFuture(b, a))[0];
       if (!fut) continue;
@@ -358,7 +377,9 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     entries.push(entry);
   }
   entries.sort((a, b) => b.value - a.value);
-  const top = entries.slice(0, topN);
+  // current figures without a safe date are listed apart and take no ranking position
+  const unsafe = entries.filter((e) => e.reliability === 'undated' || e.reliability === 'old');
+  const top = entries.filter((e) => !unsafe.includes(e)).slice(0, topN);
   if (!top.length) return null;
   const metric = (() => {
     const counts = new Map();
@@ -371,8 +392,13 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     '| --- | --- | --- | --- | --- | --- |',
     ...top.map((e, i) => `| ${i + 1} | ${e.entity}${e.country ? ` (${e.country})` : ''} | ${fmtNum(e.value)} | ${e.state} | ${e.how} | ${cite(e)} |`),
   ];
-  const note = `※ 현재(가동) 값 기준이며 현재 값이 없는 기업은 계획·목표 값을 해당 상태로 표기했습니다.${top.length < topN ? ` 자료에서 수치가 확인된 기업은 ${top.length}곳입니다.` : ''}`;
-  return { entities: top.map((e) => e.entity), table: lines.join('\n'), chart: null, charts: [], markdown: `${lines.join('\n')}\n\n${note}`, records: top.length, only: true };
+  const note = `※ 현재(가동) 값 기준이며 현재 값이 없는 기업은 계획·목표 값을 해당 상태로 표기했습니다.${top.length < topN ? ` 기준 시점이 확인되는 기업은 ${top.length}곳입니다.` : ''}`;
+  const sideLines = unsafe.length ? [
+    '', `**참고 — 시점 불명·오래된 값 (순위에서 제외, ${freshness.MAX_AGE_DAYS >= 540 ? '발행 18개월 초과' : '기준 초과'}이거나 날짜 없음)**`, '',
+    `| 기업 | ${metric} (${unitLabel}) | 사유 | 산정 | 출처 |`, '| --- | --- | --- | --- | --- |',
+    ...unsafe.map((e) => `| ${e.entity}${e.country ? ` (${e.country})` : ''} | ${fmtNum(e.value)} | ${e.reliability === 'undated' ? '시점 불명' : '오래됨'} | ${e.how} | ${cite(e)} |`),
+  ] : [];
+  return { entities: top.map((e) => e.entity), table: lines.join('\n'), chart: null, charts: [], markdown: `${lines.join('\n')}\n\n${note}${sideLines.length ? `\n${sideLines.join('\n')}` : ''}`, records: top.length, only: true, unsafe: unsafe.map((e) => e.entity) };
 }
 
 function buildDataset(records, requiredNames = [], { unitTons = false, density = null, nowYear = new Date().getFullYear(), topN = null, only = false } = {}) {
