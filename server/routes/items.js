@@ -67,6 +67,16 @@ router.get('/annual-report-facts', requireAuth, async (req, res) => {
   );
   res.json({ count: rows.length, rows });
 });
+// Read-only view of stored item_facts with their source article (review): ?entity=<name>
+router.get('/facts', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT f.entity, f.site, f.metric, f.status, f.year, f.grp, f.amount, f.original, f.basis, f.entity_type, i.id AS item_id, i.title, i.published_at
+       FROM item_facts f JOIN items i ON i.id = f.item_id
+      WHERE ($1::text IS NULL OR f.entity ILIKE '%' || $1 || '%') ORDER BY f.entity, i.published_at DESC NULLS LAST LIMIT 200`,
+    [req.query.entity || null]
+  );
+  res.json({ count: rows.length, rows });
+});
 router.post('/annual-report-rebuild', requireAuth, async (req, res) => {
   try { res.json(await require('../lib/annualReportIngest').rebuildReportItems()); } catch (err) { res.status(500).json({ error: err.message }); }
 });
