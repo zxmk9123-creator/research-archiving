@@ -29,6 +29,7 @@ async function getClassificationContext() {
 }
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
+const feedstockSupply = require('../lib/feedstockSupply');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
 const itemFacts = require('../lib/itemFacts');
 const pool = require('../db/pool');
@@ -1455,7 +1456,7 @@ async function handleSearch(req, res, signal) {
   const datasetTrace = [];
   let candidates;
   try {
-    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
+    candidates = await retrieveCandidates(`${feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
@@ -1583,7 +1584,8 @@ async function handleSearch(req, res, signal) {
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const supplyNote = feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '';
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
