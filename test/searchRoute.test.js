@@ -1466,3 +1466,15 @@ test('termExpansion: eligibility and alternative filtering', () => {
   assert.equal(te.plausibleAlt('율리시스', '율리시스'), false);
   assert.equal(te.plausibleAlt('x', '율리시스'), false);
 });
+
+test('a participation cell the materials never deny is reworded to "자료에 언급 없음"', async () => {
+  const cands = [{ id: 1, title: '프로젝트 율리시스 투자', summary: '포스코인터내셔널이 투자자로 합류했다.', ai_summary: null }];
+  const raw = '| 기업 | 참여 여부 |\n| --- | --- |\n| 포스코인터내셔널 | 참여 [1] |\n| Neste | 미참여 |\n';
+  const { answer } = await searchRouter.finalizeAnswer(raw, cands, undefined, [], '프로젝트 율리시스에 참여한 기업', null, {});
+  assert.match(answer, /\| Neste \| 자료에 언급 없음 \|/);
+  assert.doesNotMatch(answer, /미참여/);
+  // when a material itself says so, the wording is kept
+  const denied = [{ id: 1, title: 'x', summary: 'Neste는 해당 프로젝트에 참여하지 않는다고 밝혔다.', ai_summary: null }];
+  const kept = await searchRouter.finalizeAnswer(raw, denied, undefined, [], '프로젝트 율리시스에 참여한 기업', null, {});
+  assert.match(kept.answer, /미참여/);
+});

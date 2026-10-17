@@ -1016,7 +1016,7 @@ function requiredCompanies(question, candidates, roster) {
 }
 function buildCoverageBlock(required) {
   if (!required.length) return '';
-  return `\n\n[필수 포함 업체 — 자료가 제공된 업체이므로 표·차트·본문에서 하나도 빠뜨리지 말 것. 해당 항목의 수치가 자료에 없으면 "-" 또는 "미공시"로 표시하고 그 사실을 한 줄로 밝힐 것]\n${required.map((c) => `- ${c.name} (자료 ${c.indices.slice(0, 6).join(', ')})`).join('\n')}`;
+  return `\n\n[필수 포함 업체 — 자료가 제공된 업체이므로 표·차트·본문에서 하나도 빠뜨리지 말 것. 해당 항목의 수치가 자료에 없으면 "-" 또는 "미공시"로 표시하고 그 사실을 한 줄로 밝힐 것. 자료에 언급이 없는 것을 "미참여"·"아님"·"없음"처럼 부정으로 단정하지 말고 "자료에 언급 없음"이라고 쓸 것]\n${required.map((c) => `- ${c.name} (자료 ${c.indices.slice(0, 6).join(', ')})`).join('\n')}`;
 }
 function ensureCompanyCoverage(text, required, candidates) {
   const low = String(text || '').toLowerCase();
@@ -1341,6 +1341,10 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     const citedOnly = extractCitedIndices(only, candidates.length);
     const answerOnly = moveCitationsAfterPunctuation(citedOnly.length ? remapCitationMarkers(only, citedOnly) : only);
     return { answer: answerOnly, sources: (citedOnly.length ? citedOnly.map((i) => candidates[i - 1]) : candidates).map((c) => ({ id: c.id, title: c.title, source: c.source_name || null, published_at: c.published_at })) };
+  }
+  // "not mentioned" is not "did not take part": a participation cell the materials never denied is reworded
+  if (/\|\s*(미참여|불참)\s*\|/.test(modelText) && !candidates.some((c) => /(미참여|불참|참여하지\s*않)/.test(materialText(c)))) {
+    modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
