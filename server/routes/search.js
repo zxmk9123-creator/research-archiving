@@ -413,7 +413,7 @@ function dropNearDuplicates(rows, threshold = 0.7) {
   return kept;
 }
 
-async function retrieveCandidates(question, history, { light = false } = {}) {
+async function retrieveCandidates(question, history, { light = false, trace = null } = {}) {
   const retrievalQuery = resolveRetrievalQuery(question, history);
   const concepts = extractConcepts(retrievalQuery);
   if (!concepts.length) return [];
@@ -482,6 +482,11 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
     params
   );
   const base = selectDiverseCandidates(dropNearDuplicates(rows));
+  if (trace) {
+    trace.push(`concepts ${concepts.map((f, i) => `${f.join('|')}#${docFreqs[i]}`).join(' ; ')}`);
+    trace.push(`pool ${rows.length}: ${rows.slice(0, 30).map((r) => `${r.id}:${Number(r.relevance_score).toFixed(2)}`).join(' ')}`);
+    trace.push(`base ${base.map((r) => r.id).join(',')}`);
+  }
   // P8 Every specific subject gets a seat. In a multi-subject question
   // ("Neste, Eni, Chevron의 ... 비교") the top-ranked rows can all belong to
   // one subject. For each rare (specific) concept that fewer than PER_TARGET
@@ -1428,7 +1433,7 @@ async function handleSearch(req, res, signal) {
   const datasetTrace = [];
   let candidates;
   try {
-    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick });
+    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
