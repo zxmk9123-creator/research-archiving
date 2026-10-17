@@ -54,16 +54,16 @@ test('reviewOne: arbiter archive / publish / low confidence -> archived / publis
   const fetchOff = async () => '';
   try {
     // the arbiter path fetches the page; stub the network by making fetchFullText fail fast (invalid host in tests)
-    const a1 = await ra.reviewOne(hold, { names: [], arbiter: async () => ({ decision: 'archive', confidence: 0.8, reason: '홍보' }) });
+    const a1 = await ra.reviewOne(hold, { names: [], fetcher: async () => 'Plant expansion news. '.repeat(60), arbiter: async () => ({ decision: 'archive', confidence: 0.8, reason: '홍보' }) });
     assert.equal(a1.action, 'archived');
     let redrafts = 0;
-    const a2 = await ra.reviewOne(hold, { names: [], arbiter: async () => ({ decision: 'publish', confidence: 0.9, reason: '구체적 사건' }), redraft: async () => { redrafts++; return { archived: true }; } });
+    const a2 = await ra.reviewOne(hold, { names: [], fetcher: async () => 'Plant expansion news. '.repeat(60), arbiter: async () => ({ decision: 'publish', confidence: 0.9, reason: '구체적 사건' }), redraft: async () => { redrafts++; return { archived: true }; } });
     assert.equal(a2.action, 'published');
     assert.equal(redrafts, 1);
-    const a3 = await ra.reviewOne(hold, { names: [], arbiter: async () => ({ decision: 'publish', confidence: 0.9, reason: '사건' }), redraft: async () => ({ archived: false }) });
+    const a3 = await ra.reviewOne(hold, { names: [], fetcher: async () => 'Plant expansion news. '.repeat(60), arbiter: async () => ({ decision: 'publish', confidence: 0.9, reason: '사건' }), redraft: async () => ({ archived: false }) });
     assert.equal(a3.action, 'human'); // the gates still said no: a person decides
     assert.match(a3.reason, /자동 점검을 통과하지 못했습니다/);
-    const a4 = await ra.reviewOne(hold, { names: [], arbiter: async () => ({ decision: 'archive', confidence: 0.4, reason: '애매' }) });
+    const a4 = await ra.reviewOne(hold, { names: [], fetcher: async () => 'Plant expansion news. '.repeat(60), arbiter: async () => ({ decision: 'archive', confidence: 0.4, reason: '애매' }) });
     assert.equal(a4.action, 'human');
     const archivedUpdate = calls.filter((c) => c.text.includes('UPDATE items SET auto_review')).map((c) => [c.params[1], c.params[3]]);
     assert.deepEqual(archivedUpdate[0], ['archived', 'Archived']);
@@ -82,4 +82,12 @@ test('reviewOne: a failed draft is retried (max 2 attempts) before the arbiter i
     const dry = await ra.reviewOne(failed, { names: [], dryRun: true });
     assert.equal(dry.action, 'retry');
   } finally { restore(); }
+});
+
+test('reviewOne: paywall / empty body goes to human, never archived', async () => {
+  const hold = { id: 9, title: 'Repsol targets 400kt of SAF', status: 'Draft', ai_eligible: true, reviewer_eligible: null };
+  const r = await ra.reviewOne(hold, { names: [], dryRun: true, fetcher: async () => 'Subscribe to read the full article. Sign in.', arbiter: async () => { throw new Error('no model call'); } });
+  assert.equal(r.action, 'human');
+  const rej = await ra.reviewOne({ id: 10, title: 'x', status: 'Draft', ai_eligible: false, ai_qa_decision: 'REJECT', ai_eligibility_reason: '본문이 메뉴·안내 문구뿐이라 판단 불가' }, { names: [], dryRun: true });
+  assert.equal(rej.action, 'human');
 });

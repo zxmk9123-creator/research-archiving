@@ -22,7 +22,7 @@ const limitArbiter = createLimiter(1, 3000);
 const ARBITER_SYSTEM = `You are the second reviewer of an oils & fats market-intelligence archive (edible oils, palm/soy/rapeseed/sunflower, biofuels, SAF, feedstocks, trade, policy, plants and companies in that field).
 An automatic first filter already rated the item below; decide what finally happens to it. Respond with STRICT JSON ONLY: {"decision": "publish"|"archive"|"human", "confidence": number between 0 and 1, "reason": "one concise Korean sentence"}.
 - publish: it reports a concrete development (event, transaction, policy, plant, capacity, market move) with a real implication for the oils/fats/biofuel field, and the text you were given is enough to summarise it faithfully.
-- archive: off-scope, a promotional / generic company or product page, a conference or webinar notice, a social-media or forum post, a standing newsletter / aggregator with nothing new, a duplicate or repost, a bare price ticker, stale news presented as current, or a page whose text is only cookie / subscription / error boilerplate.
+- archive: off-scope, a promotional / generic company or product page, a conference or webinar notice, a social-media or forum post, a standing newsletter / aggregator with nothing new, a duplicate or repost, a bare price ticker, stale news presented as current, or a page whose text is only cookie / subscription / error boilerplate (never reached: such pages go to human before this step).
 - human: ONLY when the item looks genuinely important for the field (a named major company, a policy, a large figure) but the supplied text is too thin or contradictory for you to be confident either way. Do not use human for ordinary low-value items.
 Be decisive: most items are clearly one or the other.`;
 
@@ -39,6 +39,16 @@ async function getWatchNames() {
 function looksValuable(it, names) {
   const text = `${it.title || ''} ${it.ai_summary || it.summary || ''}`.toLowerCase();
   return /\d/.test(text) && names.some((n) => text.includes(n));
+}
+
+// Text that is only paywall / subscription / cookie / error boilerplate says nothing about the article: never archive on it.
+const WALL = /(subscribe|subscription|sign[ -]?in|log ?in|register|paywall|cookie|javascript|enable notifications|access denied|403|captcha|구독|로그인|회원가입|페이월|알림 설정|본문.{0,12}(없|제공되지|확인할 수 없)|메뉴|내비게이션)/i;
+function isWalled(text) {
+  const t = String(text || '').trim();
+  return t.length < 400 || WALL.test(t.slice(0, 1500)) && t.length < 2500;
+}
+function rejectReasonWalled(it) {
+  return /(paywall|페이월|구독|boilerplate|본문.{0,12}(없|제공되지|확인할 수 없)|메뉴|내비게이션|바이너리|깨진)/i.test(it.ai_eligibility_reason || it.ai_qa_reason || '');
 }
 
 async function fetchFullText(it) {
@@ -90,9 +100,12 @@ async function setOutcome(id, outcome, reason, { status = null } = {}) {
 }
 
 // One item -> { id, action, reason }; writes unless dryRun.
-async function reviewOne(it, { dryRun = false, names = [], arbiter = null, redraft = null } = {}) {
+async function reviewOne(it, { dryRun = false, names = [], arbiter = null, redraft = null, fetcher = null } = {}) {
   const write = async (outcome, reason, opts) => { if (!dryRun) await setOutcome(it.id, outcome, reason, opts); return { id: it.id, title: it.title, action: outcome, reason }; };
 
+  if (isClearReject(it) && !looksValuable(it, names) && rejectReasonWalled(it)) {
+    return write('human', '1차 부적합 사유가 본문 수집 실패(페이월·메뉴·오류 문구)라 보관하지 않고 사람 검수로 보냄', {});
+  }
   if (isClearReject(it) && !looksValuable(it, names)) {
     return write('archived', '1차 적합 판정과 발행 점검이 모두 비적합 — 자동 보관', { status: 'Archived' });
   }
@@ -106,7 +119,8 @@ async function reviewOne(it, { dryRun = false, names = [], arbiter = null, redra
     return { id: it.id, title: it.title, action: 'retry', reason: '재작성 후 재판정 대기' };
   }
 
-  const fullText = await fetchFullText(it);
+  const fullText = await (fetcher || fetchFullText)(it);
+  if (isWalled(fullText)) return write('human', '본문을 가져오지 못했거나 페이월·구독 안내뿐이라 사람 검수로 보냄', {});
   const verdict = await (arbiter || arbitrate)(it, fullText);
   if (verdict.decision === 'archive' && verdict.confidence >= ARCHIVE_MIN_CONFIDENCE) {
     return write('archived', `AI 2차 판정: 보관 (${verdict.confidence.toFixed(2)}) — ${verdict.reason}`, { status: 'Archived' });
