@@ -1516,7 +1516,7 @@ async function handleSearch(req, res, signal) {
   const intent = classifyIntent(question, roster);
   const subjectQ = subjectScope.forQuestion(question);
   const subjectSplit = subjectQ ? subjectScope.splitRoster(roster, subjectQ) : null;
-  const required = quick ? [] : requiredCompanies(question, candidates, subjectSplit ? subjectSplit.allowed : roster);
+  const required = quick || feedstockSupply.isFeedstockSupplyQuestion(question) ? [] : requiredCompanies(question, candidates, subjectSplit ? subjectSplit.allowed : roster);
   const subjectBlock = subjectSplit
     ? `\n\n[대상 업체 한정 — ${subjectQ.label}] 표·차트·목록의 항목으로 쓸 수 있는 업체는 이 질문의 주제(${subjectQ.label})에 해당하는 업체뿐이다${subjectSplit.allowed.length ? `(관리 대상: ${subjectSplit.allowed.map((c) => c.name).join(', ')} 및 자료가 이 주제의 생산·정제 업체임을 직접 밝힌 업체)` : ''}. 팜유를 원료로 쓰는 바이오연료·재생디젤·SAF·정유 업체, 그리고 주제와 무관한 업체는 항목으로 올리지 않는다. 해당 업체의 자료가 없으면 "미확보"로 밝힌다.`
     : '';
