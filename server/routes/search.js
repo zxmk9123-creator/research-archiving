@@ -34,7 +34,6 @@ const pool = require('../db/pool');
 // provider.callProviderWithFallback without a real network call, the same
 // way pool.query is swapped out below.
 const provider = require('../lib/ai/provider');
-const { createLimiter } = require('../lib/ai/concurrencyLimiter');
 
 const router = express.Router();
 
@@ -1354,19 +1353,18 @@ function wantsStream(req) {
   return (req.get('accept') || '').includes('text/event-stream');
 }
 
-const searchLimiter = createLimiter(2, 0, 4);
+// No cap on simultaneous searches: the tool is used by a whole team at once. (Provider-side rate limits are
+// handled per call by the stall retry / hedging in lib/ai/provider.js, not by queueing users here.)
 router.post('/', (req, res) => {
   const controller = new AbortController();
   const onClose = () => {
     if (!res.writableEnded) controller.abort(Object.assign(new Error('client disconnected'), { name: 'AbortError' }));
   };
   res.once('close', onClose);
-  searchLimiter((signal) => handleSearch(req, res, signal), controller.signal)
+  Promise.resolve()
+    .then(() => handleSearch(req, res, controller.signal))
     .catch((err) => {
       if (controller.signal.aborted || res.destroyed || res.writableEnded) return;
-      if (err.code === 'LIMITER_QUEUE_FULL') {
-        return res.status(503).set('Retry-After', '2').json({ error: '검색 요청이 많습니다. 잠시 후 다시 시도해 주세요.' });
-      }
       console.error('ai-search request failed:', err.message);
       return res.status(500).json({ error: '검색 중 오류가 발생했습니다.' });
     })

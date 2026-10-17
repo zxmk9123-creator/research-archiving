@@ -1407,3 +1407,26 @@ test('debug trace is returned only to an authenticated admin session', async () 
     restoreProvider();
   }
 });
+
+test('search has no concurrency cap: many simultaneous requests are all answered (none queued or rejected)', async () => {
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
+  let active = 0;
+  let peak = 0;
+  const restoreProvider = mockProvider(async () => {
+    active++; peak = Math.max(peak, active);
+    await new Promise((r) => setTimeout(r, 60));
+    active--;
+    return { text: '답변 [1]', provider: 'p' };
+  });
+  try {
+    await withServer(async (base) => {
+      const post = (q) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: q }) });
+      const rs = await Promise.all(Array.from({ length: 12 }, (_, i) => post(`팜유 가격 이유 ${i}`)));
+      assert.ok(rs.every((r) => r.status === 200), rs.map((r) => r.status).join(','));
+      assert.ok(peak > 4, `peak concurrency was ${peak}`);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
