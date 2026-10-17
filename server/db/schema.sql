@@ -638,6 +638,14 @@ CREATE TABLE IF NOT EXISTS term_aliases (
 
 -- Uncertainty-triggered verification routine (lib/verificationRoutine.js): an answer that had to set an entity's
 -- figure aside (undated / old / unconfirmed) queues it here; a scheduled routine collects fresh sources for it.
+-- Review autopilot (lib/reviewAutopilot.js): the second, automatic judgement over Draft items the first filter already
+-- rated; only 'human' items stay for a person. 'archived' items are status = 'Archived' (restorable), never deleted.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review TEXT CHECK (auto_review IN ('archived','published','retry','human'));
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_reason TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_at TIMESTAMPTZ;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS items_auto_review_pending ON items (status, auto_review);
+
 CREATE TABLE IF NOT EXISTS verification_queue (
   id SERIAL PRIMARY KEY,
   entity_key TEXT NOT NULL,

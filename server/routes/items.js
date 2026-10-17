@@ -77,6 +77,21 @@ router.get('/facts', requireAuth, async (req, res) => {
   );
   res.json({ count: rows.length, rows });
 });
+// Review autopilot (lib/reviewAutopilot.js): the scheduler runs it by itself; these are for operators.
+router.post('/auto-review/run', requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isSafeInteger(n)).slice(0, 200) : null;
+  res.json(await require('../lib/reviewAutopilot').runAutopilot({ dryRun: b.dryRun === true, aiBudget: Math.min(Number(b.aiBudget) || 8, 40), ids }));
+});
+router.get('/auto-review/status', requireAuth, async (req, res) => {
+  res.json(await require('../lib/reviewAutopilot').getStatus());
+});
+router.post('/:id/restore', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id)) return res.status(400).json({ error: 'invalid id' });
+  const ok = await require('../lib/reviewAutopilot').restore(id);
+  res.status(ok ? 200 : 404).json({ ok });
+});
 router.post('/backfill-published-dates', requireAuth, async (req, res) => {
   res.json(await require('../lib/publishedDates').backfillPublishedDates());
 });

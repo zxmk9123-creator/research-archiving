@@ -3250,6 +3250,11 @@ async function renderReview() {
             <div class="verdict-badge ${verdictClass}">${verdictLabel}</div>
             <p class="review-body-text">${item.ai_eligibility_reason || ''}</p>
           </div>
+          ${item.auto_review === 'human' ? `
+          <div class="review-section gate-hold-notice">
+            <span class="review-subhead">자동 검수가 사람에게 넘긴 자료</span>
+            <p class="review-body-text">${escapeHtml(item.auto_review_reason || 'AI 2차 판정이 확신하지 못했습니다.')}</p>
+          </div>` : ''}
           ${item.gate_hold_reason ? `
           <div class="review-section gate-hold-notice">
             <span class="review-subhead">자동 발행 보류됨</span>

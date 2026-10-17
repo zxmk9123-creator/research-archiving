@@ -109,6 +109,14 @@ setInterval(() => {
   verificationRoutine.runQueue().catch((err) => console.error('verification routine failed', err));
 }, VERIFICATION_TICK_MS);
 
+// Review autopilot: the second, automatic judgement over Draft items (see lib/reviewAutopilot.js). Clear rejects are
+// archived at once; a few ambiguous ones per tick go to the AI arbiter (AUTO_REVIEW=off disables).
+const reviewAutopilot = require('./lib/reviewAutopilot');
+setTimeout(() => reviewAutopilot.runAutopilot().catch((err) => console.error('review autopilot failed', err)), 3 * 60 * 1000);
+setInterval(() => {
+  reviewAutopilot.runAutopilot().catch((err) => console.error('review autopilot failed', err));
+}, 10 * 60 * 1000);
+
 // Recovers Review-tab items stuck forever at ai_status='pending' — see
 // requeueStalledPendingDrafts()'s own comment for the full root cause
 // (a redeploy killing the process mid-generateAiDraftForItem call, with
