@@ -14,6 +14,6 @@ function retrievalHint(q) {
   return isFeedstockSupplyQuestion(q) ? `${q} UCO supply feedstock supplier collector trading partnership used cooking oil` : q;
 }
 
-const PROMPT_NOTE = '\n\n[질의 유형: 원료 공급망(수거·집하·트레이딩)] 질문자가 찾는 것은 원료를 모아 공급하거나 거래하는 후방산업 기업이다. 그 원료를 사용하는 생산 기업(SAF·HVO·재생디젤 공장)을 이 질문의 답으로 나열하지 않는다. 자료에 원료 공급·수거·트레이딩 기업이 있으면(예: UCO 공급 계약·파트너십의 공급자 쪽) 그 기업만 근거와 함께 정리하고, 없으면 없다고만 말하며 어떤 역할의 기업을 찾는지 되묻는다.';
+const PROMPT_NOTE = '\n\n[질의 유형: 원료 공급망(수거·집하·트레이딩)] 질문자가 찾는 것은 원료를 모아 공급하거나 거래하는 후방산업 기업이다. 그 원료를 사용하는 생산 기업(SAF·HVO·재생디젤 공장; 예: 에코세레스/EcoCeres, Neste, Cepsa, Eni, Diamond Green Diesel)은 원료를 직접 일부 조달하더라도 이 질문의 답으로 나열하지 않는다. 자료에 원료 공급·수거·트레이딩 기업이 있으면(예: UCO 공급 계약·파트너십의 공급자 쪽) 그 기업만 근거와 함께 정리하고, 없으면 없다고만 말하며 어떤 역할의 기업을 찾는지 되묻는다.';
 
 module.exports = { isFeedstockSupplyQuestion, retrievalHint, PROMPT_NOTE };
