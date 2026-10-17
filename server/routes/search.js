@@ -8,6 +8,22 @@ const datasetPipeline = require('../lib/datasetPipeline');
 const freshness = require('../lib/freshness');
 const subjectScope = require('../lib/subjectScope');
 const annualRecords = require('../lib/annualReportRecords');
+const classificationScope = require('../lib/classificationScope');
+
+// DB classifications offered on the classification card (sectors with article counts, entity types), cached 10 min.
+let classificationCtxCache = { at: 0, value: null };
+async function getClassificationContext() {
+  if (classificationCtxCache.value && Date.now() - classificationCtxCache.at < 10 * 60 * 1000) return classificationCtxCache.value;
+  const value = { sectors: [], entityTypes: [] };
+  try {
+    const s = await pool.query(`SELECT sec.name, COUNT(DISTINCT i.id)::int AS count FROM sectors sec JOIN item_sectors isec ON isec.sector_id = sec.id JOIN items i ON i.id = isec.item_id AND i.status = 'Published' GROUP BY sec.name ORDER BY count DESC LIMIT 12`);
+    value.sectors = s.rows;
+    const e = await pool.query(`SELECT entity_type AS type, COUNT(DISTINCT lower(entity))::int AS count FROM item_facts WHERE entity_type IS NOT NULL GROUP BY entity_type`);
+    value.entityTypes = e.rows;
+  } catch (_) { /* card still works without the counts */ }
+  classificationCtxCache = { at: Date.now(), value };
+  return value;
+}
 const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
@@ -1086,7 +1102,7 @@ async function enrichChartBlocks(text, candidates = [], question = '') {
 // Quantitative visualization requests: build the verified dataset (table + chart)
 // in code (see lib/datasetPipeline.js). Null on any failure -> normal generation.
 const DATASET_TIMEOUT_MS = 75000;
-async function tryBuildDataset(question, candidates, required, signal, trace = []) {
+async function tryBuildDataset(question, candidates, required, signal, trace = [], choices = null) {
   const req = requestCompliance.parseRequest(question);
   if (!datasetPipeline.isDatasetRequest(req, question)) { trace.push('not_dataset_request'); return null; }
   try {
@@ -1163,7 +1179,8 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
     // SUBJECT FIT: when the question names a product (SAF, 팜유, ...), a figure counts only if the material it
     // comes from is about that product — crude-refinery or tanker numbers must never enter a SAF capacity table.
     {
-      const patterns = Object.values(SECTOR_KEYWORD_PATTERNS).filter((re) => re.test(question));
+      const chosen = choices && choices.subject ? (SECTOR_KEYWORD_PATTERNS[choices.subject] || new RegExp(choices.subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')) : null;
+      const patterns = chosen ? [chosen] : Object.values(SECTOR_KEYWORD_PATTERNS).filter((re) => re.test(question));
       if (patterns.length) {
         const textOfSource = (r) => {
           const m = r.source <= candidates.length ? candidates[r.source - 1] : extraCandidates[r.source - candidates.length - 1];
@@ -1179,7 +1196,7 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       const rosterDs = await getRoster();
       records = datasetPipeline.canonicalizeEntities(records, rosterDs);
       // a company question lists COMPANIES: only entities typed 기업 (entity_type) or known roster companies stay
-      if (datasetPipeline.WANTS_COMPANIES.test(question)) {
+      if (datasetPipeline.WANTS_COMPANIES.test(question) && !(choices && choices.kind === 'all')) {
         const inRoster = (e) => rosterDs.some((c) => c.names.some((n) => n.length >= 3 && String(e).toLowerCase().includes(n)));
         const before = records.length;
         records = records.filter((r) => r.etype === '기업' || inRoster(r.entity));
@@ -1197,8 +1214,9 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       const present = rosterRows.filter((c) => records.some((r) => c.names.some((n) => n.length >= 3 && (String(r.entity).toLowerCase().includes(n) || n.includes(String(r.entity).toLowerCase())))));
       requiredForBuild = required.filter((rq) => !present.some((c) => subjectScope.sameCompany(c, rq)));
     } catch (_) { /* keep required as is */ }
+    records = classificationScope.applyToRecords(records, choices);
     trace.push(`before_build records=${records.length} entities=${[...new Set(records.map((r) => r.entity))].join(',')}`);
-    const dataset = datasetPipeline.buildDataset(records, requiredForBuild, { unitTons: req.unitTons, density, topN: req.tableOnly ? req.topN : null, only: req.tableOnly });
+    const dataset = datasetPipeline.buildDataset(records, requiredForBuild, { unitTons: req.unitTons, density, topN: req.tableOnly && !(choices && choices.unit === 'site') ? req.topN : null, only: req.tableOnly && !(choices && choices.unit === 'site') });
     trace.push(dataset ? 'built' : 'build_returned_null');
     if (dataset) {
       dataset.extraCandidates = extraCandidates;
@@ -1353,12 +1371,13 @@ async function handleSearch(req, res, signal) {
   const fingerprint = questionFingerprint(question);
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
-  const confirmed = scope.confirmed === true;
+  const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
+  const confirmed = scope.confirmed === true || classification !== null;
   const quick = confirmed && scope.mode === 'quick';
 
   let candidates;
   try {
-    candidates = await retrieveCandidates(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)), req.body.history, { light: quick });
+    candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${classification && classification.subject ? ` ${classification.subject}` : ''}`, req.body.history, { light: quick });
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
@@ -1421,7 +1440,7 @@ async function handleSearch(req, res, signal) {
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
-  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, quick ? 'quick' : 'full');
+  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${classification ? JSON.stringify(classification) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
     await recordSearchTelemetry({
@@ -1436,6 +1455,16 @@ async function handleSearch(req, res, signal) {
   }
   // Heavy requests are confirmed with the user before any AI work starts.
   if (!confirmed) {
+    // Broad request with open dimensions (sector / owner unit / status / entity type): ask which DB classification is meant.
+    try {
+      const ambiguity = classificationScope.detectAmbiguity(question, {
+        ...(await getClassificationContext()), intentType: intent.type, req: requestCompliance.parseRequest(question),
+        isDataset: datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question),
+      });
+      if (ambiguity) return res.json({ needsConfirmation: true, plan: ambiguity });
+    } catch (err) { console.error('ai-search classification card failed:', err.message); }
+  }
+  if (!confirmed) {
     const materialsChars = buildMaterialsBlock(candidates).length;
     let pendingExtractions = null;
     try { pendingExtractions = await itemFacts.countPendingExtraction(candidates); } catch (_) { /* unknown -> treated as heavy */ }
@@ -1449,7 +1478,7 @@ async function handleSearch(req, res, signal) {
     if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
   }
   const datasetTrace = [];
-  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace);
+  const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, classification);
   datasetPromise.catch(() => {});
   const onlyBlock = requestCompliance.parseRequest(question).tableOnly
     ? '\n\n[출력 형식: 사용자가 도표(표)만 요청했다. 표 하나와 한 줄 주석 외에는 쓰지 않는다. 해설·배경·전략·부록·추가 업체 목록은 쓰지 않는다.]'
@@ -1465,7 +1494,7 @@ async function handleSearch(req, res, signal) {
     : intent.type === 'peers'
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(classification)}`;
 
   if (!streaming) {
     let text;

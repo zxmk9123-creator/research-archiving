@@ -1414,7 +1414,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
       if (body.needsConfirmation && body.plan) {
         // Heavy request: nothing has been started yet — show the scope card first.
         stopAiSearchStatus(moduleEl);
-        bodyEl.innerHTML = aiScopeCardHtml(body.plan);
+        bodyEl.innerHTML = body.plan.kind === 'classification' ? aiClassificationCardHtml(body.plan) : aiScopeCardHtml(body.plan);
         return;
       }
       finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources);
@@ -1517,6 +1517,34 @@ function aiScopeCardHtml(plan) {
   </div>`;
 }
 
+// Classification card: which slice of the DB's classifications a broad request means (sector, owner unit,
+// status, entity type). One radio group per OPEN dimension; the picks go back as scope.classification.
+function aiClassificationCardHtml(plan) {
+  const groups = (plan.groups || []).map((g) => `
+    <div class="ai-scope-block" data-cls-group="${escapeHtml(g.id)}">
+      <div class="ai-scope-label">${escapeHtml(g.label)}</div>
+      ${g.hint ? `<div class="ai-scope-targets">${escapeHtml(g.hint)}</div>` : ''}
+      <div class="ai-scope-options">${(g.options || []).map((o) => `
+        <label class="ai-scope-option">
+          <input type="radio" name="ai-cls-${escapeHtml(g.id)}" value="${escapeHtml(o.id)}"${o.id === g.default ? ' checked' : ''}>
+          <span class="ai-scope-option-body">
+            <span class="ai-scope-option-head">${escapeHtml(o.label)}${o.id === g.default ? '<em>추천</em>' : ''}</span>
+            ${o.detail ? `<span class="ai-scope-option-detail">${escapeHtml(o.detail)}</span>` : ''}
+          </span>
+        </label>`).join('')}</div>
+    </div>`).join('');
+  return `<div class="ai-scope-card" role="group" aria-label="분류 기준 확인">
+    <div class="ai-scope-title">${escapeHtml(plan.title || '어떤 분류의 데이터를 원하시나요?')}</div>
+    <p class="ai-scope-reason">${escapeHtml(plan.reason || '')}</p>
+    ${groups}
+    <div class="ai-scope-actions">
+      <button type="button" class="btn ai-cls-start">이 기준으로 시작</button>
+      <button type="button" class="btn-text ai-scope-cancel">질문 수정</button>
+    </div>
+    ${(plan.notes || []).map((n) => `<p class="ai-scope-note">${escapeHtml(n)}</p>`).join('')}
+  </div>`;
+}
+
 function aiSearchErrorHtml(message) {
   return `<p class="meta">${escapeHtml(message)}</p>
     <button type="button" class="btn ai-search-retry-btn">재검색</button>`;
@@ -1546,6 +1574,17 @@ function bindAiSearchForm() {
       const turnEl = startBtn.closest('.ai-search-turn');
       const picked = turnEl.querySelector('input[name="ai-scope-mode"]:checked');
       runAiSearchTurn(turnEl, turnEl.dataset.question, submitBtn, { confirmed: true, mode: picked ? picked.value : 'full' });
+      return;
+    }
+    const clsBtn = e.target.closest('.ai-cls-start');
+    if (clsBtn && !submitBtn.disabled) {
+      const turnEl = clsBtn.closest('.ai-search-turn');
+      const classification = {};
+      turnEl.querySelectorAll('[data-cls-group]').forEach((g) => {
+        const picked = g.querySelector('input[type="radio"]:checked');
+        if (picked) classification[g.dataset.clsGroup] = picked.value;
+      });
+      runAiSearchTurn(turnEl, turnEl.dataset.question, submitBtn, { confirmed: true, mode: 'full', classification });
       return;
     }
     const cancelBtn = e.target.closest('.ai-scope-cancel');

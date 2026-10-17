@@ -1069,7 +1069,11 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
   try {
     await withServer(async (base) => {
       const post = (body) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
-      const card = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
+      const cls = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
+      assert.equal(cls.needsConfirmation, true);
+      assert.equal(cls.plan.kind, 'classification'); // broad + owner/status open -> the classification card comes first
+      assert.deepEqual(cls.plan.groups.map((g) => g.id), ['unit', 'status']);
+      const card = await post({ question: '현재 가동 중인 SAF 업체별 생산능력을 그래프로 정리해줘' });
       assert.equal(card.needsConfirmation, true);
       assert.equal(providerCalls, 0);
       assert.deepEqual(card.plan.options.map((o) => o.id), ['quick', 'full']);
@@ -1077,7 +1081,7 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
       for (const o of card.plan.options) assert.ok(o.tokens > 0 && o.aiCalls && o.seconds && o.tokensText);
       assert.ok(card.plan.options[0].tokens < card.plan.options[1].tokens || card.plan.options[0].aiCalls === '1회');
       // confirmed: the work runs
-      const done = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘', scope: { confirmed: true, mode: 'full' } });
+      const done = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘', scope: { confirmed: true, mode: 'full', classification: { unit: 'operator', status: 'current' } } });
       assert.ok(done.answer);
       assert.ok(providerCalls > 0);
       // an ordinary question never shows a card
@@ -1342,4 +1346,22 @@ test('enrichChartBlocks leaves a code-built dataset chart untouched', async () =
   const text = `\`\`\`chart\n${JSON.stringify(chart)}\n\`\`\``;
   const out = await searchRouter.enrichChartBlocks(text, [{ title: 'KLK', summary: 'KLK produced 1,362,787 mt CPO' }], '');
   assert.equal(out, text);
+});
+
+test('classification card: only open dimensions are asked, narrow requests get none, answers are sanitized and enforced', () => {
+  const cs = require('../server/lib/classificationScope');
+  const ctx = { sectors: [{ name: 'SAF', count: 300 }], entityTypes: [{ type: '기업', count: 100 }], isDataset: true, intentType: 'collective' };
+  const card = cs.detectAmbiguity('글로벌 SAF 플랜트 Capacity 기준 Top10 기업의 생산능력만 도표로', { ...ctx, req: { topN: 10 } });
+  assert.deepEqual(card.groups.map((g) => g.id), ['unit', 'status', 'kind']);
+  assert.equal(cs.detectAmbiguity('Neste 업체에 대해 알려줘', { ...ctx, intentType: 'entity', req: {} }), null);
+  assert.equal(cs.detectAmbiguity('현재 가동 중인 SAF 업체별 생산능력 표', { ...ctx, req: {} }), null);
+  assert.deepEqual(cs.sanitizeChoices({ unit: 'owner', status: 'bogus', subject: 'SAF', x: 1 }), { unit: 'owner', subject: 'SAF' });
+  const recs = [
+    { entity: 'DGD', parent: 'Valero', status: '가동', etype: '기업', site: 'Port Arthur' },
+    { entity: 'IATA', status: '가동', etype: '기관', site: null },
+    { entity: 'Neste', status: '계획', etype: '기업', site: null },
+  ];
+  assert.deepEqual(cs.applyToRecords(recs, { status: 'current', kind: 'company', unit: 'owner' }).map((r) => r.entity), ['Valero']);
+  assert.deepEqual(cs.applyToRecords(recs, { status: 'plan' }).map((r) => r.entity), ['Neste']);
+  assert.deepEqual(cs.applyToRecords(recs, { unit: 'site' }).map((r) => r.entity), ['DGD']);
 });
