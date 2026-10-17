@@ -627,6 +627,15 @@ CREATE TABLE IF NOT EXISTS annual_report_facts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS annual_report_facts_dedupe ON annual_report_facts (entity, COALESCE(fiscal_year, 0), COALESCE(segment, ''), COALESCE(scope, ''), COALESCE(location, ''), metric, COALESCE(definition, ''), source_url);
 
+-- Cross-script spellings of rare search terms (Korean <-> English), learned once per term so a Korean question finds
+-- English-only sources ("율리시스" -> "Ulysses"). alt = '' records "looked up, nothing to add".
+CREATE TABLE IF NOT EXISTS term_aliases (
+  term TEXT NOT NULL,
+  alt TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (term, alt)
+);
+
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,

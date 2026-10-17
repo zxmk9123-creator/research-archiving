@@ -9,6 +9,7 @@ const freshness = require('../lib/freshness');
 const subjectScope = require('../lib/subjectScope');
 const annualRecords = require('../lib/annualReportRecords');
 const classificationScope = require('../lib/classificationScope');
+const termExpansion = require('../lib/termExpansion');
 const { isAuthenticated } = require('../lib/auth');
 
 // DB classifications offered on the classification card (sectors with article counts, entity types), cached 10 min.
@@ -434,6 +435,22 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
   // corporate prefix, an ordinary connector word), without needing a
   // hand-maintained stopword list for either language.
   const docFreqs = await Promise.all(concepts.map(conceptDocFrequency));
+  // RARE terms (few archive hits) get their other-script spelling as an extra form of the same concept
+  // ("율리시스" -> "ulysses"); a spelling that is itself a common word is discarded.
+  try {
+    const rare = concepts.map((forms, i) => ({ forms, i })).filter(({ forms, i }) => docFreqs[i] <= 3 && forms[0].length >= 3);
+    if (rare.length) {
+      const expanded = await termExpansion.expandTerms(rare.map((r) => r.forms[0]));
+      for (const { forms, i } of rare) {
+        for (const alt of expanded.get(forms[0].toLowerCase()) || []) {
+          if (forms.some((f) => f.toLowerCase() === alt.toLowerCase())) continue;
+          if (await conceptDocFrequency([alt]) > 40) continue;
+          forms.push(alt);
+        }
+        docFreqs[i] = await conceptDocFrequency(forms);
+      }
+    }
+  } catch (err) { console.error('ai-search term expansion failed:', err.message); }
   const weights = docFreqs.map((cnt) => 1 / Math.log2(cnt + 2));
 
   const params = [];
@@ -1414,7 +1431,10 @@ async function handleSearch(req, res, signal) {
     {
       const rosterForFresh = await getRoster();
       const intentForFresh = classifyIntent(question, rosterForFresh);
-      if ((intentForFresh.type !== 'general' || datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question)) && !freshness.wantsHistorical(question)) {
+      // Old articles are dropped only where the answer rests on CURRENT figures (a table/ranking/capacity question).
+      // A relationship or event ("who joined project X") does not expire: those materials stay, dated in the prompt.
+      const quantityQuestion = datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) || /(capa|capacity|생산\s*능력|생산량|용량|물량|면적|규모)/i.test(question);
+      if (quantityQuestion && intentForFresh.type !== 'entity' && !freshness.wantsHistorical(question)) {
         const fresh = candidates.filter((c) => !freshness.candidateOutdated(c));
         if (fresh.length !== candidates.length) console.log(`ai-search freshness dropped=${candidates.length - fresh.length} kept=${fresh.length}`);
         candidates = fresh; // an empty remainder is reported as insufficient evidence, never filled with old data
