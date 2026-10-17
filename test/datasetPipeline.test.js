@@ -293,3 +293,19 @@ test('company capacity questions drop buyers / contractors; "Gela" and "젤라" 
   ]);
   assert.equal(out.records.length, 3); // Gela/젤라 merged; Venice (same figure, different place spelled in Latin) and 베네치아 (different figure) stay
 });
+
+test('mergeJointVentures: amounts within 5% (unit conversion / rounding) are the same facility; far-apart amounts are not', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const base = { status: '가동', year: 2026, group: 'mass', original: 'x', basis: '직접', metric: '생산능력', site: null };
+  const texts = { 1: 'Diamond Green Diesel Port Arthur, a Valero joint venture, 696,363 t', 2: 'Valero says the Diamond Green Diesel plant makes 681,374 t' };
+  const near = dp2.mergeJointVentures([
+    { ...base, entity: 'Diamond Green Diesel', amount: 696363, source: 1, site: 'Port Arthur' },
+    { ...base, entity: 'Valero', amount: 681374, source: 2 },
+  ], (r) => texts[r.source]);
+  assert.deepEqual(near.records.map((r) => r.entity), ['Diamond Green Diesel']);
+  const far = dp2.mergeJointVentures([
+    { ...base, entity: 'Diamond Green Diesel', amount: 696363, source: 1, site: 'Port Arthur' },
+    { ...base, entity: 'Valero', amount: 1200000, source: 2 },
+  ], (r) => texts[r.source]);
+  assert.equal(far.records.length, 2);
+});

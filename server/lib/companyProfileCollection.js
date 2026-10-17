@@ -56,6 +56,11 @@ const VERIFY_COMPANIES = [
   { name: '에코세레스', verify: true, queries: ['에코세레스 SAF 생산능력 연산 톤 2026 장자강 조호르'] },
 ];
 
+// Fourth one-off set: DATED coverage of the large SAF producers whose capacity figures only exist in undated or old
+// sources. Two queries each, worded towards dated news ("2026", outlet-style phrasing).
+const SAF_MAJORS = ['Neste', 'Diamond Green Diesel', 'Valero', 'Phillips 66', 'TotalEnergies', 'Enilive', 'Chevron', 'bp', 'Shell', 'Petrobras', 'LanzaJet', 'Gevo', 'World Energy', 'Montana Renewables', 'Repsol', 'Moeve Cepsa', 'OMV', 'Galp', 'Infinium', 'Twelve'];
+const VERIFY_DATED_COMPANIES = SAF_MAJORS.map((n) => ({ name: n, verify: true, noRoster: true, queries: [`${n} SAF production capacity tonnes per year 2026 news`, `${n} sustainable aviation fuel plant start-up capacity expansion 2025 2026`] }));
+
 const TEMPLATES = [
   (n) => `${n} sustainable aviation fuel SAF capacity production sites`,
   (n) => `${n} SAF investment expansion plan capex`,
@@ -93,7 +98,7 @@ async function ensureSetup(list = COMPANIES) {
 
 async function runCompanyProfileCollection({ only, set } = {}) {
   if (status.running) return { started: false, reason: 'already_running' };
-  const pool_ = set === 'palm' ? PALM_COMPANIES.map((c) => ({ ...c, palm: true })) : set === 'verify' ? VERIFY_COMPANIES : COMPANIES;
+  const pool_ = set === 'palm' ? PALM_COMPANIES.map((c) => ({ ...c, palm: true })) : set === 'verify' ? VERIFY_COMPANIES : set === 'verify-dated' ? VERIFY_DATED_COMPANIES : COMPANIES;
   const companies = pool_.filter((c) => !only || only.includes(c.name));
   Object.assign(status, { running: true, startedAt: new Date().toISOString(), finishedAt: null, done: 0, current: null, failedQueries: 0, perCompany: {}, totals: { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0 } });
   status.total = companies.reduce((a, c) => a + buildQueries(c).length, 0);
@@ -129,4 +134,4 @@ async function runCompanyProfileCollection({ only, set } = {}) {
   return { started: true, total: status.total };
 }
 
-module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, VERIFY_COMPANIES, buildQueries };
+module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, VERIFY_COMPANIES, VERIFY_DATED_COMPANIES, buildQueries };

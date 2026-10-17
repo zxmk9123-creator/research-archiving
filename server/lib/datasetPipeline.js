@@ -114,9 +114,23 @@ function canonicalizeEntities(records, roster = []) {
 // dropped and remembered as `partners`, so a ranking or a sum never counts the facility twice.
 const firstToken = (name) => String(name || '').toLowerCase().split(/[\s.(]+/).find((w) => w.length >= 3) || String(name || '').toLowerCase();
 function mergeJointVentures(records, textOfSource) {
-  const keyOf = (r) => `${r.status}|${r.year || 0}|${r.group}|${Math.round(r.amount)}`;
+  // same status / year / unit group, amounts within 5% of each other (the same plant is often stated as 696,363 t by one
+  // source and 681,374 t by another after unit conversion or rounding) form one candidate cluster
+  const NEAR = 0.05;
+  const keyOf = (r) => `${r.status}|${r.year || 0}|${r.group}`;
+  const buckets = new Map();
+  records.forEach((r, i) => { const k = keyOf(r); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(i); });
   const groups = new Map();
-  records.forEach((r, i) => { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); });
+  for (const [k, idxs] of buckets) {
+    const sorted = idxs.slice().sort((a, b) => records[a].amount - records[b].amount);
+    let cluster = [];
+    let n = 0;
+    for (const i of sorted) {
+      if (cluster.length && records[i].amount > records[cluster[0]].amount * (1 + NEAR)) { groups.set(`${k}|${n++}`, cluster); cluster = []; }
+      cluster.push(i);
+    }
+    if (cluster.length) groups.set(`${k}|${n}`, cluster);
+  }
   const drop = new Set();
   const partnersOf = new Map();
   for (const idxs of groups.values()) {

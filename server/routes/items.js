@@ -77,6 +77,9 @@ router.get('/facts', requireAuth, async (req, res) => {
   );
   res.json({ count: rows.length, rows });
 });
+router.post('/backfill-published-dates', requireAuth, async (req, res) => {
+  res.json(await require('../lib/publishedDates').backfillPublishedDates());
+});
 router.post('/annual-report-rebuild', requireAuth, async (req, res) => {
   try { res.json(await require('../lib/annualReportIngest').rebuildReportItems()); } catch (err) { res.status(500).json({ error: err.message }); }
 });
