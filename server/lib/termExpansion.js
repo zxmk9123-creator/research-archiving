@@ -10,7 +10,7 @@ const SYSTEM = 'For each term, give the other common spellings of the SAME thing
 
 const eligible = (t) => {
   const s = String(t || '').trim();
-  if (/^[0-9\W_]+$/.test(s)) return false;
+  if (!/[A-Za-z가-힣]/.test(s)) return false; // digits / punctuation only
   return /[가-힣]/.test(s) ? s.length >= 3 : /^[A-Za-z][A-Za-z0-9 .'-]{3,}$/.test(s);
 };
 const plausibleAlt = (alt, term) => {
