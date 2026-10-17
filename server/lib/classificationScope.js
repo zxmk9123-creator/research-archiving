@@ -12,7 +12,7 @@ const UNIT_FIXED = /(거점별|플랜트별|설비별|공장별|사업장별|모
 const STATUS_FIXED = /(현재|가동|운영\s*중|건설|계획|목표|예정|전망|20[2-4]\d\s*년|향후|미래|\bcurrent\b|planned|target)/i;
 const PRODUCT_FIXED = /(SAF\s*전용|SAF만|항공유\s*전용|재생\s*디젤|HVO|바이오\s*디젤|재생\s*연료\s*전체|바이오\s*연료\s*전체|전체\s*재생\s*연료|renewable diesel)/i;
 const CAPACITY_WORDS = /(capa|capacity|생산\s*능력|생산량|용량)/i;
-const KIND_FIXED = /(기관|국가|정부|협회|기업만|업체만|회사만)/i;
+const KIND_FIXED = /(기관|국가|나라별|지역별|정부|협회|기업만|업체만|회사만|기업별|업체별|회사별)/i;
 
 // Each group: the user's choice is sent back as classification[group.id].
 function buildGroups(question, { sectors = [], entityTypes = [] } = {}) {
@@ -59,13 +59,14 @@ function buildGroups(question, { sectors = [], entityTypes = [] } = {}) {
       default: 'current',
     });
   }
-  if (COMPANY_WORDS.test(q) && !KIND_FIXED.test(q)) {
+  if (!KIND_FIXED.test(q)) {
     const n = (t) => (entityTypes.find((e) => e.type === t) || {}).count;
     groups.push({
-      id: 'kind', label: '대상 유형 (entity_type)', hint: 'DB가 구분해 둔 주체 유형 중 무엇을 포함할까요?',
+      id: 'kind', label: '비교 단위 (entity_type) — 한 표에는 한 위계만', hint: '기업·국가·기관은 서로 다른 위계라 한 표·차트에 섞지 않습니다. 어느 위계로 만들까요?',
       options: [
-        { id: 'company', label: '기업만', detail: `${n('기업') ? `기업 ${n('기업')}곳 · ` : ''}기관·국가 제외. 기본값` },
-        { id: 'all', label: '기관·국가 포함', detail: `${n('기관') ? `기관 ${n('기관')} · ` : ''}${n('국가') ? `국가 ${n('국가')}` : '협회·정부 추정치 포함'}` },
+        { id: 'company', label: '기업', detail: `${n('기업') ? `기업 ${n('기업')}곳 · ` : ''}국가·지역·기관 제외. 기본값` },
+        { id: 'country', label: '국가·지역', detail: `${n('국가') ? `국가 ${n('국가')} · ` : ''}글로벌 합계 포함, 기업·기관 제외` },
+        { id: 'institution', label: '기관', detail: `${n('기관') ? `기관 ${n('기관')} · ` : ''}협회·정부·리서치 기관 추정치, 기업·국가 제외` },
       ],
       default: 'company',
     });
@@ -90,7 +91,7 @@ function detectAmbiguity(question, ctx = {}) {
   };
 }
 
-const ALLOWED = { unit: ['operator', 'owner', 'site'], status: ['current', 'plan', 'both'], kind: ['company', 'all'], product: ['saf', 'all'] };
+const ALLOWED = { unit: ['operator', 'owner', 'site'], status: ['current', 'plan', 'both'], kind: ['company', 'country', 'institution', 'all'], product: ['saf', 'all'] };
 function sanitizeChoices(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
@@ -106,7 +107,6 @@ function applyToRecords(records, choices) {
   let out = records;
   if (choices.status === 'current') out = out.filter((r) => r.status === '가동');
   else if (choices.status === 'plan') out = out.filter((r) => PLAN_STATUS.has(r.status));
-  if (choices.kind === 'company') out = out.filter((r) => r.etype !== '기관' && r.etype !== '국가');
   if (choices.product === 'saf' || choices.product === 'all') {
     // product scope: only applied when most facts carry a product label (older facts are labelled by re-extraction);
     // filtering on a thin labelled minority would silently drop most companies
@@ -121,6 +121,32 @@ function applyToRecords(records, choices) {
   return out;
 }
 
+// ONE HIERARCHY PER TABLE. Companies, countries/regions (incl. "글로벌") and institutions are different levels and are
+// never mixed in one table or chart: the level comes from the card (choices.kind) or the question, default company.
+const PLACEHOLDER = /^(기업|업체|회사|기업들|업체들|전체|합계|총계|기타|company|companies|others?|total)$/i;
+const REGION = /^(글로벌|전\s*세계|세계|global|worldwide|world|아시아|유럽|북미|남미|중동|아프리카|EU|미국|중국|일본|한국|대만|인도|인도네시아|말레이시아|싱가포르|태국|베트남|필리핀|브라질|아르헨티나|캐나다|멕시코|파나마|칠레|콜롬비아|영국|독일|프랑스|스페인|이탈리아|네덜란드|벨기에|노르웨이|스웨덴|핀란드|폴란드|루마니아|호주|러시아|터키|튀르키예|사우디|UAE|US|USA|U\.S\.|UK|China|India|Indonesia|Malaysia|Brazil|Japan|Korea|Europe|Asia)(?![A-Za-z])(\s*(및|와|과|,|and|&)\s*\S+)?\s*(전체|합계)?$/i;
+const INST = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
+function levelOf(r) {
+  if (r.etype === '국가') return 'country';
+  if (r.etype === '기관') return 'institution';
+  if (r.etype === '기업') return 'company';
+  const name = String(r.entity || '').trim();
+  if (REGION.test(name)) return 'country';
+  if (INST.test(name)) return 'institution';
+  return 'company';
+}
+function levelFor(question, choices) {
+  if (choices && ['company', 'country', 'institution'].includes(choices.kind)) return choices.kind;
+  const q = String(question || '');
+  if (/(국가별|나라별|지역별|국가\s*순위|by country)/i.test(q)) return 'country';
+  if (/(기관별|협회별)/.test(q)) return 'institution';
+  return 'company';
+}
+function enforceLevel(records, question, choices) {
+  const level = levelFor(question, choices);
+  return records.filter((r) => !PLACEHOLDER.test(String(r.entity || '').trim()) && levelOf(r) === level);
+}
+
 // One sentence for the writer, so its prose matches what the code enforces.
 function describeChoices(choices) {
   if (!choices) return '';
@@ -129,7 +155,7 @@ function describeChoices(choices) {
   if (choices.unit) p.push({ operator: '집계 단위: 운영 법인', owner: '집계 단위: 소유 모회사', site: '집계 단위: 플랜트(거점)' }[choices.unit]);
   if (choices.status) p.push({ current: '시점: 현재 가동', plan: '시점: 건설·계획·목표', both: '시점: 현재와 계획을 구분' }[choices.status]);
   if (choices.product) p.push({ saf: '제품 범위: SAF 전용', all: '제품 범위: 재생연료 전체' }[choices.product]);
-  if (choices.kind) p.push({ company: '대상: 기업만', all: '대상: 기관·국가 포함' }[choices.kind]);
+  if (choices.kind) p.push({ company: '비교 단위: 기업', country: '비교 단위: 국가·지역', institution: '비교 단위: 기관', all: '비교 단위: 기업' }[choices.kind]);
   return p.length ? `\n\n[사용자가 확인한 분류 기준 — ${p.join(' · ')}. 이 기준을 벗어난 항목은 쓰지 않는다.]` : '';
 }
 
@@ -178,4 +204,4 @@ function nextContext(prev, { question, choices, datasetEntities, focusEntities }
   };
 }
 
-module.exports = { sanitizeContext, refersBack, carry, nextContext, detectAmbiguity, buildGroups, sanitizeChoices, applyToRecords, describeChoices };
+module.exports = { sanitizeContext, refersBack, carry, nextContext, detectAmbiguity, buildGroups, sanitizeChoices, applyToRecords, describeChoices, enforceLevel, levelFor, levelOf };

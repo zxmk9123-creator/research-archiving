@@ -1072,7 +1072,7 @@ test('guide card: a heavy request returns a scope plan first and starts NO AI wo
       const cls = await post({ question: '글로벌 SAF 플랜트 Capa를 그래프로 정리해줘' });
       assert.equal(cls.needsConfirmation, true);
       assert.equal(cls.plan.kind, 'classification'); // broad + owner/status open -> the classification card comes first
-      assert.deepEqual(cls.plan.groups.map((g) => g.id), ['unit', 'product', 'status']);
+      assert.deepEqual(cls.plan.groups.map((g) => g.id), ['unit', 'product', 'status', 'kind']);
       const card = await post({ question: '현재 가동 중인 SAF 업체별 생산능력을 그래프로 정리해줘' });
       assert.equal(card.needsConfirmation, true);
       assert.equal(providerCalls, 0);
@@ -1361,7 +1361,7 @@ test('classification card: only open dimensions are asked, narrow requests get n
     { entity: 'IATA', status: '가동', etype: '기관', site: null },
     { entity: 'Neste', status: '계획', etype: '기업', site: null },
   ];
-  assert.deepEqual(cs.applyToRecords(recs, { status: 'current', kind: 'company', unit: 'owner' }).map((r) => r.entity), ['Valero']);
+  assert.deepEqual(cs.enforceLevel(cs.applyToRecords(recs, { status: 'current', kind: 'company', unit: 'owner' }), '', { kind: 'company' }).map((r) => r.entity), ['Valero']);
   assert.deepEqual(cs.applyToRecords(recs, { status: 'plan' }).map((r) => r.entity), ['Neste']);
   assert.deepEqual(cs.applyToRecords(recs, { unit: 'site' }).map((r) => r.entity), ['DGD']);
 });
@@ -1477,4 +1477,18 @@ test('a participation cell the materials never deny is reworded to "자료에 �
   const denied = [{ id: 1, title: 'x', summary: 'Neste는 해당 프로젝트에 참여하지 않는다고 밝혔다.', ai_summary: null }];
   const kept = await searchRouter.finalizeAnswer(raw, denied, undefined, [], '프로젝트 율리시스에 참여한 기업', null, {});
   assert.match(kept.answer, /미참여/);
+});
+
+test('one hierarchy per table: companies, countries/regions and institutions are never mixed; placeholders dropped', () => {
+  const cs = require('../server/lib/classificationScope');
+  const recs = [
+    { entity: '글로벌', etype: null }, { entity: '미국', etype: null }, { entity: 'EU 및 영국', etype: null }, { entity: '파나마', etype: '국가' },
+    { entity: 'Petrobras', etype: null }, { entity: 'Neste', etype: '기업' }, { entity: '기업', etype: '기업' }, { entity: 'IATA', etype: null },
+  ];
+  const names = (rs) => rs.map((r) => r.entity);
+  assert.deepEqual(names(cs.enforceLevel(recs, '글로벌 SAF 생산능력 도표', null)), ['Petrobras', 'Neste']);
+  assert.deepEqual(names(cs.enforceLevel(recs, '', { kind: 'country' })), ['글로벌', '미국', 'EU 및 영국', '파나마']);
+  assert.deepEqual(names(cs.enforceLevel(recs, '', { kind: 'institution' })), ['IATA']);
+  assert.equal(cs.levelFor('국가별 SAF 생산능력', null), 'country');
+  assert.deepEqual(names(cs.enforceLevel(recs, '', { kind: 'all' })), ['Petrobras', 'Neste']);
 });

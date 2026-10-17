@@ -1152,12 +1152,13 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
   if (!datasetPipeline.isDatasetRequest(req, question)) { trace.push('not_dataset_request'); return null; }
   try {
     const density = datasetPipeline.productDensity(`${question} ${candidates.map(materialText).join(' ').slice(0, 40000)}`);
+    const entityLevel = classificationScope.levelFor(question, choices);
     // 1) facts stored when the items were published (item_facts): no AI call at all
     let records = [];
     let pending = [];
     try {
       const loaded = await itemFacts.loadFactRecords(candidates);
-      records = datasetPipeline.recordsForQuestion(loaded.records.map((r) => datasetPipeline.guardStoredRecord(r, materialText(candidates[r.source - 1] || {}))), question, density);
+      records = datasetPipeline.recordsForQuestion(loaded.records.map((r) => datasetPipeline.guardStoredRecord(r, materialText(candidates[r.source - 1] || {}))), question, density, { level: entityLevel });
       // 2) only items never processed (facts_status IS NULL) that state a quantity still need the AI extraction
       pending = candidates
         .map((c, i) => ({ c, i }))
@@ -1186,7 +1187,7 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       if (topic.length) {
         const wide = await itemFacts.loadFactsByTopic(topic, { excludeIds: candidates.map((c) => c.id).filter(Boolean), baseIndex: candidates.length });
         const textOfSource = (r) => materialText(wide.items[r.source - candidates.length - 1] || {});
-        records = records.concat(datasetPipeline.recordsForQuestion(wide.records.map((r) => datasetPipeline.guardStoredRecord(r, textOfSource(r))), question, density));
+        records = records.concat(datasetPipeline.recordsForQuestion(wide.records.map((r) => datasetPipeline.guardStoredRecord(r, textOfSource(r))), question, density, { level: entityLevel }));
         extraCandidates = wide.items;
       }
     } catch (err) {
@@ -1195,7 +1196,7 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
     // 1c) verified figures from company annual reports (annual_report_facts): FFB/CPO/PK output and planted area
     try {
       const annual = await annualRecords.loadAnnualRecords(question, { candidates, baseIndex: candidates.length + extraCandidates.length });
-      const annualFit = datasetPipeline.recordsForQuestion(annual.records, question, density);
+      const annualFit = datasetPipeline.recordsForQuestion(annual.records, question, density, { level: entityLevel });
       trace.push(`annual family=${annual.family} loaded=${annual.records.length} fit=${annualFit.length} entities=${annualFit.map((r) => r.entity).join(',')}`);
       // enough audited figures of ONE comparable kind: the dataset is built from them alone — news-derived
       // figures of other meanings (capacity targets, deals) must not be mixed into the same column
@@ -1278,7 +1279,7 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       if (same.dropped) trace.push(`same_facility_merged ${same.dropped}`);
       records = same.records;
     }
-    records = classificationScope.applyToRecords(records, choices);
+    records = classificationScope.enforceLevel(classificationScope.applyToRecords(records, choices), question, choices);
     if (focusEntities.length) {
       // "그 업체들만": the follow-up keeps to the companies of the previous table
       const keep = focusEntities.map((e) => String(e).toLowerCase());

@@ -53,7 +53,7 @@ const PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total', 'other']);
 const ENTITY_TYPES = new Set(['기업', '기관', '국가', '기타']);
 const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|EU|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
 const isInstitution = (r) => r.etype === '기관' || (!r.etype && INSTITUTION_NAME.test(String(r.entity || '').trim()));
-function recordsForQuestion(records, question, density = null) {
+function recordsForQuestion(records, question, density = null, { level = 'company' } = {}) {
   const q = String(question || '');
   const historical = freshness.wantsHistorical(q);
   const wantsCompanies = WANTS_COMPANIES.test(q);
@@ -64,10 +64,10 @@ function recordsForQuestion(records, question, density = null) {
   return records
     .filter((r) => {
       if (!historical && freshness.isOutdated(r.pubAt)) return false; // outdated facts never reach an answer
-      if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      if (level === 'company' && isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       if (wantsCompanies && (wantsCap || wantsOut) && NON_PRODUCER.has(r.role) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       // a company question lists companies: countries and other non-company entities (entity_type) are out
-      if (wantsCompanies && (r.etype === '국가' || r.etype === '기관') && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      if (level === 'company' && wantsCompanies && (r.etype === '국가' || r.etype === '기관') && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       if (r.group === 'area') return wantsArea;
       if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
