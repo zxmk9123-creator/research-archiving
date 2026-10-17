@@ -480,14 +480,14 @@ async function retrieveCandidates(question, history, { light = false } = {}) {
     .sort((a, b) => a.df - b.df)
     .slice(0, 4);
   if (specific.length >= 2) {
-    for (const c of specific) {
+    // the per-subject lookups are independent: run them together (results are merged in the same order as before)
+    const lookups = specific.map(async (c) => {
       const have = base.filter((r) => c.forms.some((f) => textOf(r).includes(f.toLowerCase()))).length;
-      if (have >= PER_TARGET) continue;
+      if (have >= PER_TARGET) return [];
       const others = concepts.filter((f) => f !== c.forms).flat();
-      try {
-        for (const r of await retrieveForTarget(c.forms[0], others)) if (!seenIds.has(r.id)) { seenIds.add(r.id); coverage.push(r); }
-      } catch (_) { /* best-effort */ }
-    }
+      try { return await retrieveForTarget(c.forms[0], others); } catch (_) { return []; /* best-effort */ }
+    });
+    for (const rows of await Promise.all(lookups)) for (const r of rows) if (!seenIds.has(r.id)) { seenIds.add(r.id); coverage.push(r); }
   }
   let baseCovered = base.concat(coverage);
   let ceiling = MAX_TOTAL_CANDIDATES;
@@ -945,7 +945,17 @@ async function verifyCitations(text, candidates, signal) {
 // every single request — now it only ever delays this final polish
 // step, never the first visible token (see the streaming path below).
 // Roster = the watchlist companies with every spelling we match them by.
+// Read ~7 times per request (retrieval, intent, scope, dataset, finalize ...), changing only when an operator or the
+// discovery job edits the watchlist: cached in-process for ROSTER_TTL_MS (off in tests), so one request costs one query.
+const ROSTER_TTL_MS = 30 * 1000;
+let rosterCache = { at: 0, value: null };
 async function getRoster() {
+  if (process.env.ROSTER_CACHE !== 'off' && rosterCache.value && Date.now() - rosterCache.at < ROSTER_TTL_MS) return rosterCache.value;
+  const value = await loadRoster();
+  if (value.length) rosterCache = { at: Date.now(), value };
+  return value;
+}
+async function loadRoster() {
   try {
     const { rows } = await pool.query('SELECT name, aliases, segment FROM companies WHERE watched = true');
     return rows.map((r) => ({

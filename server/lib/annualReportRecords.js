@@ -90,8 +90,9 @@ function onePerEntity(records, family) {
 async function loadAnnualRecords(question, { candidates = [], baseIndex = 0 } = {}) {
   const family = familyForQuestion(question);
   if (!family) return { records: [], items: [] };
+  // facts first WITHOUT the (large) report text; the text of only the picked reports is fetched afterwards
   const { rows } = await pool.query(
-    `SELECT f.*, i.id AS item_id, i.title, i.summary, i.ai_summary, i.insight, i.ai_insight, i.published_at
+    `SELECT f.*, i.id AS item_id, i.published_at
        FROM annual_report_facts f JOIN items i ON i.source_url = f.source_url || '#annual-report-facts' AND i.status = 'Published'`
   );
   const mapped = rows.filter((r) => r.scope !== 'country' && r.scope !== 'site').map((r) => ({ row: r, rec: toRecord(r) })).filter((x) => x.rec && x.rec.family === family);
@@ -100,11 +101,18 @@ async function loadAnnualRecords(question, { candidates = [], baseIndex = 0 } = 
   const items = [];
   const indexOf = new Map(candidates.map((c, i) => [c.id, i + 1]));
   const records = [];
+  const needed = [...new Set(picked.map((rec) => rowOf.get(rec).item_id).filter((id) => !indexOf.has(id)))];
+  const textRows = needed.length
+    ? (await pool.query('SELECT id, title, summary, ai_summary, insight, ai_insight, published_at FROM items WHERE id = ANY($1)', [needed])).rows
+    : [];
+  const textById = new Map(textRows.map((r) => [r.id, r]));
   for (const rec of picked) {
     const row = rowOf.get(rec);
     let idx = indexOf.get(row.item_id);
     if (!idx) {
-      items.push({ id: row.item_id, title: row.title, summary: row.summary, ai_summary: row.ai_summary, insight: row.insight, ai_insight: row.ai_insight, published_at: row.published_at, source_name: 'Company annual report' });
+      const t = textById.get(row.item_id);
+      if (!t) continue;
+      items.push({ ...t, source_name: 'Company annual report' });
       idx = baseIndex + items.length;
       indexOf.set(row.item_id, idx);
     }

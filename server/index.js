@@ -5,6 +5,10 @@ const { maybeRunDailyDiscovery } = require('./lib/dailyDiscovery');
 const { refreshScopeTerms, maybeRunWeeklyScopeAnalysis } = require('./lib/scopeAnalysis');
 const { requeueStalledPendingDrafts } = require('./lib/aiDraft');
 
+const asyncSafety = require('./lib/asyncSafety');
+asyncSafety.patchAsyncRoutes();
+asyncSafety.installProcessGuards();
+
 const app = express();
 app.use(express.json());
 
@@ -56,6 +60,8 @@ app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
+
+app.use(asyncSafety.errorHandler);
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`listening on ${port}`));
