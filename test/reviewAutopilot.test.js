@@ -88,6 +88,13 @@ test('reviewOne: paywall / empty body goes to human, never archived', async () =
   const hold = { id: 9, title: 'Repsol targets 400kt of SAF', status: 'Draft', ai_eligible: true, reviewer_eligible: null };
   const r = await ra.reviewOne(hold, { names: [], dryRun: true, fetcher: async () => 'Subscribe to read the full article. Sign in.', arbiter: async () => { throw new Error('no model call'); } });
   assert.equal(r.action, 'human');
+  // title-only triage: a confident archive (report sales page) is archived, a publish-leaning or unsure verdict stays human
+  const sale = await ra.reviewOne(hold, { names: [], dryRun: true, fetcher: async () => '', arbiter: async () => ({ decision: 'archive', confidence: 0.92, reason: '보고서 판매 페이지' }) });
+  assert.equal(sale.action, 'archived');
+  const unsure = await ra.reviewOne(hold, { names: [], dryRun: true, fetcher: async () => '', arbiter: async () => ({ decision: 'publish', confidence: 0.95, reason: '중요' }) });
+  assert.equal(unsure.action, 'human');
+  const weak = await ra.reviewOne(hold, { names: [], dryRun: true, fetcher: async () => '', arbiter: async () => ({ decision: 'archive', confidence: 0.7, reason: '애매' }) });
+  assert.equal(weak.action, 'human');
   const rej = await ra.reviewOne({ id: 10, title: 'x', status: 'Draft', ai_eligible: false, ai_qa_decision: 'REJECT', ai_eligibility_reason: '본문이 메뉴·안내 문구뿐이라 판단 불가' }, { names: [], dryRun: true });
   assert.equal(rej.action, 'human');
 });

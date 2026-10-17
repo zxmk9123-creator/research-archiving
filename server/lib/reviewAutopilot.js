@@ -99,12 +99,27 @@ async function setOutcome(id, outcome, reason, { status = null } = {}) {
   );
 }
 
+// No readable body: decide from title + first-pass summary only. Only a CONFIDENT archive (sales / promo / generic pages)
+// is acted on; anything else stays with the human. Never published without a body.
+const TITLE_ONLY_ARCHIVE_MIN = 0.85;
+async function titleOnlyTriage(it, arbiter, write, why) {
+  try {
+    const v = await (arbiter || arbitrate)(it, '');
+    if (v.decision === 'archive' && v.confidence >= TITLE_ONLY_ARCHIVE_MIN) {
+      return write('archived', `본문 없이 제목·요약으로 판정: 보관 (${v.confidence.toFixed(2)}) — ${v.reason}`, { status: 'Archived' });
+    }
+    return write('human', `${why} — 제목·요약 판정도 확정 불가(${v.decision} ${v.confidence.toFixed(2)}): ${v.reason}`, {});
+  } catch (_) {
+    return write('human', why, {});
+  }
+}
+
 // One item -> { id, action, reason }; writes unless dryRun.
 async function reviewOne(it, { dryRun = false, names = [], arbiter = null, redraft = null, fetcher = null } = {}) {
   const write = async (outcome, reason, opts) => { if (!dryRun) await setOutcome(it.id, outcome, reason, opts); return { id: it.id, title: it.title, action: outcome, reason }; };
 
   if (isClearReject(it) && !looksValuable(it, names) && rejectReasonWalled(it)) {
-    return write('human', '1차 부적합 사유가 본문 수집 실패(페이월·메뉴·오류 문구)라 보관하지 않고 사람 검수로 보냄', {});
+    return titleOnlyTriage(it, arbiter, write, '1차 부적합 사유가 본문 수집 실패(페이월·메뉴·오류 문구)');
   }
   if (isClearReject(it) && !looksValuable(it, names)) {
     return write('archived', '1차 적합 판정과 발행 점검이 모두 비적합 — 자동 보관', { status: 'Archived' });
@@ -120,7 +135,7 @@ async function reviewOne(it, { dryRun = false, names = [], arbiter = null, redra
   }
 
   const fullText = await (fetcher || fetchFullText)(it);
-  if (isWalled(fullText)) return write('human', '본문을 가져오지 못했거나 페이월·구독 안내뿐이라 사람 검수로 보냄', {});
+  if (isWalled(fullText)) return titleOnlyTriage(it, arbiter, write, '본문을 가져오지 못했거나 페이월·구독 안내뿐');
   const verdict = await (arbiter || arbitrate)(it, fullText);
   if (verdict.decision === 'archive' && verdict.confidence >= ARCHIVE_MIN_CONFIDENCE) {
     return write('archived', `AI 2차 판정: 보관 (${verdict.confidence.toFixed(2)}) — ${verdict.reason}`, { status: 'Archived' });
@@ -159,7 +174,7 @@ async function runAutopilot({ aiBudget = 8, dryRun = false, ids = null } = {}) {
     const names = await getWatchNames().catch(() => []);
     const { rows } = await pool.query(
       `SELECT i.*, s.name AS source_name FROM items i LEFT JOIN sources s ON s.id = i.source_id
-        WHERE i.status = 'Draft' AND (i.auto_review IS NULL OR (i.auto_review = 'retry' AND i.auto_review_attempts < $1))
+        WHERE i.status = 'Draft' AND (i.auto_review IS NULL OR (i.auto_review = 'retry' AND i.auto_review_attempts < $1)${ids ? " OR i.auto_review = 'human'" : ''})
           ${ids ? 'AND i.id = ANY($3)' : ''}
         ORDER BY i.collected_at DESC LIMIT $2`,
       ids ? [MAX_RETRIES, 2000, ids] : [MAX_RETRIES, 2000]
