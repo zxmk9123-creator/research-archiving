@@ -14,6 +14,6 @@ function retrievalHint(q) {
   return isFeedstockSupplyQuestion(q) ? `${q} UCO supply feedstock supplier collector trading partnership used cooking oil` : q;
 }
 
-const PROMPT_NOTE = '\n\n[질의 유형: 원료 공급망(수거·집하·트레이딩)] 질문자가 찾는 것은 원료를 모아 공급하거나 거래하는 후방산업 기업이다. 그 원료를 사용하는 생산 기업(SAF·HVO·재생디젤 공장; 예: 에코세레스/EcoCeres, Neste, Cepsa, Eni, Diamond Green Diesel)은 원료를 직접 일부 조달하더라도 이 질문의 답으로 나열하지 않는다. 자료에 원료 공급·수거·트레이딩 기업이 있으면(예: UCO 공급 계약·파트너십의 공급자 쪽) 그 기업만 근거와 함께 정리하고, 없으면 없다고만 말하며 어떤 역할의 기업을 찾는지 되묻는다.';
+const PROMPT_NOTE = '\n\n[질의 유형: 원료 공급업체] 찾는 대상은 UCO 배출처(식당·식품공장 등)의 폐식용유를 집적해 바이오연료 생산자 등에 직접 유통·판매하는 공급업체다(수거 자체에 초점을 두지 않는다). 자료에 나온 기업을 이 기준으로 나누어 표나 소제목으로 제시한다: (1) 집적·직접 유통 공급업체(핵심: 여러 배출처의 UCO를 모아 자기 명의로 공급·수출) (2) 트레이더·중개(물량을 사고팔지만 집적 기반이 불분명) (3) 수거·물류 전문(공급 계약 없이 수거·운송만). 각 기업은 근거 문장과 함께 한 곳에만 넣고, 어느 분류인지 자료로 판단되지 않으면 "분류 불명"으로 따로 둔다. 배출처(예: Sheetz 같은 식당 체인)와 UCO를 원료로 쓰는 생산 기업(SAF·HVO·재생디젤 공장; 예: 에코세레스/EcoCeres, Neste, Cepsa, Eni, Diamond Green Diesel)은 일부 직접 조달하더라도 나열하지 않는다. 공급업체가 자료에 없으면 없다고만 말하고 어떤 역할의 기업을 찾는지 되묻는다.';
 
 module.exports = { isFeedstockSupplyQuestion, retrievalHint, PROMPT_NOTE };
