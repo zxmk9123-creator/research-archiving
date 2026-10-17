@@ -240,7 +240,8 @@ test('mergeJointVentures: the venture (parent recorded) stays, its owner is the 
 test('dedupeSameFacility: one plant under several labels counts once; different plants with the same figure stay', () => {
   const dp2 = require('../server/lib/datasetPipeline');
   const r = (site, extra = {}) => ({ entity: 'PT.ARC', site, status: '가동', year: 2026, source: 1, group: 'mass', amount: 5e5, original: '50만 톤', basis: '직접', ...extra });
-  const out = dp2.dedupeSameFacility([r('인도네시아 공장'), r('인도네시아 법인'), r('Port Arthur'), r('Port Arthur SAF plant', { amount: 5e5 })]);
+  // (the Hangul and the Latin plants have different figures: unrelated, even though their scripts differ)
+  const out = dp2.dedupeSameFacility([r('인도네시아 공장'), r('인도네시아 법인'), r('Port Arthur', { amount: 7e5 }), r('Port Arthur SAF plant', { amount: 7e5 })]);
   assert.deepEqual(out.records.map((x) => x.site), ['인도네시아 공장', 'Port Arthur SAF plant']);
   assert.equal(out.dropped, 2);
   // two named plants with identical capacity are different facilities
@@ -270,4 +271,25 @@ test('ranking: undated or old "current" figures take no position and are listed 
   assert.match(ds.markdown, /시점 불명·오래된 값/);
   assert.match(ds.markdown, /\| NoDate Co .*시점 불명/);
   assert.match(ds.markdown, /\| Old Co .*오래됨/);
+});
+
+test('company capacity questions drop buyers / contractors; "Gela" and "젤라" with the same figure are one plant', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const Y = new Date().getFullYear();
+  const base = { status: '가동', year: Y, group: 'mass', amount: 4e5, original: '40만 톤', basis: '직접', metric: '생산능력', etype: '기업', source: 1, tons: 4e5 };
+  const recs = [
+    { ...base, entity: 'Neste', site: null, role: 'producer' },
+    { ...base, entity: 'Singapore Airlines Group', site: null, role: 'consumer', amount: 2000 },
+    { ...base, entity: 'Technip Energies', site: null, role: 'engineering', amount: 6e6 },
+    { ...base, entity: 'Unlabelled Co', site: null, role: null },
+  ];
+  const fit = dp2.recordsForQuestion(recs, '글로벌 SAF 생산능력 Top10 기업 도표', null);
+  assert.deepEqual(fit.map((r) => r.entity), ['Neste', 'Unlabelled Co']);
+  // asked for by name, an airline stays
+  assert.ok(dp2.recordsForQuestion(recs, 'Singapore Airlines Group SAF 기업 생산능력', null).some((r) => r.entity === 'Singapore Airlines Group'));
+  const out = dp2.dedupeSameFacility([
+    { ...base, entity: 'Eni', site: 'Gela 바이오리파이너리' }, { ...base, entity: 'Eni', site: '젤라 바이오리파이너리' },
+    { ...base, entity: 'Eni', site: 'Venice', amount: 4e5 }, { ...base, entity: 'Eni', site: '베네치아', amount: 5e5 },
+  ]);
+  assert.equal(out.records.length, 3); // Gela/젤라 merged; Venice (same figure, different place spelled in Latin) and 베네치아 (different figure) stay
 });

@@ -29,10 +29,10 @@ async function storeFacts(itemId, records, { replace = false } = {}) {
     if (replace && records.length) await client.query('DELETE FROM item_facts WHERE item_id = $1', [itemId]);
     for (const r of records) {
       await client.query(
-        `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (item_id, entity, COALESCE(site,''), status, grp, amount) DO NOTHING`,
-        [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null, r.product || null]
+        [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null, r.product || null, r.role || null]
       );
     }
     await client.query('COMMIT');
@@ -80,13 +80,13 @@ async function loadFactRecords(candidates) {
   if (!ids.length) return { records: [], statusById: new Map() };
   const { rows: statuses } = await pool.query('SELECT id, facts_status FROM items WHERE id = ANY($1)', [ids]);
   const statusById = new Map(statuses.map((r) => [r.id, r.facts_status]));
-  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product FROM item_facts WHERE item_id = ANY($1)', [ids]);
+  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role FROM item_facts WHERE item_id = ANY($1)', [ids]);
   const indexById = new Map(candidates.map((c, i) => [c.id, i + 1]));
   const pubById = new Map(candidates.map((c) => [c.id, c.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
     group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null,
-    etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, tons: null,
+    etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, tons: null,
   }));
   return { records, statusById };
 }
@@ -124,14 +124,14 @@ async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, ma
   const items = [...(dated.rows || []), ...(undated.rows || [])].filter((i) => !seen.has(i.id) && seen.add(i.id));
   if (!items.length) return { records: [], items: [] };
   const { rows } = await pool.query(
-    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product FROM item_facts WHERE item_id = ANY($1)',
+    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role FROM item_facts WHERE item_id = ANY($1)',
     [items.map((i) => i.id)]
   );
   const indexById = new Map(items.map((it, k) => [it.id, baseIndex + k + 1]));
   const pubById = new Map(items.map((it) => [it.id, it.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
-    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, tons: null,
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, tons: null,
   }));
   return { records, items };
 }
@@ -176,7 +176,7 @@ async function runBackfill({ limit = 300, mode = 'new' } = {}) {
 const classifyStatus = { running: false, total: 0, done: 0, updated: 0, errors: 0 };
 async function classifyEntities() {
   if (classifyStatus.running) return { started: false, reason: 'already_running' };
-  const { rows } = await pool.query('SELECT DISTINCT entity FROM item_facts WHERE entity_type IS NULL ORDER BY entity LIMIT 2000');
+  const { rows } = await pool.query('SELECT DISTINCT entity FROM item_facts WHERE entity_type IS NULL OR role IS NULL ORDER BY entity LIMIT 2000');
   const names = rows.map((r) => r.entity);
   Object.assign(classifyStatus, { running: true, total: names.length, done: 0, updated: 0, errors: 0 });
   (async () => {
@@ -185,13 +185,13 @@ async function classifyEntities() {
         const batch = names.slice(i, i + 40);
         try {
           const result = await limitFactsCall(() => provider.callProviderWithFallback({
-            system: 'Classify each named entity. Respond with ONLY a JSON array of {"entity": string, "type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null}. 기업 = company; 기관 = industry body, agency, regulator, NGO, research house, exchange; 국가 = country/region. "country" = headquarters country in Korean (or the country itself); "parent" = owning group if the entity is a well-known subsidiary/JV. Use null whenever you are not certain.',
+            system: 'Classify each named entity. Respond with ONLY a JSON array of {"entity": string, "type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "role": "producer"|"consumer"|"engineering"|"trader"|"finance"|"other"}. role = what the entity mainly is for fuel / oils capacity questions: producer = makes the product (refiner, crusher, plantation, biofuel plant owner or operator); consumer = airline, shipper, fleet or end buyer; engineering = designs / builds plants for others; trader = distributor / trader; finance = investor, lender, bank; other. 기업 = company; 기관 = industry body, agency, regulator, NGO, research house, exchange; 국가 = country/region. "country" = headquarters country in Korean (or the country itself); "parent" = owning group if the entity is a well-known subsidiary/JV. Use null whenever you are not certain.',
             user: JSON.stringify(batch),
           }));
           const arr = dp.parseRecords(result.text);
           for (const a of arr) {
             if (!a || !batch.includes(a.entity) || !['기업', '기관', '국가', '기타'].includes(a.type)) continue;
-            const u = await pool.query('UPDATE item_facts SET entity_type=$2, country=$3, parent=$4 WHERE entity=$1 AND entity_type IS NULL', [a.entity, a.type, a.country ? String(a.country).slice(0, 60) : null, a.parent ? String(a.parent).slice(0, 80) : null]);
+            const u = await pool.query('UPDATE item_facts SET role = COALESCE($5, role), entity_type = COALESCE(entity_type, $2), country = COALESCE(country, $3), parent = COALESCE(parent, $4) WHERE entity = $1', [a.entity, a.type, a.country ? String(a.country).slice(0, 60) : null, a.parent ? String(a.parent).slice(0, 80) : null, ['producer', 'consumer', 'engineering', 'trader', 'finance', 'other'].includes(a.role) ? a.role : null]);
             classifyStatus.updated += u.rowCount;
           }
         } catch (err) { classifyStatus.errors++; console.error(`classifyEntities batch failed: ${err.message}`); }

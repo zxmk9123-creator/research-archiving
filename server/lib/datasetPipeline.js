@@ -46,6 +46,9 @@ const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|
 const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
 // Industry bodies / agencies are sources of estimates, not producers: never charted as a company
 // unless the question names them. Unlabelled (older) facts fall back to a name list.
+const ROLES = new Set(['producer', 'consumer', 'engineering', 'trader', 'finance', 'other']);
+// capacity / output questions about companies list PRODUCERS: buyers, contractors, traders and financiers are not
+const NON_PRODUCER = new Set(['consumer', 'engineering', 'trader', 'finance']);
 const PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total', 'other']);
 const ENTITY_TYPES = new Set(['기업', '기관', '국가', '기타']);
 const INSTITUTION_NAME = /^(IATA|ICAO|IEA|IRENA|EASA|ISCC|FAO|USDA|OPEC|EPA|CARB|EIA|UN|WTO|IMO|EU|European Commission|국제항공운송협회|국제민간항공기구|국제에너지기구)(?![A-Za-z])/i;
@@ -62,6 +65,7 @@ function recordsForQuestion(records, question, density = null) {
     .filter((r) => {
       if (!historical && freshness.isOutdated(r.pubAt)) return false; // outdated facts never reach an answer
       if (isInstitution(r) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
+      if (wantsCompanies && (wantsCap || wantsOut) && NON_PRODUCER.has(r.role) && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       // a company question lists companies: countries and other non-company entities (entity_type) are out
       if (wantsCompanies && (r.etype === '국가' || r.etype === '기관') && !q.toLowerCase().includes(String(r.entity).toLowerCase())) return false;
       if (r.group === 'area') return wantsArea;
@@ -148,12 +152,14 @@ function mergeJointVentures(records, textOfSource) {
 // same facility: summing them would double the plant. The more specific site name is kept.
 const GENERIC_SITE = /(공장|법인|시설|플랜트|정유소|정유공장|바이오정유소|바이오리파이너리|콤플렉스|단지|산업단지|프로젝트|사업장|생산시설|plant|facility|complex|refinery|biorefinery|site|unit|project|works|saf)/gi;
 const siteCore = (s) => String(s || '').toLowerCase().replace(GENERIC_SITE, '').replace(/[^a-z0-9가-힣]/g, '');
+// the same plant written once in Latin letters and once in Hangul ("Gela" / "젤라") with the same figure
+const differentScripts = (a, b) => (/[가-힣]/.test(a) !== /[가-힣]/.test(b)) && (/[A-Za-z]/.test(a) !== /[A-Za-z]/.test(b));
 function dedupeSameFacility(records) {
   const keep = [];
   const dropped = [];
   for (const r of records) {
     const dup = r.site ? keep.findIndex((k) => k.site && k.entity.toLowerCase() === r.entity.toLowerCase() && k.status === r.status && k.group === r.group
-      && Math.round(k.amount) === Math.round(r.amount) && (siteCore(k.site) === siteCore(r.site) || !siteCore(k.site) || !siteCore(r.site) || siteCore(k.site).includes(siteCore(r.site)) || siteCore(r.site).includes(siteCore(k.site)))) : -1;
+      && Math.round(k.amount) === Math.round(r.amount) && (differentScripts(k.site, r.site) || siteCore(k.site) === siteCore(r.site) || !siteCore(k.site) || !siteCore(r.site) || siteCore(k.site).includes(siteCore(r.site)) || siteCore(r.site).includes(siteCore(k.site)))) : -1;
     if (dup < 0) { keep.push(r); continue; }
     if (String(r.site).length > String(keep[dup].site).length) keep[dup] = r; // keep the more specific label
     dropped.push(r);
@@ -168,7 +174,7 @@ function isDatasetRequest(req, question) {
 }
 
 const EXTRACTION_SYSTEM = `You extract a structured dataset from supplied materials. Respond with ONLY a JSON array — no prose, no code fences.
-Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "product": "saf"|"renewable_diesel"|"biofuel_total"|"other", "entity_type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "source": number}
+Each element: {"entity": string, "site": string|null, "scope": "site"|"total", "metric": string, "value": number, "unit": string, "period": "연간"|"일일"|null, "status": "가동"|"건설중"|"계획"|"목표", "year": number|null, "product": "saf"|"renewable_diesel"|"biofuel_total"|"other", "role": "producer"|"consumer"|"engineering"|"trader"|"finance"|"other", "entity_type": "기업"|"기관"|"국가"|"기타", "country": string|null, "parent": string|null, "source": number}
 Rules:
 - Extract the quantity the QUESTION asks about (for example production capacity, output volume, shipments, trade volume, investment amount). One element per distinct figure that a material STATES for an entity's plant/site/segment (or for the entity as a whole when no site is given, site=null). Cover EVERY entity and EVERY site the materials give a figure for; never skip an item because of its unit (gallons, barrels, b/d, currency are all fine).
 - "metric" is a short Korean label of the quantity (e.g. "생산능력", "생산량", "투자액").
@@ -178,6 +184,7 @@ Rules:
 - "source" is the 자료 number the figure comes from.
 - "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.
 - "product" = what the quantity is the capacity/output OF: saf = sustainable aviation fuel only (SAF / 지속가능항공유 / bio-jet); renewable_diesel = renewable diesel / HVO / biodiesel only; biofuel_total = all renewable fuels together (SAF plus renewable diesel, or a combined "renewable fuels" figure, or unspecified biofuel); other = anything else (ethanol, crude, feedstock, palm oil ...). When one plant states both a total and a SAF share, they are TWO elements.
+- "role" = what the entity IS in this material: producer = it makes / will make the product (operator or owner of the plant); consumer = it buys or uses it (airline, shipper, fleet); engineering = designs or builds plants for others; trader = distributes / trades; finance = investor or lender; other. A figure that is a PURCHASE, offtake, order or design scope of a non-producer is still extracted, with that role.
 - "entity_type": 기업 = a company or its plant operator; 기관 = an industry body, agency, regulator, NGO, research house or exchange (IATA, ICAO, IEA, USDA, EU, ISCC...) that merely reports/estimates a figure; 국가 = a country/region; 기타 otherwise. "country" = the country (Korean) where the entity is headquartered (or the country itself for 국가), null if not stated or not certain. "parent" = the owning group when the entity is a subsidiary/JV named so in the material, else null.`;
 
 function buildExtractionUser(question, materialsBlock) {
@@ -273,7 +280,7 @@ function verifyRecords(records, candidates, materialText, { density = null } = {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({
-      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, etype: ENTITY_TYPES.has(r.entity_type) ? r.entity_type : null, product: PRODUCTS.has(r.product) ? r.product : null, country: clean(r.country) || null, parent: clean(r.parent) || null, pubAt: candidates[source - 1].published_at || null,
+      entity, site, status, year, source, group, amount, basis, metric: clean(r.metric) || null, etype: ENTITY_TYPES.has(r.entity_type) ? r.entity_type : null, product: PRODUCTS.has(r.product) ? r.product : null, role: ROLES.has(r.role) ? r.role : null, country: clean(r.country) || null, parent: clean(r.parent) || null, pubAt: candidates[source - 1].published_at || null,
       tons: group === 'mass' ? amount : group === 'volume' && density ? (amount * density) / 1000 : null,
       original: `${Number(r.value).toLocaleString('en-US')} ${unit}${r.period === '일일' && cls !== 'bpd' ? '/일' : ''}`.trim(),
     });
