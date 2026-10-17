@@ -1425,6 +1425,7 @@ async function handleSearch(req, res, signal) {
   const confirmed = scope.confirmed === true || classification !== null || carried.cardAnswered;
   const quick = confirmed && scope.mode === 'quick';
 
+  const datasetTrace = [];
   let candidates;
   try {
     candidates = await retrieveCandidates(`${subjectScope.retrievalHint(question, subjectScope.forQuestion(question))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick });
@@ -1482,6 +1483,7 @@ async function handleSearch(req, res, signal) {
     return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
   }
 
+  datasetTrace.push(`candidates ${candidates.map((c) => c.id).join(',')}`);
   const roster = await getRoster();
   const intent = classifyIntent(question, roster);
   const subjectQ = subjectScope.forQuestion(question);
@@ -1531,7 +1533,6 @@ async function handleSearch(req, res, signal) {
     });
     if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
   }
-  const datasetTrace = [];
   const nextContextFor = (dataset) => classificationScope.nextContext(prevContext, { question, choices, datasetEntities: dataset && dataset.entities, focusEntities: intent.focus.map((c) => c.name) });
   const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, choices, intent.focus.length ? [] : referencedEntities);
   datasetPromise.catch(() => {});

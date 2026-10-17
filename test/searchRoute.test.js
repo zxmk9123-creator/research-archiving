@@ -1444,6 +1444,11 @@ test('product scope: card asks SAF-only vs all renewable fuels for SAF capacity 
   // too few labelled facts (older, not yet re-extracted): the filter is not applied rather than emptying the table
   const unlabeled = recs.map((r, i) => (i < 2 ? r : { ...r, product: null }));
   assert.equal(cs.applyToRecords(unlabeled, { product: 'saf' }).length, 5);
+  // labelled minority (3 of 10): not applied either
+  const thin = Array.from({ length: 10 }, (_, i) => ({ entity: `T${i}`, product: i < 3 ? 'saf' : null, status: '가동', etype: '기업' }));
+  assert.equal(cs.applyToRecords(thin, { product: 'saf' }).length, 10);
+  const mostly = Array.from({ length: 10 }, (_, i) => ({ entity: `T${i}`, product: i < 7 ? 'saf' : null, status: '가동', etype: '기업' }));
+  assert.equal(cs.applyToRecords(mostly, { product: 'saf' }).length, 7);
   assert.match(cs.describeChoices({ product: 'saf' }), /SAF 전용/);
   // the follow-up keeps the product unless it states one
   const ctx2 = cs.sanitizeContext({ classification: { product: 'saf', status: 'current' } });

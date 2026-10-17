@@ -108,9 +108,10 @@ function applyToRecords(records, choices) {
   else if (choices.status === 'plan') out = out.filter((r) => PLAN_STATUS.has(r.status));
   if (choices.kind === 'company') out = out.filter((r) => r.etype !== '기관' && r.etype !== '국가');
   if (choices.product === 'saf' || choices.product === 'all') {
-    // product scope: only applied when enough facts carry a product label (older facts are labelled by re-extraction)
+    // product scope: only applied when most facts carry a product label (older facts are labelled by re-extraction);
+    // filtering on a thin labelled minority would silently drop most companies
     const labelled = out.filter((r) => r.product);
-    if (labelled.length >= 3) {
+    if (labelled.length >= 3 && labelled.length / out.length >= 0.6) {
       const keep = choices.product === 'saf' ? new Set(['saf']) : new Set(['saf', 'renewable_diesel', 'biofuel_total']);
       out = out.filter((r) => r.product && keep.has(r.product));
     }
