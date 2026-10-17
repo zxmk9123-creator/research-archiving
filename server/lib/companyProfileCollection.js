@@ -134,4 +134,27 @@ async function runCompanyProfileCollection({ only, set } = {}) {
   return { started: true, total: status.total };
 }
 
-module.exports = { runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, VERIFY_COMPANIES, VERIFY_DATED_COMPANIES, buildQueries };
+// Runs arbitrary queries through the same pipeline (dedup, relevance, freshness gate, AI screening, tagging) and
+// returns plain totals; used by the verification routine. Does not touch the one-off run's status object.
+async function collectQueries(queries) {
+  const source = await ensureSetup([]);
+  const totals = { discovered: 0, archived: 0, failedQueries: 0, itemIds: [] };
+  for (const q of queries) {
+    const r = await collectWebDiscoverySource({ ...source, url: q }, { itemType: '보고서', skipStaleCheck: true, skipKnownRejects: true, maxFresh: true });
+    if (!r.ok) { totals.failedQueries++; continue; }
+    totals.discovered += r.discovered || 0;
+    totals.archived += r.archived || 0;
+    for (const d of r.details || []) {
+      if (d.stage === 'archived' && d.itemId) {
+        totals.itemIds.push(d.itemId);
+        try {
+          const { rows } = await pool.query('SELECT title, ai_summary, summary FROM items WHERE id = $1', [d.itemId]);
+          if (rows[0]) await matchCompanies(d.itemId, `${rows[0].title} ${rows[0].ai_summary || rows[0].summary || ''}`);
+        } catch (_) { /* tagging is best-effort */ }
+      }
+    }
+  }
+  return totals;
+}
+
+module.exports = { collectQueries, runCompanyProfileCollection, getStatus: () => status, COMPANIES, PALM_COMPANIES, VERIFY_COMPANIES, VERIFY_DATED_COMPANIES, buildQueries };

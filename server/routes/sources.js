@@ -143,6 +143,16 @@ router.get('/collect-company-profiles/status', requireAuth, (req, res) => {
   res.json(companyProfileCollection.getStatus());
 });
 
+// Uncertainty-triggered verification (lib/verificationRoutine.js): the scheduler runs it by itself; these are for operators.
+router.post('/run-verification', requireAuth, (req, res) => {
+  const routine = require('../lib/verificationRoutine');
+  routine.runQueue({ max: Math.min(Number(req.body && req.body.max) || 3, 10) }).catch((err) => console.error(`manual verification run failed: ${err.message}`));
+  res.status(202).json({ started: true });
+});
+router.get('/verification-status', requireAuth, async (req, res) => {
+  res.json(await require('../lib/verificationRoutine').getStatus());
+});
+
 router.post('/backfill-7day-discovery', requireAuth, async (req, res) => {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`

@@ -636,6 +636,24 @@ CREATE TABLE IF NOT EXISTS term_aliases (
   PRIMARY KEY (term, alt)
 );
 
+-- Uncertainty-triggered verification routine (lib/verificationRoutine.js): an answer that had to set an entity's
+-- figure aside (undated / old / unconfirmed) queues it here; a scheduled routine collects fresh sources for it.
+CREATE TABLE IF NOT EXISTS verification_queue (
+  id SERIAL PRIMARY KEY,
+  entity_key TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  topic TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','gave_up')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  seen_count INTEGER NOT NULL DEFAULT 1,
+  archived_last INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_run_at TIMESTAMPTZ,
+  UNIQUE (entity_key, topic)
+);
+
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,

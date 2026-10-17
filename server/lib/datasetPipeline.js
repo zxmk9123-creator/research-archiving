@@ -423,7 +423,7 @@ function buildRanking(records, valueOf, unitLabel, topN, nowYear) {
     `| 기업 | ${metric} (${unitLabel}) | 사유 | 산정 | 출처 |`, '| --- | --- | --- | --- | --- |',
     ...unsafe.map((e) => `| ${e.entity}${e.country ? ` (${e.country})` : ''} | ${fmtNum(e.value)} | ${e.reliability === 'undated' ? '시점 불명' : '오래됨'} | ${e.how} | ${cite(e)} |`),
   ] : [];
-  return { entities: top.map((e) => e.entity), table: lines.join('\n'), chart: null, charts: [], markdown: `${lines.join('\n')}\n\n${note}${sideLines.length ? `\n${sideLines.join('\n')}` : ''}`, records: top.length, only: true, unsafe: unsafe.map((e) => e.entity) };
+  return { entities: top.map((e) => e.entity), table: lines.join('\n'), chart: null, charts: [], markdown: `${lines.join('\n')}\n\n${note}${sideLines.length ? `\n${sideLines.join('\n')}` : ''}`, records: top.length, only: true, unsafe: unsafe.map((e) => e.entity), uncertain: unsafe.map((e) => ({ entity: e.entity, reason: e.reliability })) };
 }
 
 function buildDataset(records, requiredNames = [], { unitTons = false, density = null, nowYear = new Date().getFullYear(), topN = null, only = false } = {}) {
@@ -488,7 +488,9 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   if (excluded) notes.push(`다른 단위의 ${excluded}건은 차트에서 제외했고 표에 원문 표기로 남겼습니다${basis.group === 'mass' && !density ? ' (제품 밀도를 알 수 없어 톤으로 환산하지 않음)' : ''}.`);
   notes.push('현재 값은 거점별 가장 최근 기준, 계획·목표는 거점별 가장 먼 연도의 값을 막대로 그렸고, 전사 합계는 거점 값과 합산하지 않았습니다. 표에는 모든 값과 기준 연도를 기재했습니다.');
   const chartBlocks = charts.map((c) => `\`\`\`chart\n${JSON.stringify(c)}\n\`\`\``).join('\n\n');
-  return { entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
+  // entities whose CURRENT figure rests on undated / old evidence: candidates for the verification routine
+  const uncertain = currentRows.filter((r) => currentReliability(r) !== 'ok').map((r) => ({ entity: r.entity, reason: currentReliability(r) }));
+  return { uncertain, entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
 module.exports = { dedupeSameFacility, mergeJointVentures, WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

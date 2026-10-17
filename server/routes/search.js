@@ -10,6 +10,7 @@ const subjectScope = require('../lib/subjectScope');
 const annualRecords = require('../lib/annualReportRecords');
 const classificationScope = require('../lib/classificationScope');
 const termExpansion = require('../lib/termExpansion');
+const verificationRoutine = require('../lib/verificationRoutine');
 const { isAuthenticated } = require('../lib/auth');
 
 // DB classifications offered on the classification card (sectors with article counts, entity types), cached 10 min.
@@ -1559,6 +1560,12 @@ async function handleSearch(req, res, signal) {
     });
     if (assessment.heavy) return res.json({ needsConfirmation: true, plan: assessment.plan });
   }
+  // weak evidence found while answering -> queued for the verification routine (after the answer; never blocks it)
+  const queueUncertain = (dataset) => {
+    if (!dataset || !Array.isArray(dataset.uncertain) || !dataset.uncertain.length) return;
+    const topic = (choices && choices.subject) || (Object.keys(SECTOR_KEYWORD_PATTERNS).find((k) => SECTOR_KEYWORD_PATTERNS[k].test(question)) || '');
+    verificationRoutine.enqueue(dataset.uncertain, { topic }).catch((err) => console.error('verification enqueue failed:', err.message));
+  };
   const nextContextFor = (dataset) => classificationScope.nextContext(prevContext, { question, choices, datasetEntities: dataset && dataset.entities, focusEntities: intent.focus.map((c) => c.name) });
   const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, choices, intent.focus.length ? [] : referencedEntities);
   datasetPromise.catch(() => {});
@@ -1607,6 +1614,7 @@ async function handleSearch(req, res, signal) {
       isFollowup, questionFingerprint: fingerprint, streamed: false,
     });
     // trace = internal stage counts: admin session only
+    queueUncertain(dataset);
     return res.json({ answer, insufficient: false, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
   }
 
@@ -1672,6 +1680,7 @@ async function handleSearch(req, res, signal) {
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
   sendEvent('done', { answer, insufficient: false, sources, context: nextContextFor(dataset) });
   res.end();
+  queueUncertain(dataset);
   await recordSearchTelemetry({
     requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt,
     candidateCount: candidates.length, sourceCount: sources.length, provider: 'freellmapi', model: modelUsed,

@@ -15,3 +15,4 @@ process.env.ITEM_FACTS = 'off';
 process.env.URL_MEMO = 'off';
 process.env.ROSTER_CACHE = 'off';
 process.env.TERM_EXPANSION = 'off';
+process.env.VERIFICATION_ROUTINE = 'off';

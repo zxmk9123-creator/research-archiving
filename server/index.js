@@ -100,6 +100,15 @@ setInterval(() => {
   maybeRunWeeklyScopeAnalysis().catch((err) => console.error('scope analysis run failed', err));
 }, COLLECTION_CHECK_INTERVAL_MS);
 
+// Uncertainty-triggered verification: entities an answer had to set aside (undated / old figures) are queued by the
+// search route; this routine collects fresh sources for a few of them per tick (VERIFICATION_ROUTINE=off disables).
+const verificationRoutine = require('./lib/verificationRoutine');
+const VERIFICATION_TICK_MS = 30 * 60 * 1000;
+setTimeout(() => verificationRoutine.runQueue().catch((err) => console.error('verification routine failed', err)), 5 * 60 * 1000);
+setInterval(() => {
+  verificationRoutine.runQueue().catch((err) => console.error('verification routine failed', err));
+}, VERIFICATION_TICK_MS);
+
 // Recovers Review-tab items stuck forever at ai_status='pending' — see
 // requeueStalledPendingDrafts()'s own comment for the full root cause
 // (a redeploy killing the process mid-generateAiDraftForItem call, with
