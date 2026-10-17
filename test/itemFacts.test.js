@@ -98,6 +98,7 @@ test('hasQuantity: only unit-bearing quantities count (years, percentages and ba
 
 test('loadFactsByTopic: the whole archive\'s stored facts for a topic, numbered after the chat candidates', async () => {
   const { calls, restore } = mockPool((text) => {
+    if (text.includes('published_at IS NULL')) return { rows: [] }; // the undated lookup
     if (text.includes('FROM items i LEFT JOIN sources')) return { rows: [{ id: 70, title: 'Chevron Geismar', summary: 's' }, { id: 71, title: 'Total Grandpuits', summary: 's' }] };
     if (text.includes('FROM item_facts WHERE item_id = ANY')) return { rows: [
       { item_id: 70, entity: 'Chevron', site: 'Geismar', metric: '생산능력', status: '가동', year: null, grp: 'volume', amount: 1.28e9, basis: '환산(갤런→리터)', original: '340 million gallons' },
@@ -137,4 +138,22 @@ test('extractFactsForItem with replace: a run that yields no records keeps the o
     await itemFacts.extractFactsForItem(item(), { replace: true });
     assert.ok(!calls.some((c) => c.text.includes('DELETE FROM item_facts')));
   } finally { restore(); restoreProvider(); }
+});
+
+test('loadFactsByTopic: undated items are fetched separately so a long dated list cannot push them out', async () => {
+  const { calls, restore } = mockPool((text) => {
+    if (text.includes('published_at IS NULL')) return { rows: [{ id: 90, title: 'undated TotalEnergies', summary: 's', published_at: null }] };
+    if (text.includes('published_at IS NOT NULL')) return { rows: [{ id: 80, title: 'dated', summary: 's', published_at: '2026-01-01' }] };
+    if (text.includes('FROM item_facts WHERE item_id = ANY')) return { rows: [
+      { item_id: 80, entity: 'A', site: null, metric: 'm', status: '가동', year: null, grp: 'mass', amount: 1, basis: '직접', original: '1 톤' },
+      { item_id: 90, entity: 'TotalEnergies', site: null, metric: 'm', status: '가동', year: null, grp: 'mass', amount: 2, basis: '직접', original: '2 톤' },
+    ] };
+    return { rows: [] };
+  });
+  try {
+    const r = await itemFacts.loadFactsByTopic(['saf'], { maxItems: 1, maxUndated: 1 });
+    assert.deepEqual(r.items.map((i) => i.id), [80, 90]);
+    assert.deepEqual(r.records.map((x) => x.entity), ['A', 'TotalEnergies']);
+    assert.ok(calls.some((c) => c.text.includes('published_at IS NULL') && c.params[2] === 1));
+  } finally { restore(); }
 });

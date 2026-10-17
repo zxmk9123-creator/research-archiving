@@ -1000,6 +1000,15 @@ async function loadRoster() {
 //    deterministically from its own material, with a [N] footnote — so the
 //    answer can never silently omit a company that the archive covers.
 const { SECTOR_KEYWORD_PATTERNS } = require('../lib/classificationSanity');
+const PRODUCT_TOPIC_TERMS = {
+  SAF: ['saf', '지속가능항공유', 'sustainable aviation fuel', '바이오항공유'],
+  '팜유': ['팜유', 'palm oil'],
+  '대두유': ['대두유', 'soybean oil', 'soy oil'],
+  '유채씨유': ['유채씨유', 'rapeseed oil', 'canola oil'],
+  '해바라기유': ['해바라기유', 'sunflower oil'],
+  UCO: ['uco', 'used cooking oil', '폐식용유'],
+  Tallow: ['tallow', '우지'],
+};
 function requiredCompanies(question, candidates, roster) {
   const intent = classifyIntent(question, roster);
   if (intent.type !== 'collective' && intent.type !== 'peers') return [];
@@ -1160,11 +1169,17 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
     //     articles; those extra articles are appended after the candidates so footnotes resolve
     let extraCandidates = [];
     try {
-      const topic = [];
-      for (const forms of extractConcepts(question)) {
-        const f = forms[0];
-        if (!f || datasetPipeline.METRIC_WORDS.test(f) || ENTITY_NOUN.test(f) || requestCompliance.isVisualWord(f)) continue;
-        topic.push(...forms);
+      let topic = [];
+      // a named product (SAF, 팜유 ...) IS the topic: its own spellings, not every loose word of the question
+      // ("글로벌", "기준", "Top10" would pull in the whole archive and push specific items past the item limit)
+      const named = Object.keys(PRODUCT_TOPIC_TERMS).find((k) => (choices && choices.subject === k) || (SECTOR_KEYWORD_PATTERNS[k] && SECTOR_KEYWORD_PATTERNS[k].test(question)));
+      if (named) topic = PRODUCT_TOPIC_TERMS[named];
+      else {
+        for (const forms of extractConcepts(question)) {
+          const f = forms[0];
+          if (!f || datasetPipeline.METRIC_WORDS.test(f) || ENTITY_NOUN.test(f) || requestCompliance.isVisualWord(f)) continue;
+          topic.push(...forms);
+        }
       }
       if (topic.length) {
         const wide = await itemFacts.loadFactsByTopic(topic, { excludeIds: candidates.map((c) => c.id).filter(Boolean), baseIndex: candidates.length });

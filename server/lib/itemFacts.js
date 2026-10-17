@@ -104,19 +104,24 @@ async function countPendingExtraction(candidates) {
 // text mentions one of the topic terms — so a quantity dataset is complete over the whole
 // archive, not just over the handful of articles that happened to rank into the chat's top-N.
 // Returned items are appended after the chat's own candidates (sources are numbered after them).
-async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, maxItems = 150 } = {}) {
+async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, maxItems = 300, maxUndated = 100 } = {}) {
   const forms = (topicForms || []).map((f) => String(f).trim()).filter((f) => f.length >= 2);
   if (!forms.length) return { records: [], items: [] };
   const pats = forms.map((f) => `%${f}%`);
-  const { rows: items } = await pool.query(
-    `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
+  // dated items (newest first) and UNDATED items (profile-collection pages often carry no date) are fetched separately,
+  // so a long dated list can never push the undated ones past the limit
+  const base = `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name
      FROM items i LEFT JOIN sources s ON s.id = i.source_id
      WHERE i.status = 'Published' AND i.facts_status = 'done' AND NOT (i.id = ANY($2))
        AND EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id)
-       AND (i.title ILIKE ANY($1) OR i.summary ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1) OR i.insight ILIKE ANY($1))
-     ORDER BY i.published_at DESC NULLS LAST LIMIT $3`,
-    [pats, excludeIds.length ? excludeIds : [0], maxItems]
-  );
+       AND (i.title ILIKE ANY($1) OR i.summary ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1) OR i.insight ILIKE ANY($1))`;
+  const exclude = excludeIds.length ? excludeIds : [0];
+  const [dated, undated] = await Promise.all([
+    pool.query(`${base} AND i.published_at IS NOT NULL ORDER BY i.published_at DESC LIMIT $3`, [pats, exclude, maxItems]),
+    pool.query(`${base} AND i.published_at IS NULL ORDER BY i.collected_at DESC LIMIT $3`, [pats, exclude, maxUndated]),
+  ]);
+  const seen = new Set();
+  const items = [...(dated.rows || []), ...(undated.rows || [])].filter((i) => !seen.has(i.id) && seen.add(i.id));
   if (!items.length) return { records: [], items: [] };
   const { rows } = await pool.query(
     'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product FROM item_facts WHERE item_id = ANY($1)',
