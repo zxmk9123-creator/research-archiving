@@ -438,11 +438,13 @@ async function retrieveCandidates(question, history, { light = false, trace = nu
   // RARE terms (few archive hits) get their other-script spelling as an extra form of the same concept
   // ("율리시스" -> "ulysses"); a spelling that is itself a common word is discarded.
   try {
-    const rare = concepts.map((forms, i) => ({ forms, i })).filter(({ forms, i }) => docFreqs[i] <= 3 && forms[0].length >= 3);
+    // the term looked up is the particle-free STEM ("율리시스", not "율리시스에" — the form with the Korean particle is not a word)
+    const stemOf = (forms) => forms.filter((f) => f.length >= 3).sort((a, b) => a.length - b.length)[0];
+    const rare = concepts.map((forms, i) => ({ forms, i, term: stemOf(forms) })).filter(({ term, i }) => docFreqs[i] <= 3 && term);
     if (rare.length) {
-      const expanded = await termExpansion.expandTerms(rare.map((r) => r.forms[0]));
-      for (const { forms, i } of rare) {
-        for (const alt of expanded.get(forms[0].toLowerCase()) || []) {
+      const expanded = await termExpansion.expandTerms(rare.map((r) => r.term));
+      for (const { forms, i, term } of rare) {
+        for (const alt of expanded.get(term.toLowerCase()) || []) {
           if (forms.some((f) => f.toLowerCase() === alt.toLowerCase())) continue;
           if (await conceptDocFrequency([alt]) > 40) continue;
           forms.push(alt);

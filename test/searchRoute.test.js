@@ -1455,3 +1455,14 @@ test('product scope: card asks SAF-only vs all renewable fuels for SAF capacity 
   assert.equal(cs.carry(ctx2, '그럼 상위 5개만').choices.product, 'saf');
   assert.equal(cs.carry(ctx2, '그럼 재생디젤 포함 전체로').choices.product, undefined);
 });
+
+test('termExpansion: eligibility and alternative filtering', () => {
+  const te = require('../server/lib/termExpansion');
+  assert.equal(te.eligible('율리시스'), true);
+  assert.equal(te.eligible('율리시스에'), true); // eligibility is about shape; the caller passes the stem
+  assert.equal(te.eligible('12'), false);
+  assert.equal(te.eligible('ab'), false);
+  assert.equal(te.plausibleAlt('Ulysses', '율리시스'), true);
+  assert.equal(te.plausibleAlt('율리시스', '율리시스'), false);
+  assert.equal(te.plausibleAlt('x', '율리시스'), false);
+});
