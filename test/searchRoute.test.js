@@ -1393,3 +1393,17 @@ test('conversation context: a follow-up inherits sector, card answers and the pr
   assert.equal(next.classification.unit, 'operator');
   assert.deepEqual(next.entities, ['Neste', 'Eni S.p.A.', 'Chevron']);
 });
+
+test('debug trace is returned only to an authenticated admin session', async () => {
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [SAMPLE_ROW] })]]);
+  const restoreProvider = mockProvider(async () => ({ text: '답변 [1]', provider: 'p' }));
+  try {
+    await withServer(async (base) => {
+      const r = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '팜유 가격 이유', debug: true }) }).then((x) => x.json());
+      assert.equal(r.trace, undefined);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});

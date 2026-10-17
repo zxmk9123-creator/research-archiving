@@ -9,6 +9,7 @@ const freshness = require('../lib/freshness');
 const subjectScope = require('../lib/subjectScope');
 const annualRecords = require('../lib/annualReportRecords');
 const classificationScope = require('../lib/classificationScope');
+const { isAuthenticated } = require('../lib/auth');
 
 // DB classifications offered on the classification card (sectors with article counts, entity types), cached 10 min.
 let classificationCtxCache = { at: 0, value: null };
@@ -1537,7 +1538,8 @@ async function handleSearch(req, res, signal) {
       candidateCount: candidates.length, sourceCount: sources.length, provider: providerName,
       isFollowup, questionFingerprint: fingerprint, streamed: false,
     });
-    return res.json({ answer, insufficient: false, sources, context: nextContextFor(dataset), ...(req.body.debug === true ? { trace: datasetTrace } : {}) });
+    // trace = internal stage counts: admin session only
+    return res.json({ answer, insufficient: false, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
   }
 
   // --- Streaming path ---
