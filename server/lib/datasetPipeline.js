@@ -141,6 +141,25 @@ function mergeJointVentures(records, textOfSource) {
   return { records: merged, dropped: drop.size };
 }
 
+// SAME ENTITY, SAME FIGURE: one plant is often described by several articles under different labels ("인도네시아 공장",
+// "인도네시아 법인", "Port Arthur" / "Port Arthur SAF"). Two site rows of one entity with the same status, group and
+// amount whose site names differ only by generic words (공장/법인/시설/plant/complex ...) or contain one another are the
+// same facility: summing them would double the plant. The more specific site name is kept.
+const GENERIC_SITE = /(공장|법인|시설|플랜트|정유소|정유공장|바이오정유소|바이오리파이너리|콤플렉스|단지|산업단지|프로젝트|사업장|생산시설|plant|facility|complex|refinery|biorefinery|site|unit|project|works|saf)/gi;
+const siteCore = (s) => String(s || '').toLowerCase().replace(GENERIC_SITE, '').replace(/[^a-z0-9가-힣]/g, '');
+function dedupeSameFacility(records) {
+  const keep = [];
+  const dropped = [];
+  for (const r of records) {
+    const dup = r.site ? keep.findIndex((k) => k.site && k.entity.toLowerCase() === r.entity.toLowerCase() && k.status === r.status && k.group === r.group
+      && Math.round(k.amount) === Math.round(r.amount) && (siteCore(k.site) === siteCore(r.site) || !siteCore(k.site) || !siteCore(r.site) || siteCore(k.site).includes(siteCore(r.site)) || siteCore(r.site).includes(siteCore(k.site)))) : -1;
+    if (dup < 0) { keep.push(r); continue; }
+    if (String(r.site).length > String(keep[dup].site).length) keep[dup] = r; // keep the more specific label
+    dropped.push(r);
+  }
+  return { records: keep, dropped: dropped.length };
+}
+
 const WANTS_COMPANIES = /(기업|업체|회사|company|companies|producer|생산자)/i;
 
 function isDatasetRequest(req, question) {
@@ -421,4 +440,4 @@ function buildDataset(records, requiredNames = [], { unitTons = false, density =
   return { entities: [...new Set(records.filter((r) => valueOf(r) !== null && valueOf(r) !== undefined).map((r) => r.entity))], table: lines.join('\n'), chart: charts[0], charts, markdown: `${lines.join('\n')}\n\n${chartBlocks}\n\n${notes.join(' ')}`, records: sorted.length };
 }
 
-module.exports = { mergeJointVentures, WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };
+module.exports = { dedupeSameFacility, mergeJointVentures, WANTS_COMPANIES, canonicalizeEntities, guardStoredRecord, recordsForQuestion, isDatasetRequest, productDensity, EXTRACTION_SYSTEM, buildExtractionUser, parseRecords, verifyRecords, buildDataset, bucketRows, chartBasis, METRIC_WORDS };

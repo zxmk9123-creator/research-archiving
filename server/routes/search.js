@@ -1233,6 +1233,9 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
       const jv = datasetPipeline.mergeJointVentures(records, textOfSrc);
       if (jv.dropped) trace.push(`jv_merged ${jv.dropped}`);
       records = jv.records;
+      const same = datasetPipeline.dedupeSameFacility(records);
+      if (same.dropped) trace.push(`same_facility_merged ${same.dropped}`);
+      records = same.records;
     }
     records = classificationScope.applyToRecords(records, choices);
     if (focusEntities.length) {

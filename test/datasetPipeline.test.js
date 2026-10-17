@@ -236,3 +236,18 @@ test('mergeJointVentures: the venture (parent recorded) stays, its owner is the 
   assert.deepEqual(out.records.map((r) => r.entity), ['Diamond Green Diesel']);
   assert.deepEqual(out.records[0].partners, ['Valero Energy']);
 });
+
+test('dedupeSameFacility: one plant under several labels counts once; different plants with the same figure stay', () => {
+  const dp2 = require('../server/lib/datasetPipeline');
+  const r = (site, extra = {}) => ({ entity: 'PT.ARC', site, status: '가동', year: 2026, source: 1, group: 'mass', amount: 5e5, original: '50만 톤', basis: '직접', ...extra });
+  const out = dp2.dedupeSameFacility([r('인도네시아 공장'), r('인도네시아 법인'), r('Port Arthur'), r('Port Arthur SAF plant', { amount: 5e5 })]);
+  assert.deepEqual(out.records.map((x) => x.site), ['인도네시아 공장', 'Port Arthur SAF plant']);
+  assert.equal(out.dropped, 2);
+  // two named plants with identical capacity are different facilities
+  const two = dp2.dedupeSameFacility([r('Rotterdam'), r('Singapore')]);
+  assert.equal(two.records.length, 2);
+  // a different amount or status is never merged
+  assert.equal(dp2.dedupeSameFacility([r('Gela 공장'), r('Gela 공장', { amount: 6e5 }), r('Gela 공장', { status: '계획' })]).records.length, 3);
+  // another entity is never merged here
+  assert.equal(dp2.dedupeSameFacility([r('Gela 공장'), r('Gela 공장', { entity: 'Eni' })]).records.length, 2);
+});
