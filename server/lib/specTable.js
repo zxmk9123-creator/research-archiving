@@ -6,7 +6,9 @@ const RANK = (s) => (/가동|현재|운영|current/i.test(s) ? 3 : /건설/.test
 
 // -> { tons, converted } | null
 function parseCapacity(cell, density = 0.8) {
-  const t = String(cell || '').replace(/\[\d+\]/g, '').replace(/\s+/g, ' ');
+  const t = String(cell || '').replace(/\[\d+\]/g, '').replace(/⚠[^|]*/g, '').replace(/\s+/g, ' ')
+    .replace(/(\d[\d,]*)\s*만\s*(\d[\d,]*)(?=\s*(?:톤|t\b|배럴|갤런|리터))/g, (_, a, b) => String(Number(a.replace(/,/g, '')) * 1e4 + Number(b.replace(/,/g, '')))); // "4만 2,000톤"
+
   const m = t.match(/([\d][\d,]*(?:\.\d+)?)\s*(만|억|천|k|m)?\s*(톤|t\b|kt\b|mt\b|ktpa|tpa|tons?\b|tonnes?\b|bpd|b\/d|bbl\/d|배럴\s*\/?\s*일|일일\s*배럴|배럴|barrels?|갤런|gallons?|gal\b|리터|liters?|litres?|l\b)/i);
   if (!m) return null;
   let v = Number(m[1].replace(/,/g, ''));
@@ -65,7 +67,7 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
       const best = pool.slice().sort((a, b) => b.rank - a.rank || b.year - a.year || (b.cap ? b.cap.tons : 0) - (a.cap ? a.cap.tons : 0))[0];
       const cells = best.cells.slice();
       if (best.cap) {
-        const orig = cells[capIdx].replace(/\s*\[\d+\]/g, '').trim();
+        const orig = cells[capIdx].replace(/\s*\[\d+\]/g, '').replace(/⚠[^|]*/g, '').replace(/\s*※/g, '').trim();
         const cites = (cells[capIdx].match(/\[\d+\]/g) || []).join('');
         cells[capIdx] = `${fmt(best.cap.tons)}${best.cap.converted ? ' ※' : ''}${cites ? ` ${cites}` : ''}`;
         if (best.cap.converted) conv.push(`- ${cells[0].replace(/[*_`]/g, '')}: 원문 ${orig}`);

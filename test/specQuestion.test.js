@@ -44,3 +44,9 @@ test('normalizeSpecTables: running beats a later planned year even without a sta
   const out = st.normalizeSpecTables(t);
   assert.ok(/\| A \| 770,000/.test(out) && out.includes('450,000 톤/년'));
 });
+
+test('parseCapacity handles "4만 2,000톤" and drops warning text', () => {
+  const st = require('../server/lib/specTable');
+  assert.equal(st.parseCapacity('4만 2,000톤').tons, 42000);
+  assert.equal(st.parseCapacity('10,500 bpd ⚠원문 수치 확인 필요').converted, true);
+});
