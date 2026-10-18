@@ -10,3 +10,11 @@ test('feedstock-supply questions are recognised and expanded; producer questions
   assert.match(f.retrievalHint('UCO 수거업체'), /feedstock supplier/);
   assert.equal(f.retrievalHint('SAF 생산업체'), 'SAF 생산업체');
 });
+
+test('feedstock chain questions (value chain / diagram of UCO) are recognised and expand retrieval', () => {
+  assert.ok(f.isFeedstockChainQuestion('UCO 공급 밸류체인을 도식으로 그려줘'));
+  assert.ok(f.isFeedstockChainQuestion('폐식용유 공급망 관계도'));
+  assert.ok(!f.isFeedstockChainQuestion('팜유의 밸류체인을 그려줘'));
+  assert.match(f.retrievalHint('UCO 밸류체인 도식'), /feedstock supplier/);
+  assert.match(f.CHAIN_NOTE, /공급업체/);
+});

@@ -1369,6 +1369,22 @@ async function diagramPalmExtras(roster, have) {
   return out.slice(0, 12);
 }
 
+// Feedstock chain diagrams: recent supply-side materials (collectors, aggregators, suppliers, traders) join the candidates.
+async function feedstockSupplyExtras(have) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name, 0 AS relevance_score
+         FROM items i LEFT JOIN sources s ON s.id = i.source_id
+        WHERE i.status = 'Published' AND NOT (i.id = ANY($3))
+          AND (i.title ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1) OR i.summary ILIKE ANY($1))
+          AND (i.title ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.summary ILIKE ANY($2))
+        ORDER BY i.published_at DESC NULLS LAST LIMIT 8`,
+      [['%used cooking oil%', '%UCO%', '%폐식용유%'], ['%collect%', '%supplier%', '%aggregat%', '%trading%', '%partnership%', '%수거%', '%집하%', '%공급 계약%', '%공급업체%', '%공급망%', '%feedstock supply%'], have.map((c) => c.id).filter(Boolean)]
+    );
+    return rows;
+  } catch (_) { return []; }
+}
+
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
   let rawBody = String(rawText || '');
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
@@ -1507,6 +1523,7 @@ async function handleSearch(req, res, signal) {
     candidates = await retrieveCandidates(`${feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
     {
       const rosterForFresh = await getRoster();
+      if (feedstockSupply.isFeedstockChainQuestion(question)) candidates = candidates.concat(await feedstockSupplyExtras(candidates));
       if (diagram.isDiagramQuestion(question) && /(팜|palm)/i.test(question)) candidates = candidates.concat(await diagramPalmExtras(rosterForFresh, candidates));
       const intentForFresh = classifyIntent(question, rosterForFresh);
       // Old articles are dropped only where the answer rests on CURRENT figures (a table/ranking/capacity question).
@@ -1645,7 +1662,7 @@ async function handleSearch(req, res, signal) {
       relationBlock = companyRelations.promptBlock(await companyRelations.relationsFor(relNames, { limit: 80 }));
     } catch (_) { /* optional context */ }
   }
-  const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '');
+  const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
   const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
