@@ -119,7 +119,7 @@ setInterval(() => {
   reviewAutopilot.runAutopilot().catch((err) => console.error('review autopilot failed', err));
 }, 10 * 60 * 1000);
 
-// Entity registry maintenance: once a day after 03:00 KST (bilingual names, roles of new companies, relation cleanup). New companies
+// Entity registry maintenance: every 3 days at or after 09:00 KST (bilingual names, roles of new companies, relation cleanup). New companies
 // are registered when their item is published; this settles the rest (ENTITY_MAINTENANCE=off disables).
 const entityMaintenance = require('./lib/entityMaintenance');
 setTimeout(() => entityMaintenance.maybeRunEntityMaintenance().catch((err) => console.error('entity maintenance failed', err)), 10 * 60 * 1000);
