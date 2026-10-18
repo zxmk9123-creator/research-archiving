@@ -24,6 +24,12 @@ const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_
 const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학)$/i;
 const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
 const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
+// a joint venture must be stated as one (a "collaboration" or a "business combination" is not); brand ownership is not company
+// ownership; an exploration block / field / mine is an asset, not a company
+const JV_STRICT = /(합작|joint[- ]venture|\bJV\b|공동\s*(출자|투자|설립|개발)|co-?invest|consortium|컨소시엄)/i;
+const BRAND_CUE = /(브랜드|상표|brand|trademark|라이선스|licen[cs]e)/i;
+const STRONG_OWNERSHIP = /(인수|acqui|지분|stake|자회사|subsidiar|\d\s*%|모회사|parent|합병|merger|wholly|지배)/i;
+const ASSET_NAME = /(탐사\s*블록|광구|\bblocks?\b|\bfields?\b|유전|가스전|\blicen[cs]e area\b|\bwells?\b|광산|\bmines?\b)/i;
 const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-?invest|설립한)/i;
 
 // Collective / generic labels ("중국 내 식당", "여러 항공사들", "인도 자회사", "major airlines") name no single company.
@@ -53,7 +59,10 @@ function fixRelation(r) {
   if (isNonCompanyName(src) || isNonCompanyName(dst)) return null;
   const ev = String(r.evidence || '');
   const pct = Number(r.share_pct) || 0;
+  if (['owns', 'stake', 'jv_partner'].includes(relation) && (ASSET_NAME.test(dst) || ASSET_NAME.test(src))) return null; // assets are not companies
+  if (relation === 'jv_partner' && !JV_STRICT.test(ev)) return null;                    // "협력", "기업 결합" are not a joint venture
   if (relation === 'owns') {
+    if (ev && BRAND_CUE.test(ev) && !STRONG_OWNERSHIP.test(ev)) return null;           // "소유의 브랜드" is brand ownership
     if (ev && JV_CUE.test(ev) && pct <= 50) relation = 'stake';        // a JV partner is not the JV's parent
     else if (pct > 0 && pct <= 50) relation = 'stake';
     else if (ev && !OWNERSHIP_CUE.test(ev)) return null;              // "strategic review of X" is not ownership

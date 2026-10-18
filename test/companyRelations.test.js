@@ -11,8 +11,8 @@ test('verifyRelations keeps only rows whose both names occur in the text, maps t
   const text = 'LG Chem and Eni formed LG Eni BioRefining. Eni owns 51% of Enilive. Hyundai E&C builds the plant for LG Eni BioRefining.';
   const canon = (n) => ({ 'lg chem': 'LG화학' }[n.toLowerCase()] || n);
   const out = rel.verifyRelations([
-    { src: 'LG Chem', dst: 'Eni', relation: 'jv_partner', evidence: 'formed' },
-    { src: 'Eni', dst: 'LG Chem', relation: 'jv_partner', evidence: 'formed' },
+    { src: 'LG Chem', dst: 'Eni', relation: 'jv_partner', evidence: '합작 법인 formed' },
+    { src: 'Eni', dst: 'LG Chem', relation: 'jv_partner', evidence: '합작 법인 formed' },
     { src: 'Eni', dst: 'Enilive', relation: 'owns', share_pct: 51, evidence: 'owns 51%' },
     { src: 'Hyundai E&C', dst: 'LG Eni BioRefining', relation: 'contractor_for', evidence: 'builds' },
     { src: 'Shell', dst: 'Eni', relation: 'owns' },             // Shell not in the text
@@ -60,4 +60,16 @@ test('a label that lists several companies is not one company ("Foo, Inc." is)',
   assert.equal(rel.isNonCompanyName('Neste, Marathon Petroleum'), true);
   assert.equal(rel.isNonCompanyName('Calumet, Inc'), false);
   assert.equal(rel.baseKey('Golden Agri-Resources'), 'golden agri resources');
+});
+
+test('fixRelation: jv_partner needs a stated joint venture, brand ownership is not company ownership, assets are not companies', () => {
+  const f = rel.fixRelation;
+  assert.equal(f({ src: 'LanzaTech', dst: 'Mibelle Group', relation: 'jv_partner', evidence: 'Mibelle Group과 협력해 기술을 개발 중' }), null);
+  assert.equal(f({ src: 'DevvStream', dst: 'Southern Energy Renewables', relation: 'jv_partner', evidence: '기업 결합 제안을 승인받았다' }), null);
+  assert.equal(f({ src: 'Airbus', dst: 'Tereos', relation: 'jv_partner', evidence: 'Technip, Airbus, Safran, Tereos가 합작 법인 Rebound를 설립' }).relation, 'jv_partner');
+  assert.equal(f({ src: 'GS칼텍스', dst: '포스코인터내셔널', relation: 'jv_partner', evidence: 'GS칼텍스와 공동 설립한 정제법인 PT.ARC' }).relation, 'jv_partner');
+  assert.equal(f({ src: 'Sime Darby Berhad', dst: 'Sime Darby Plantation Berhad', relation: 'owns', evidence: 'Sime Darby Berhad 소유의 브랜드 사용' }), null);
+  assert.equal(f({ src: 'Sime Darby Berhad', dst: 'Sime Darby Plantation', relation: 'owns', evidence: 'Sime Darby Berhad가 지분 51%를 보유' }).relation, 'owns');
+  assert.equal(f({ src: 'Eni', dst: '사푸칼라 탐사 블록', relation: 'owns', share_pct: 100, evidence: 'ENI는 사푸칼라 탐사 블록 지분 100%를 획득' }), null);
+  assert.equal(f({ src: 'Eni', dst: 'Eni West Field', relation: 'stake', evidence: 'stake in field' }), null);
 });
