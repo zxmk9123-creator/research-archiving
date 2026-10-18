@@ -34,6 +34,7 @@ const specQuestion = require('../lib/specQuestion');
 const specTable = require('../lib/specTable');
 const diagram = require('../lib/diagram');
 const companyRelations = require('../lib/companyRelations');
+const entityRegistry = require('../lib/entityRegistry');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
 const itemFacts = require('../lib/itemFacts');
 const pool = require('../db/pool');
@@ -1338,11 +1339,12 @@ async function ensureVisual(text, req, signal) {
 }
 
 // Canonical company spelling (roster aliases) and a "not a company" test (country / region / market / institution) for diagram nodes.
-function diagramHelpers(roster) {
+function diagramHelpers(roster, registry = { canon: (n) => n, roleOf: () => null }) {
   const canonMap = new Map();
   for (const c of roster || []) for (const n of c.rawNames || [c.name]) canonMap.set(String(n).toLowerCase().trim(), c.name);
   return {
-    canon: (label) => canonMap.get(String(label).toLowerCase().trim()) || label,
+    canon: (label) => registry.canon(canonMap.get(String(label).toLowerCase().trim()) || label),
+    roleOf: (label) => registry.roleOf(label),
     isNonCompany: (label) => classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()) || /^[A-Za-z가-힣]{1,2}사$|^company [a-z]$/i.test(String(label).trim()) || /[®™]/.test(label),
   };
 }
@@ -1417,7 +1419,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
   if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
-  if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length, ...diagramHelpers(rosterForScope) });
+  if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length, ...diagramHelpers(rosterForScope, await entityRegistry.getRegistry()) });
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);

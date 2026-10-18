@@ -1299,3 +1299,15 @@ CREATE TABLE IF NOT EXISTS company_relations (
 CREATE UNIQUE INDEX IF NOT EXISTS company_relations_uniq ON company_relations (LOWER(src), LOWER(dst), relation);
 CREATE INDEX IF NOT EXISTS company_relations_dst ON company_relations (LOWER(dst));
 ALTER TABLE items ADD COLUMN IF NOT EXISTS relations_status TEXT;
+
+-- Entity registry (lib/entityRegistry.js): `entity` keeps the original spelling chosen as the representative,
+-- `same_names` every other spelling of the SAME company (Latin / Hangul / suffix variants), `role` what it is in the
+-- supply chain (emitter / supplier / producer / ...). Lookups map any listed spelling to `entity`.
+CREATE TABLE IF NOT EXISTS entity_registry (
+  id SERIAL PRIMARY KEY,
+  entity TEXT NOT NULL,
+  same_names TEXT[] NOT NULL DEFAULT '{}',
+  role TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS entity_registry_entity ON entity_registry (LOWER(entity));

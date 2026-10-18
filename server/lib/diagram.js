@@ -53,14 +53,14 @@ function applyRelationRules(edges, nodes) {
 }
 
 // -> normalized object or null
-function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
+function sanitize(raw, { canon = (n) => n, isNonCompany = () => false, roleOf = () => null } = {}) {
   const d = raw && typeof raw === 'object' ? raw : null;
   if (!d || !Array.isArray(d.nodes)) return null;
   const type = d.type === 'relations' ? 'relations' : 'valuechain';
-  const stages = type === 'valuechain' && Array.isArray(d.stages)
+  let stages = type === 'valuechain' && Array.isArray(d.stages)
     ? d.stages.slice(0, 8).map((s) => ({ id: str(s && s.id, 20), label: str(s && s.label, 24) })).filter((s) => s.id && s.label)
     : [];
-  const stageIds = new Set(stages.map((s) => s.id));
+  let stageIds = new Set(stages.map((s) => s.id));
   const seen = new Set();
   const remap = new Map(); // model id -> kept node id (same company under two spellings is one node)
   const byLabel = new Map();
@@ -79,6 +79,19 @@ function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
     nodes.push({ id, label, stage: stageIds.has(n.stage) ? n.stage : null, group: str(n.group, 24) || null });
   }
   if (nodes.length < 2) return null;
+  // emitters (배출처: restaurants, food factories ...) and suppliers (aggregate + distribute) are different stages
+  if (type === 'valuechain') {
+    const SUPPLY = /집적|공급|수거|aggregat|supplier/i;
+    let emit = stages.find((s) => /배출|emit/i.test(s.label) && !SUPPLY.test(s.label)); // a pure emitter stage only
+    const supply = stages.find((s) => SUPPLY.test(s.label));
+    for (const n of nodes) {
+      const role = roleOf(n.label);
+      if (role === 'emitter') {
+        if (!emit) { emit = { id: 's_emit', label: '배출처' }; stages = [emit, ...stages]; stageIds = new Set(stages.map((x) => x.id)); }
+        n.stage = emit.id;
+      } else if (role === 'supplier' && emit && n.stage === emit.id) n.stage = supply ? supply.id : n.stage;
+    }
+  }
   let edges = [];
   const keys = new Set();
   const known = new Set(nodes.map((n) => n.id));
@@ -112,9 +125,9 @@ function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
 
 // Replaces every ```diagram fence with the sanitized block (invalid ones are removed). Evidence is carried by the [n]
 // markers of the explanation lines (the diagram itself shows no source marks).
-function sanitizeInText(text, { maxSource = Infinity, canon, isNonCompany } = {}) {
+function sanitizeInText(text, { maxSource = Infinity, canon, isNonCompany, roleOf } = {}) {
   return String(text || '').replace(/```diagram[^\n]*\n([\s\S]*?)```/g, (whole, body) => {
-    const d = sanitize(parse(body), { canon, isNonCompany });
+    const d = sanitize(parse(body), { canon, isNonCompany, roleOf });
     if (!d) return '';
     for (const e of d.edges) if (e.source && e.source > maxSource) e.source = null;
     return `\`\`\`diagram\n${JSON.stringify(d)}\n\`\`\`\n`;

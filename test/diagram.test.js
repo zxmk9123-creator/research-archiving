@@ -58,3 +58,13 @@ test('sanitize applies the relation rules to edges: JV owners are stakes, cue-le
   assert.equal(t('f', 'e').type, 'supplies');
   assert.equal(t('g', 'h').type, 'owns');
 });
+
+test('sanitize: emitters get their own stage, a supplier is moved out of the emitter stage (roles come from the registry)', () => {
+  const roles = { sheetz: 'emitter', 'restaurant technologies': 'supplier', fathopes: 'supplier' };
+  const d = dg.sanitize({ type: 'valuechain', stages: [{ id: 's1', label: '배출·수거·집적' }, { id: 's2', label: '정제·생산' }], nodes: [
+    { id: 'a', label: 'Sheetz', stage: 's1' }, { id: 'b', label: 'Restaurant Technologies', stage: 's1' }, { id: 'c', label: 'Chevron', stage: 's2' },
+  ], edges: [{ from: 'a', to: 'b', type: 'supplies', label: 'UCO' }, { from: 'b', to: 'c', type: 'supplies', label: 'UCO' }] }, { roleOf: (n) => roles[n.toLowerCase()] || null });
+  assert.equal(d.stages[0].label, '배출처');
+  assert.equal(d.nodes.find((n) => n.label === 'Sheetz').stage, d.stages[0].id);
+  assert.notEqual(d.nodes.find((n) => n.label === 'Restaurant Technologies').stage, d.stages[0].id);
+});

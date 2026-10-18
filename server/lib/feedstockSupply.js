@@ -13,7 +13,7 @@ function isFeedstockSupplyQuestion(q) {
 // A value-chain / relationship diagram of a feedstock ("UCO 공급 밸류체인"): the supply side must be retrieved too.
 const CHAIN = /(밸류\s*체인|가치\s*사슬|공급망|value\s*chain|supply\s*chain|도식|관계도|구조도|다이어그램|diagram)/i;
 const isFeedstockChainQuestion = (q) => CHAIN.test(String(q || '')) && FEEDSTOCK.test(String(q || ''));
-const CHAIN_NOTE = '\n\n[원료 공급망 도식] 첫 단계는 배출처에서 원료(UCO 등)를 집적해 공급·유통하는 공급업체(수거·집하·트레이더 포함), 다음이 정제·생산 기업(SAF·HVO·재생디젤), 마지막이 수요처다. 공급업체 단계가 자료에 있으면 반드시 그 단계에 넣고, 생산 기업을 공급업체 단계에 넣지 않는다.';
+const CHAIN_NOTE = '\n\n[원료 공급망 도식] 단계는 왼쪽부터 (1) 배출처(식당·식품공장·유통점처럼 폐식용유가 나오는 곳) (2) 집적·공급업체(여러 배출처의 원료를 모아 직접 유통·수출하는 업체: 수거·집하·트레이더 포함) (3) 정제·생산 기업(SAF·HVO·재생디젤) (4) 수요처로 나눈다. 배출처와 공급업체는 서로 다른 단계다. 자료에 있는 업체를 알맞은 단계에 넣고, 배출처를 공급업체 단계에 넣지 않으며 생산 기업을 공급업체 단계에 넣지 않는다.';
 
 function retrievalHint(q) {
   return isFeedstockSupplyQuestion(q) || isFeedstockChainQuestion(q) ? `${q} UCO supply feedstock supplier collector trading partnership used cooking oil` : q;

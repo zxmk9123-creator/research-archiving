@@ -104,8 +104,12 @@ async function canonicalizer() {
         if (/[가-힣]/.test(h) && /^[A-Za-z]/.test(l) && !/[가-힣]/.test(l)) bilingual.set(String(h).toLowerCase().trim(), l);
       }
     } catch (_) { /* optional */ }
+    let registry = null;
+    try { registry = await require('./entityRegistry').getRegistry(); } catch (_) { /* optional */ }
     return (n) => {
       const k = String(n).toLowerCase().trim();
+      const viaRegistry = registry && registry.canon(n);
+      if (viaRegistry && viaRegistry !== n) return viaRegistry;
       const viaRoster = map.get(k) || baseMap.get(baseKey(n));
       if (viaRoster) return viaRoster;
       const latin = bilingual.get(k);

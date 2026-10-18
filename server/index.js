@@ -17,6 +17,7 @@ app.use('/api/sources', require('./routes/sources'));
 app.use('/api/companies', require('./routes/companies'));
 app.use('/api/items', require('./routes/items'));
 app.use('/api/relations', require('./routes/relations'));
+app.use('/api/entities', require('./routes/entities'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/picks', require('./routes/picks'));
 app.use('/api/stats', require('./routes/stats'));
