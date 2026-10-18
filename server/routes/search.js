@@ -1366,14 +1366,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (/\|\s*(미참여|불참)\s*\|/.test(modelText) && !candidates.some((c) => /(미참여|불참|참여하지\s*않)/.test(materialText(c)))) {
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
-  if (specQuestion.isSpecQuestion(question)) {
-    // the capacity column comes from stored facts classified at extraction (plant capacity vs throughput vs market target);
-    // the model's own cell is only the fallback for companies without classified facts
-    const density = datasetPipeline.productDensity(question) || 0.8;
-    let facts = null;
-    try { facts = specTable.factIndex((await itemFacts.loadFactRecords(candidates)).records, { density, safOnly: /SAF|항공유/i.test(question) && !/재생\s*디젤|HVO|바이오\s*디젤/i.test(question) }); } catch (_) { /* text-only fallback */ }
-    modelText = specTable.normalizeSpecTables(specQuestion.dropEmptyRows(modelText), { density, facts });
-  }
+  if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
@@ -1383,7 +1376,16 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (guarded.fixed || guarded.flagged) console.log(`ai-search number_guard fixed=${guarded.fixed} flagged=${guarded.flagged}`);
   // Table presentation: one unit/format per numeric column, malformed numbers
   // removed, mixed-unit columns annotated (see lib/tableCheck.js).
-  const tabled = tableCheck.normalizeTablesInText(guarded.text);
+  let guardedText = guarded.text;
+  if (specQuestion.isSpecQuestion(question)) {
+    // the capacity column comes from stored facts classified at extraction (plant capacity vs throughput vs market target);
+    // the model's own cell is only the fallback for companies without classified facts
+    const density = datasetPipeline.productDensity(question) || 0.8;
+    let facts = null;
+    try { facts = specTable.factIndex((await itemFacts.loadFactRecords(candidates)).records, { density, safOnly: /SAF|항공유/i.test(question) && !/재생\s*디젤|HVO|바이오\s*디젤/i.test(question) }); } catch (_) { /* text-only fallback */ }
+    guardedText = specTable.normalizeSpecTables(guardedText, { density, facts });
+  }
+  const tabled = tableCheck.normalizeTablesInText(guardedText);
   if (tabled.normalized || tabled.warnings) console.log(`ai-search table_guard normalized=${tabled.normalized} warnings=${tabled.warnings}`);
   // Explicit user requests are enforced in code (chart kind, unit, a chart when one
   // was asked for) — see lib/requestCompliance.js.

@@ -70,10 +70,10 @@ router.get('/annual-report-facts', requireAuth, async (req, res) => {
 // Read-only view of stored item_facts with their source article (review): ?entity=<name>
 router.get('/facts', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT f.entity, f.site, f.metric, f.status, f.year, f.grp, f.amount, f.original, f.basis, f.entity_type, f.product, i.id AS item_id, i.title, i.published_at
+    `SELECT f.entity, f.site, f.metric, f.status, f.year, f.grp, f.amount, f.original, f.basis, f.entity_type, f.product, f.kind, i.id AS item_id, COALESCE(i.ai_summary, i.summary) AS summary, i.title, i.published_at
        FROM item_facts f JOIN items i ON i.id = f.item_id
-      WHERE ($1::text IS NULL OR f.entity ILIKE '%' || $1 || '%') ORDER BY f.entity, i.published_at DESC NULLS LAST LIMIT 200`,
-    [req.query.entity || null]
+      WHERE ($1::text IS NULL OR f.entity ILIKE '%' || $1 || '%') AND ($2::text IS NULL OR f.kind = $2) ORDER BY ${req.query.kind ? 'random()' : 'f.entity, i.published_at DESC NULLS LAST'} LIMIT 200`,
+    [req.query.entity || null, req.query.kind || null]
   );
   res.json({ count: rows.length, rows });
 });

@@ -83,3 +83,10 @@ test('recordsForQuestion: a capacity question drops facts classified as throughp
   const out = dp.recordsForQuestion([{ ...base, entity: 'A', amount: 5, original: '5 톤', kind: 'market_target' }, { ...base, entity: 'B', amount: 6, original: '6 톤', kind: 'plant_capacity' }, { ...base, entity: 'C', amount: 7, original: '7 톤', kind: null }], '업체별 생산능력', null).map((r) => r.entity);
   assert.deepEqual(out, ['B', 'C']);
 });
+
+test('normalizeSpecTables: a capacity cell the number check could not ground (⚠) is not shown as a value', () => {
+  const st = require('../server/lib/specTable');
+  const t = ['| 업체 | 생산능력 |', '| :-- | :-- |', '| Petrobras | ⚠원문 수치 확인 필요 |', '| Neste | 150만 톤 |'].join('\n');
+  const out = st.normalizeSpecTables(t);
+  assert.ok(/\| Petrobras \| - \|/.test(out) && /\| Neste \| 1,500,000/.test(out));
+});

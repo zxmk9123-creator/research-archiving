@@ -30,7 +30,8 @@ function parseCapacity(cell, density = 0.8) {
 // A figure that is a market / sales / supply target or a feedstock throughput is not a plant's production capacity.
 const NON_CAPACITY = /(시장\s*(내|규모|점유|공급)|공급\s*(능력|목표|량)|판매(량|\s*목표)?|수요|점유율|처리량|투입량|원료\s*처리|market|sales|supply (?:target|capacity)|throughput|feedstock (?:capacity|processing))/i;
 const REAL_CAPACITY = /(생산\s*능력|공장|정제소|플랜트|plant|refinery|production capacity)/i;
-const nonCapacity = (cells, capIdx) => NON_CAPACITY.test(cells.join(' ')) && !REAL_CAPACITY.test(cells[capIdx] || '');
+const UNVERIFIED = /⚠/;
+const nonCapacity = (cells, capIdx) => UNVERIFIED.test(cells[capIdx] || '') || (NON_CAPACITY.test(cells.join(' ')) && !REAL_CAPACITY.test(cells[capIdx] || ''));
 
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 const splitCells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
