@@ -26,3 +26,17 @@ test('sanitizeInText rewrites valid blocks with an evidence line and removes inv
   assert.equal((out.match(/```diagram/g) || []).length, 1);
   assert.ok(!out.includes('"source":9'));
 });
+
+test('sanitize: canonical names merge the same company, markets/countries are dropped, node and edge ceilings hold', () => {
+  const canon = (n) => (/^(SD Guthrie|Sime Darby Plantation.*)$/i.test(n) ? 'SD Guthrie' : n);
+  const isNonCompany = (n) => /시장$|^일본$/.test(n);
+  const d = dg.sanitize({ type: 'valuechain', stages: [{ id: 's1', label: 'a' }], nodes: [
+    { id: 'a', label: 'Sime Darby Plantation Bhd.', stage: 's1' }, { id: 'b', label: 'SD Guthrie', stage: 's1' }, { id: 'c', label: 'PT.ARC' }, { id: 'd', label: '인도 시장' },
+  ], edges: [{ from: 'a', to: 'c', type: 'supplies' }, { from: 'b', to: 'c', type: 'supplies' }, { from: 'c', to: 'd', type: 'flow' }] }, { canon: (n) => (n.startsWith('Sime Darby') ? 'SD Guthrie' : n), isNonCompany });
+  assert.deepEqual(d.nodes.map((n) => n.label), ['SD Guthrie', 'PT.ARC']);
+  assert.equal(d.edges.length, 1);
+  const many = { type: 'relations', nodes: Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, label: `Co${i}` })), edges: Array.from({ length: 30 }, (_, i) => ({ from: `n${i}`, to: `n${(i + 1) % 30}`, type: 'owns' })) };
+  const out = dg.sanitize(many);
+  assert.ok(out.nodes.length <= 16 && out.edges.length <= 24);
+  assert.ok(out.edges.every((e) => out.nodes.some((n) => n.id === e.from) && out.nodes.some((n) => n.id === e.to)));
+});

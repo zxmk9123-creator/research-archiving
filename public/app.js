@@ -992,6 +992,7 @@ function renderDiagramHtml(jsonText) {
   };
   const typeLabel = { owns: '지배·자회사', stake: '지분', jv: '합작', supplies: '공급', contract: '하청·시공', flow: '흐름' };
   const used = [...new Set(edges.map((e) => e.type))];
+  const labelParts = [];
   const edgeSvg = edges.map((e) => {
     const a = byId.get(e.from); const b = byId.get(e.to);
     const st = style[e.type] || style.flow;
@@ -1004,14 +1005,17 @@ function renderDiagramHtml(jsonText) {
     // an edge that skips a column runs through the lane above the nodes instead of behind the boxes in between
     const skip = Math.abs(a.c - b.c) > 1;
     const lane = headH - 6;
-    const path = skip
-      ? `M${x1},${y1} C${x1 + bend * dir},${lane} ${x2 - bend * dir},${lane} ${x2},${y2}`
-      : `M${x1},${y1} C${x1 + bend * dir},${y1} ${x2 - bend * dir * (sameCol ? -1 : 1)},${y2} ${x2},${y2}`;
-    const mx = (x1 + x2) / 2 + (sameCol ? bend * 0.75 : 0); const my = skip ? lane + 8 : (y1 + y2) / 2;
+    const P = skip
+      ? [[x1, y1], [x1 + bend * dir, lane], [x2 - bend * dir, lane], [x2, y2]]
+      : [[x1, y1], [x1 + bend * dir, y1], [x2 - bend * dir * (sameCol ? -1 : 1), y2], [x2, y2]];
+    const path = `M${P[0][0]},${P[0][1]} C${P[1][0]},${P[1][1]} ${P[2][0]},${P[2][1]} ${P[3][0]},${P[3][1]}`;
+    // label: on the curve inside the gap right after the source column (never on top of a box), drawn above everything
+    const t = sameCol ? 0.5 : Math.min(0.5, Math.max(0.14, (gapX * 0.42) / Math.max(Math.abs(x2 - x1), 1)));
+    const at = (k) => { const u = 1 - t; return u * u * u * P[0][k] + 3 * u * u * t * P[1][k] + 3 * u * t * t * P[2][k] + t * t * t * P[3][k]; };
+    if (e.label) labelParts.push(`<text x="${at(0).toFixed(1)}" y="${(at(1) - 5).toFixed(1)}" text-anchor="middle" font-size="11" fill="${st.c}" stroke="var(--surface, #fff)" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${escapeHtml(e.label)}</text>`);
     const op = e.inferred ? 0.55 : 1;
     const dash = e.inferred ? '2 4' : st.dash;
-    return `<path d="${path}" fill="none" stroke="${st.c}" stroke-width="1.6" ${dash ? `stroke-dasharray="${dash}"` : ''} opacity="${op}" ${st.arrow ? `marker-end="url(#dg-arrow-${e.type in style ? e.type : 'flow'})"` : ''}/>`
-      + (e.label ? `<text x="${mx}" y="${my - 4}" text-anchor="middle" font-size="11" fill="${st.c}" stroke="var(--surface, #fff)" stroke-width="3" paint-order="stroke">${escapeHtml(e.label)}${e.source ? ` [${e.source}]` : ''}</text>` : '');
+    return `<path d="${path}" fill="none" stroke="${st.c}" stroke-width="1.6" ${dash ? `stroke-dasharray="${dash}"` : ''} opacity="${op}" ${st.arrow ? `marker-end="url(#dg-arrow-${e.type in style ? e.type : 'flow'})"` : ''}/>`;
   }).join('');
   const stageSvg = d.type === 'valuechain' ? stages.map((s, i) => (colOf.has(i) ? `<text x="${x0[colOf.get(i)] + colW[colOf.get(i)] / 2}" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text-muted, #667085)">${escapeHtml(s.label)}</text>` : '')).join('') : '';
   const nodeSvg = nodes.map((n) => {
@@ -1020,7 +1024,7 @@ function renderDiagramHtml(jsonText) {
   }).join('');
   const markers = Object.keys(style).filter((k) => style[k].arrow).map((k) => `<marker id="dg-arrow-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${style[k].c}"/></marker>`).join('');
   const legend = used.map((t) => `<span class="dg-key"><i style="border-top:2px ${style[t].dash ? 'dashed' : 'solid'} ${style[t].c}"></i>${typeLabel[t] || t}</span>`).join('') + (edges.some((e) => e.inferred) ? '<span class="dg-key"><i style="border-top:2px dotted #7d7d7d"></i>추정</span>' : '');
-  return `<figure class="ai-diagram">${d.title ? `<figcaption>${escapeHtml(String(d.title))}</figcaption>` : ''}<div class="ai-diagram-scroll"><svg viewBox="0 0 ${Math.round(W)} ${Math.round(Ht)}" width="${Math.round(W)}" height="${Math.round(Ht)}" role="img" aria-label="${escapeHtml(String(d.title || '도식'))}"><defs>${markers}</defs>${stageSvg}${edgeSvg}${nodeSvg}</svg></div><div class="dg-legend">${legend}</div></figure>`;
+  return `<figure class="ai-diagram">${d.title ? `<figcaption>${escapeHtml(String(d.title))}</figcaption>` : ''}<div class="ai-diagram-scroll"><svg viewBox="0 0 ${Math.round(W)} ${Math.round(Ht)}" width="${Math.round(W)}" height="${Math.round(Ht)}" role="img" aria-label="${escapeHtml(String(d.title || '도식'))}"><defs>${markers}</defs>${stageSvg}${edgeSvg}${nodeSvg}${labelParts.join('')}</svg></div><div class="dg-legend">${legend}</div></figure>`;
 }
 
 function renderChartHtml(jsonText) {

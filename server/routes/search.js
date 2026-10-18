@@ -1337,6 +1337,16 @@ async function ensureVisual(text, req, signal) {
   }
 }
 
+// Canonical company spelling (roster aliases) and a "not a company" test (country / region / market / institution) for diagram nodes.
+function diagramHelpers(roster) {
+  const canonMap = new Map();
+  for (const c of roster || []) for (const n of c.rawNames || [c.name]) canonMap.set(String(n).toLowerCase().trim(), c.name);
+  return {
+    canon: (label) => canonMap.get(String(label).toLowerCase().trim()) || label,
+    isNonCompany: (label) => classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()),
+  };
+}
+
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
   let rawBody = String(rawText || '');
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
@@ -1369,7 +1379,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
   if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
-  if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length });
+  if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length, ...diagramHelpers(rosterForScope) });
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
