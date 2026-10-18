@@ -18,6 +18,8 @@ router.get('/status', requireAuth, (req, res) => res.json({ ...rel.getStatus() }
 
 router.post('/seed-from-facts', requireAuth, async (req, res) => res.json({ seeded: await rel.seedFromFacts() }));
 
+router.post('/cleanup', requireAuth, async (req, res) => res.json(await rel.cleanupRelations()));
+
 router.post('/backfill', requireAuth, async (req, res) => res.json(await rel.runBackfill({ limit: req.body && req.body.limit })));
 
 // Manual curation: add / remove a row. Manual rows are never overwritten by the AI pass.

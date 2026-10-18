@@ -15,8 +15,42 @@ const limitCall = createLimiter(1, 4000);
 
 const SYSTEM = `You extract company relationships from ONE article. Respond with ONLY a JSON array (possibly empty).
 Each element: {"src": string, "dst": string, "relation": "owns"|"stake"|"jv_partner"|"supplies"|"contractor_for"|"offtake_from", "share_pct": number|null, "evidence": string}
-Direction: "src <relation> dst". owns = src controls / is the parent of dst (dst is its subsidiary); stake = src holds a minority or unspecified equity stake in dst (associate, investment); jv_partner = src and dst are partners of the same joint venture (use the two partner companies, never the JV itself); supplies = src supplies feedstock / product / equipment to dst; contractor_for = src is the contractor / EPC / licensor / outsourced operator doing work for dst; offtake_from = src buys / has an offtake agreement with dst as seller.
+Direction: "src <relation> dst". owns = src controls / is the parent of dst (dst is its subsidiary); stake = src holds a minority or unspecified equity stake in dst (associate, investment); jv_partner = src and dst are partners of the same joint venture (use the two partner companies, never the JV itself); supplies = src supplies feedstock / product / equipment to dst; contractor_for = src is the contractor / EPC / licensor / outsourced operator doing work for dst; offtake_from = src is the BUYER (offtaker) and dst the seller. supplies / offtake_from never have an airline as the supplier. When dst is a joint venture that several partners formed, each partner relates to it as stake (owns only if the article says the partner controls it or holds more than 50%) and the partners relate to each other as jv_partner. owns needs a stated acquisition / ownership / subsidiary / percentage; a review, plan or rumour is not ownership. Airports, associations, agencies and governments are not companies.
 Rules: only relationships the article STATES between two named companies (not people, governments or institutions); names exactly as written in the article; "share_pct" only when a percentage is stated; "evidence" = the short phrase from the article that states it. A plant or JV entity may be dst of owns/stake. No inference, no general-knowledge additions.`;
+
+// ---- name hygiene shared by extraction, cleanup and diagrams ------------------------------------------------------------
+const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\.?|limited|inc\.?|corp\.?|corporation|co\.?|company|llc|gmbh|ag|nv|bv|ab|asa|oyj|holdings?|group)\b|\(.*?\)|（.*?）|㈜|주식회사|\(주\)/gi;
+const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_`]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학)$/i;
+const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
+const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
+const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-?invest|설립한)/i;
+
+function isNonCompanyName(name) {
+  try {
+    const level = require('./classificationScope').levelOf({ entity: name });
+    if (level !== 'company') return true;
+  } catch (_) { /* optional */ }
+  return NON_COMPANY.test(String(name || '').trim()) || /^[A-Za-z가-힣]{1,2}사$/.test(String(name || '').trim());
+}
+
+// One relation row -> its corrected form, or null to drop it. Rules (code, from the sentence the row came with):
+//   owns needs an ownership cue and, for a joint venture or a share <= 50%, is a stake instead (a JV partner is not its parent);
+//   offtake_from / supplies run seller -> buyer, so an airline can never be the seller; non-companies never become nodes.
+function fixRelation(r) {
+  let { src, dst, relation } = r;
+  if (isNonCompanyName(src) || isNonCompanyName(dst)) return null;
+  const ev = String(r.evidence || '');
+  const pct = Number(r.share_pct) || 0;
+  if (relation === 'owns') {
+    if (ev && JV_CUE.test(ev) && pct <= 50) relation = 'stake';        // a JV partner is not the JV's parent
+    else if (pct > 0 && pct <= 50) relation = 'stake';
+    else if (ev && !OWNERSHIP_CUE.test(ev)) return null;              // "strategic review of X" is not ownership
+  }
+  if (relation === 'offtake_from' && AIRLINE.test(dst) && !AIRLINE.test(src)) [src, dst] = [dst, src]; // buyer is src
+  if (relation === 'supplies' && AIRLINE.test(src) && !AIRLINE.test(dst)) [src, dst] = [dst, src];
+  return { ...r, src, dst, relation };
+}
 
 const textOf = (item) => [item.title, item.summary || item.ai_summary, item.insight || item.ai_insight].filter(Boolean).join('\n');
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
@@ -40,13 +74,17 @@ function verifyRelations(rows, text, canon = (n) => n) {
     const dst = clean(r && r.dst);
     if (!relation || src.length < 2 || dst.length < 2 || src.toLowerCase() === dst.toLowerCase()) continue;
     if (!low.includes(src.toLowerCase()) || !low.includes(dst.toLowerCase())) continue;
-    let [a, b] = [canon(src), canon(dst)];
-    if (relation === 'jv_partner' && a.toLowerCase() > b.toLowerCase()) [a, b] = [b, a]; // symmetric: one row per pair
-    const key = `${a.toLowerCase()}|${b.toLowerCase()}|${relation}`;
+    const fixed = fixRelation({ src, dst, relation, share_pct: r.share_pct, evidence: r.evidence });
+    if (!fixed) continue;
+    let [a, b] = [canon(fixed.src), canon(fixed.dst)];
+    const relationF = fixed.relation;
+    if (a.toLowerCase() === b.toLowerCase()) continue;
+    if (relationF === 'jv_partner' && a.toLowerCase() > b.toLowerCase()) [a, b] = [b, a]; // symmetric: one row per pair
+    const key = `${a.toLowerCase()}|${b.toLowerCase()}|${relationF}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const pct = Number(r.share_pct);
-    out.push({ src: a, dst: b, relation, share_pct: pct > 0 && pct <= 100 ? pct : null, evidence: clean(r.evidence).slice(0, 240) || null });
+    out.push({ src: a, dst: b, relation: relationF, share_pct: pct > 0 && pct <= 100 ? pct : null, evidence: clean(r.evidence).slice(0, 240) || null });
   }
   return out;
 }
@@ -55,9 +93,49 @@ async function canonicalizer() {
   try {
     const { rows } = await pool.query('SELECT name, aliases FROM companies');
     const map = new Map();
-    for (const c of rows) for (const n of [c.name, ...(c.aliases || [])]) if (n) map.set(String(n).toLowerCase().trim(), c.name);
-    return (n) => map.get(String(n).toLowerCase().trim()) || n;
+    const baseMap = new Map();
+    for (const c of rows) for (const n of [c.name, ...(c.aliases || [])]) if (n) { map.set(String(n).toLowerCase().trim(), c.name); if (baseKey(n).length >= 3) baseMap.set(baseKey(n), c.name); }
+    // bilingual spellings learned elsewhere (term_aliases): the Latin spelling is the canonical one
+    let bilingual = new Map();
+    try {
+      const { rows: al } = await pool.query('SELECT term, alt FROM term_aliases WHERE alt IS NOT NULL');
+      for (const a of al) {
+        const [h, l] = /[가-힣]/.test(a.term) ? [a.term, a.alt] : [a.alt, a.term];
+        if (/[가-힣]/.test(h) && /^[A-Za-z]/.test(l) && !/[가-힣]/.test(l)) bilingual.set(String(h).toLowerCase().trim(), l);
+      }
+    } catch (_) { /* optional */ }
+    return (n) => {
+      const k = String(n).toLowerCase().trim();
+      const viaRoster = map.get(k) || baseMap.get(baseKey(n));
+      if (viaRoster) return viaRoster;
+      const latin = bilingual.get(k);
+      return latin ? (map.get(latin.toLowerCase()) || baseMap.get(baseKey(latin)) || latin) : n;
+    };
   } catch (_) { return (n) => n; }
+}
+
+// One-off cleanup of stored rows with the same rules (re-canonicalize, fix type / direction, drop non-companies,
+// merge the rows that become identical). Manual rows are left alone.
+async function cleanupRelations() {
+  const canon = await canonicalizer();
+  const { rows } = await pool.query("SELECT id, src, dst, relation, share_pct, evidence, item_id FROM company_relations WHERE origin <> 'manual' ORDER BY id");
+  const stats = { checked: rows.length, dropped: 0, changed: 0, merged: 0 };
+  for (const r of rows) {
+    const fixed = fixRelation(r);
+    if (!fixed) { await pool.query('DELETE FROM company_relations WHERE id = $1', [r.id]); stats.dropped++; continue; }
+    let [a, b] = [canon(fixed.src), canon(fixed.dst)];
+    if (a.toLowerCase() === b.toLowerCase()) { await pool.query('DELETE FROM company_relations WHERE id = $1', [r.id]); stats.dropped++; continue; }
+    if (fixed.relation === 'jv_partner' && a.toLowerCase() > b.toLowerCase()) [a, b] = [b, a];
+    if (a === r.src && b === r.dst && fixed.relation === r.relation) continue;
+    try {
+      await pool.query('UPDATE company_relations SET src = $2, dst = $3, relation = $4 WHERE id = $1', [r.id, a, b, fixed.relation]);
+      stats.changed++;
+    } catch (_) { // the corrected row already exists: keep that one
+      await pool.query('DELETE FROM company_relations WHERE id = $1', [r.id]);
+      stats.merged++;
+    }
+  }
+  return stats;
 }
 
 async function storeRelations(rows, itemId, origin = 'ai') {
@@ -152,4 +230,4 @@ function promptBlock(rows) {
   return `\n\n[기업 관계 DB — 질문 기업의 자회사·관계기업·합작·공급·하청 관계(기사에서 확인된 것만). 이 관계는 답변에서 소속·합작 구분과 중복 합산 방지에 사용하고, DB에 없는 관계는 추정하지 않는다]\n${rows.map((r) => `- ${describe(r)}`).join('\n')}`;
 }
 
-module.exports = { RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };
+module.exports = { baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };

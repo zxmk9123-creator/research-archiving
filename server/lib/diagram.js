@@ -7,6 +7,7 @@ const EDGE_TYPES = ['owns', 'stake', 'jv', 'supplies', 'contract', 'flow'];
 const MAX_NODES = 16;
 const MAX_EDGES = 24;
 
+const baseKey = (n) => require('./companyRelations').baseKey(n);
 const isDiagramQuestion = (q) => WANTS.test(String(q || ''));
 
 const PROMPT_NOTE = `\n\n[질의 유형: 도식] 사용자는 관계도·밸류체인 같은 그림을 요청했다. 답변에 아래 형식의 \`\`\`diagram 코드블록을 정확히 하나 넣고, 그 뒤에 2~4줄의 설명만 쓰고 각 줄 끝에 근거 자료 번호 [n]을 붙인다(그림을 글로 다시 나열하지 않는다). 형식(JSON만):
@@ -39,7 +40,7 @@ function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
     seen.add(id);
     const label = canon(raw) || raw;
     if (isNonCompany(label)) continue; // countries / markets / institutions are not boxes of a company diagram
-    const key = label.toLowerCase();
+    const key = baseKey(label) || label.toLowerCase(); // Eni / Eni S.p.A. / (주)Eni are one box
     if (byLabel.has(key)) { remap.set(id, byLabel.get(key)); continue; }
     byLabel.set(key, id);
     remap.set(id, id);
