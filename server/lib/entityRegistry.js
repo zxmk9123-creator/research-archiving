@@ -25,6 +25,9 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
     if (bk.length < 3) continue;
     if (byKey.has(bk)) union(k, byKey.get(bk)); else byKey.set(bk, k);
   }
+  // "Golden Agri" / "Golden Agri Resources" / "Golden Agri-Resources": the same base name plus generic words only
+  const latinNames = [...count.keys()].filter((k) => /[A-Za-z]/.test(k) && !/[가-힣]/.test(k));
+  for (let i = 0; i < latinNames.length; i++) for (let j = i + 1; j < latinNames.length; j++) if (sameCompanyName(latinNames[i], latinNames[j], { crossScript: false })) union(latinNames[i], latinNames[j]);
   const lower = new Map([...count.keys()].map((k) => [k.toLowerCase(), k]));
   for (const [a, b] of links) { const x = lower.get(String(a).toLowerCase().trim()); const y = lower.get(String(b).toLowerCase().trim()); if (x && y) union(x, y); }
   const roster = new Set(rosterNames.map((r) => String(r).toLowerCase().trim()));
@@ -64,8 +67,14 @@ async function loadInputs() {
   add((await pool.query('SELECT entity, COUNT(*) AS n FROM item_facts WHERE entity_type = $1 GROUP BY entity', ['기업'])).rows, 'entity');
   add((await pool.query('SELECT src, COUNT(*) AS n FROM company_relations GROUP BY src')).rows, 'src');
   add((await pool.query('SELECT dst, COUNT(*) AS n FROM company_relations GROUP BY dst')).rows, 'dst');
-  const { rows: companies } = await pool.query('SELECT name, aliases FROM companies');
   const links = [];
+  // spellings stored by an earlier build stay linked even when the raw data no longer contains them (relations are rewritten
+  // to the canonical name): entity <-> each of its same_names
+  try {
+    const { rows: prev } = await pool.query('SELECT entity, same_names FROM entity_registry');
+    for (const p of prev) for (const sn of p.same_names || []) { names.push({ name: sn, n: 0 }); links.push([p.entity, sn]); }
+  } catch (_) { /* first build */ }
+  const { rows: companies } = await pool.query('SELECT name, aliases FROM companies');
   const rosterNames = [];
   for (const c of companies) {
     rosterNames.push(c.name);
@@ -199,6 +208,7 @@ async function rejectAlias(term) {
   const a = await pool.query('DELETE FROM term_aliases WHERE term = $1 AND alt <> $2', [t, '']);
   await pool.query("INSERT INTO term_aliases (term, alt) VALUES ($1, '') ON CONFLICT DO NOTHING", [t]);
   const b = await pool.query('UPDATE companies SET aliases = array_remove(aliases, $1) WHERE $1 = ANY(aliases)', [t]);
+  await pool.query('UPDATE entity_registry SET same_names = array_remove(same_names, $1) WHERE $1 = ANY(same_names)', [t]);
   cache.at = 0;
   return { removed: a.rowCount, rosterAliasesRemoved: b.rowCount };
 }

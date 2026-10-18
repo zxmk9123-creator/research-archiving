@@ -54,3 +54,10 @@ test('collective labels are not companies; real names that merely contain such w
   for (const n of ['중국 내 식당', '여러 항공사들', '인도 자회사', '주요 항공사', '항공사', '코린도 산하 플랜테이션 회사 2곳', '카자흐스탄 내 최대 식용유 제조업체', 'major airlines', 'Restaurants', 'various suppliers']) assert.equal(rel.isNonCompanyName(n), true, n);
   for (const n of ['Restaurant Technologies', '대상주식회사', '이라크 국영 유조선 회사(IOTC)', 'Neste', '현대오일뱅크', 'Air bp', 'Customers Bancorp']) assert.equal(rel.isNonCompanyName(n), false, n);
 });
+
+test('a label that lists several companies is not one company ("Foo, Inc." is)', () => {
+  assert.equal(rel.isNonCompanyName('Valero, Darling Ingredients'), true);
+  assert.equal(rel.isNonCompanyName('Neste, Marathon Petroleum'), true);
+  assert.equal(rel.isNonCompanyName('Calumet, Inc'), false);
+  assert.equal(rel.baseKey('Golden Agri-Resources'), 'golden agri resources');
+});

@@ -30,3 +30,12 @@ test('sameCompanyName crossScript can be switched off (English name vs an existi
   assert.equal(reg.sameCompanyName('Burger King', '버거킹', { crossScript: false }), false);
   assert.equal(reg.sameCompanyName('Burger King', 'Burger King Corp.', { crossScript: false }), true);
 });
+
+test('cluster: generic-word variants merge; a name that only survives as a stored same_name keeps its link', () => {
+  const out = reg.cluster([{ name: 'Golden Agri', n: 2 }, { name: 'Golden Agri Resources', n: 4 }, { name: 'Golden Agri-Resources', n: 9 }, { name: 'Chevron-REG', n: 1 }, { name: 'Chevron', n: 5 }, { name: 'Burger King', n: 3 }, { name: '버거킹', n: 0 }], { links: [['Burger King', '버거킹']] });
+  const grp = (n) => out.find((g) => [g.entity, ...g.same_names].includes(n));
+  assert.equal(grp('Golden Agri'), grp('Golden Agri-Resources'));
+  assert.equal(grp('Golden Agri Resources'), grp('Golden Agri-Resources'));
+  assert.notEqual(grp('Chevron-REG'), grp('Chevron'));
+  assert.equal(grp('버거킹'), grp('Burger King'));
+});

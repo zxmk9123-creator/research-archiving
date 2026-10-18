@@ -20,7 +20,7 @@ Rules: only relationships the article STATES between two named companies (not pe
 
 // ---- name hygiene shared by extraction, cleanup and diagrams ------------------------------------------------------------
 const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\.?|limited|inc\.?|corp\.?|corporation|co\.?|company|llc|gmbh|ag|nv|bv|ab|asa|oyj|holdings?|group)\b|\(.*?\)|（.*?）|㈜|주식회사|\(주\)|그룹|홀딩스/gi;
-const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_`]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_`‐–-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학)$/i;
 const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
 const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
@@ -29,7 +29,12 @@ const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-
 // Collective / generic labels ("중국 내 식당", "여러 항공사들", "인도 자회사", "major airlines") name no single company.
 const AGG_KO = /^(주요|글로벌|여러|다수|일부|각국|현지|국내|해외|대형|중소|기타|모든|전\s*세계)\s|(\s|^)(업체|기업|회사|항공사|제조업체|시추업체|식당|자회사|고객사|고객|공급사|판매점|업계)(들|\s*(중\s*)?(하나|\d+곳))?$|^(항공사|식당|업체|기업|고객|고객사)들?$|\s(내|산하)\s/;
 const AGG_EN = /^(?:(?:major|leading|local|various|several|other|many|some|multiple)\s+)?(?:restaurants|airlines|companies|customers|suppliers|producers|retailers|households|refiners|others?)$/i;
-const isAggregateName = (name) => AGG_KO.test(String(name || '').trim()) || AGG_EN.test(String(name || '').trim());
+// "Valero, Darling Ingredients" / "Neste, Marathon Petroleum": several companies in one label ("Foo, Inc." is one company)
+const multiCompany = (name) => {
+  const parts = String(name || '').split(/\s*,\s*/).filter(Boolean);
+  return parts.length >= 2 && !parts.slice(1).every((p) => /^(inc|ltd|llc|co|corp|plc|limited|s\.a|sa|ag|gmbh|bhd|tbk)\.?$/i.test(p));
+};
+const isAggregateName = (name) => AGG_KO.test(String(name || '').trim()) || AGG_EN.test(String(name || '').trim()) || multiCompany(name);
 
 function isNonCompanyName(name) {
   if (isAggregateName(name)) return true;
