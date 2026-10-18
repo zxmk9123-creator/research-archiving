@@ -48,3 +48,19 @@ test('cluster never merges by acronym on its own (BP vs Bharat Petroleum, P&G vs
   assert.notEqual(grp('P&G'), grp('Phelan Green Group'));
   assert.equal(grp('BP'), grp('bp'));
 });
+
+test('refineRole: code rules correct the model (finance only for financiers, emitter needs used-oil evidence, supplier needs feedstock evidence)', () => {
+  const r = reg.refineRole;
+  assert.equal(r('finance', { name: '포스코인터내셔널' }), 'trader');
+  assert.equal(r('finance', { name: 'Mitsubishi' }), 'trader');
+  assert.equal(r('finance', { name: 'Idemitsu Kosan', factRoles: { producer: 4 } }), 'producer');
+  assert.equal(r('finance', { name: 'Bain Capital' }), 'finance');
+  assert.equal(r('finance', { name: 'BNP 파리바' }), 'finance');
+  assert.equal(r('emitter', { name: 'Unilever', evidence: ['Unilever buys palm oil'] }), 'consumer');
+  assert.equal(r('emitter', { name: 'Burger King', evidence: ['폐식용유를 수거해'] }), 'emitter');
+  assert.equal(r('supplier', { name: 'Air bp', evidence: ['jet fuel to airports'] }), 'trader');
+  assert.equal(r('supplier', { name: 'FatHopes Energy', evidence: ['UCO 수거 전문 기업'] }), 'supplier');
+  assert.equal(r('other', { name: 'Puma Energy', factRoles: { producer: 3 } }), 'producer');
+  assert.equal(r('other', { name: 'Metro Atlanta Chamber', factRoles: { producer: 3 } }), 'other');
+  assert.equal(r('bogus', { name: 'X' }), 'other');
+});

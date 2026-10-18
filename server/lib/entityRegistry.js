@@ -171,6 +171,61 @@ async function classifyRoles({ limit = 400 } = {}) {
   return { requested: rows.length, classified: done };
 }
 
+// ---- second pass: roles from evidence + the facts' own role votes, then code rules ---------------------------------------
+const ROLE_SYSTEM_V2 = `Classify each company by its role in the oils & fats / biofuel feedstock chain, using the hints given with it. Respond with ONLY a JSON array of {"entity": string, "role": "emitter"|"supplier"|"producer"|"consumer"|"trader"|"engineering"|"finance"|"other"}.
+emitter = a restaurant / fast-food / food-service chain, fuel-station food retailer or food factory WHERE USED COOKING OIL OR WASTE FAT ARISES and is collected (a food brand that merely BUYS edible oil is a consumer, not an emitter). supplier = collects and aggregates feedstock (used cooking oil, fats, POME) and itself distributes / sells / exports it (collector-aggregator, renderer, feedstock supplier); a jet-fuel or fuel distributor is a trader, not a supplier. producer = refines or produces oils or fuels, incl. integrated energy majors and the operating arms of conglomerates (Idemitsu Kosan, plantations, mills, SAF/HVO plants). consumer = buys or uses the product (airline, shipper, food brand, tech buyer). trader = trading house, commodity trader, fuel distributor, general trading company (Mitsui & Co., Mitsubishi Corp., Gunvor, POSCO International). engineering = designs / builds / licenses plants and equipment. finance = ONLY banks, funds, asset managers, investors and lenders. other = associations, agencies, consultants, terminals, ports, airports, anything else.`;
+
+const FINANCE_NAME = /(capital|bank|fund|asset management|investment|infrastructure partners|blackrock|black rock|\bGIP\b|\bING\b|BNP|파리바|캐피탈|펀드|은행|자산운용|투자|\bLP\b)/i;
+const TRADER_NAME = /(trading|trade\b|상사|商事|mitsui|mitsubishi|itochu|marubeni|sumitomo|gunvor|trafigura|glencore|cargill|dreyfus|물산|posco international|포스코인터)/i;
+const USED_OIL = /(used cooking oil|\bUCO\b|폐식용유|waste (cooking )?oil|waste fat|식당|restaurant|튀김|fryer)/i;
+const FEEDSTOCK_EVIDENCE = /(collect|aggregat|\bUCO\b|used cooking|feedstock|rendering|수거|집하|폐식용유|원료|supply|공급)/i;
+const FACT_TO_ROLE = { producer: 'producer', consumer: 'consumer', engineering: 'engineering', trader: 'trader', finance: 'finance', other: 'other' };
+
+// ai: the model's role; ctx: { name, evidence: [text], factRoles: { role: count } } -> the role to store
+function refineRole(ai, ctx) {
+  const name = String(ctx.name || '');
+  const ev = (ctx.evidence || []).join(' ');
+  const votes = Object.entries(ctx.factRoles || {}).sort((a, b) => b[1] - a[1]);
+  const factRole = votes.length && votes[0][1] >= 2 ? FACT_TO_ROLE[votes[0][0]] || null : null;
+  let role = ROLES.includes(ai) ? ai : 'other';
+  if (role === 'finance' && !FINANCE_NAME.test(name)) role = TRADER_NAME.test(name) ? 'trader' : (factRole && factRole !== 'finance' ? factRole : 'other');
+  if (role === 'emitter' && !USED_OIL.test(ev)) role = 'consumer';                      // a food brand that buys oil is not a 배출처
+  if (role === 'supplier' && !FEEDSTOCK_EVIDENCE.test(ev)) role = factRole && factRole !== 'supplier' ? factRole : 'trader';
+  if (role === 'other' && factRole === 'producer' && !/(association|agency|institute|consult|coalition|chamber|ministry|협회|연합|정부)/i.test(name)) role = 'producer';
+  return role;
+}
+
+async function reclassifyRoles({ limit = 600 } = {}) {
+  const { rows } = await pool.query('SELECT entity, same_names FROM entity_registry ORDER BY id LIMIT $1', [Math.min(Number(limit) || 600, 1500)]);
+  let changed = 0;
+  for (let i = 0; i < rows.length; i += 25) {
+    const batch = rows.slice(i, i + 25);
+    const ctxs = new Map();
+    for (const r of batch) {
+      const names = [r.entity, ...(r.same_names || [])].map((n) => n.toLowerCase());
+      const { rows: ev } = await pool.query('SELECT evidence FROM company_relations WHERE (LOWER(src) = ANY($1) OR LOWER(dst) = ANY($1)) AND evidence IS NOT NULL LIMIT 3', [names]);
+      const { rows: fr } = await pool.query('SELECT role, COUNT(*)::int AS n FROM item_facts WHERE LOWER(entity) = ANY($1) AND role IS NOT NULL GROUP BY role', [names]);
+      ctxs.set(r.entity, { name: r.entity, evidence: ev.map((e) => String(e.evidence).slice(0, 120)), factRoles: Object.fromEntries(fr.map((f) => [f.role, f.n])) });
+    }
+    const hints = batch.map((r) => { const c = ctxs.get(r.entity); return `- ${r.entity}${c.evidence.length ? ` — evidence: ${c.evidence.map((e) => `"${e}"`).join(' | ')}` : ''}${Object.keys(c.factRoles).length ? ` — other extraction tagged it: ${Object.entries(c.factRoles).map(([k, v]) => `${k}×${v}`).join(', ')}` : ''}`; });
+    let ai = [];
+    try {
+      const result = await limitCall(() => provider.callProviderWithFallback({ system: ROLE_SYSTEM_V2, user: hints.join('\n') }));
+      const text = String(result.text || '');
+      ai = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
+    } catch (err) { console.error(`entity role reclassification batch failed: ${err.message}`); continue; }
+    const byEntity = new Map((Array.isArray(ai) ? ai : []).filter((a) => a && typeof a.entity === 'string').map((a) => [a.entity, a.role]));
+    for (const r of batch) {
+      if (!byEntity.has(r.entity)) continue;
+      const role = refineRole(byEntity.get(r.entity), ctxs.get(r.entity));
+      const u = await pool.query('UPDATE entity_registry SET role = $2, updated_at = now() WHERE LOWER(entity) = LOWER($1) AND role IS DISTINCT FROM $2', [r.entity, role]);
+      changed += u.rowCount;
+    }
+  }
+  cache.at = 0;
+  return { checked: rows.length, changed };
+}
+
 // ---- lookup (cached) -----------------------------------------------------------------------------------------------------
 const cache = { at: 0, byName: new Map() };
 const TTL = 10 * 60 * 1000;
@@ -214,4 +269,4 @@ async function rejectAlias(term) {
   return { removed: a.rowCount, rosterAliasesRemoved: b.rowCount };
 }
 
-module.exports = { rejectAlias, learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
+module.exports = { refineRole, reclassifyRoles, rejectAlias, learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
