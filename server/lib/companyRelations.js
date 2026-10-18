@@ -19,7 +19,7 @@ Direction: "src <relation> dst". owns = src controls / is the parent of dst (dst
 Rules: only relationships the article STATES between two named companies (not people, governments or institutions); names exactly as written in the article; "share_pct" only when a percentage is stated; "evidence" = the short phrase from the article that states it. A plant or JV entity may be dst of owns/stake. No inference, no general-knowledge additions.`;
 
 // ---- name hygiene shared by extraction, cleanup and diagrams ------------------------------------------------------------
-const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\.?|limited|inc\.?|corp\.?|corporation|co\.?|company|llc|gmbh|ag|nv|bv|ab|asa|oyj|holdings?|group)\b|\(.*?\)|（.*?）|㈜|주식회사|\(주\)/gi;
+const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\.?|limited|inc\.?|corp\.?|corporation|co\.?|company|llc|gmbh|ag|nv|bv|ab|asa|oyj|holdings?|group)\b|\(.*?\)|（.*?）|㈜|주식회사|\(주\)|그룹|홀딩스/gi;
 const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_`]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학)$/i;
 const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
