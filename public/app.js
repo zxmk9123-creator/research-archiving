@@ -2141,6 +2141,7 @@ async function renderArchive(query = {}) {
   document.getElementById('f-q').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('f-apply').click();
   });
+  startArchiveTour(); // first visit only (replayed from the "사용 가이드" link)
 }
 
 // Groups already-sorted (published_at DESC) items into consecutive
@@ -3843,6 +3844,22 @@ const REVIEW_TOUR_STEPS = [
 ];
 function startReviewTour() { runSpotlightTour(REVIEW_TOUR_STEPS, REVIEW_TOUR_SEEN_KEY); }
 
+// 자료(Archive) tab guide — how to narrow the list (뉴스/보고서, search, filters) and what the three views
+// 전체 / 내 저장 / 팀 Pick mean. Replayed from the "사용 가이드" link while on this tab.
+const ARCHIVE_TOUR_SEEN_KEY = 'ra_archive_tour_seen';
+const ARCHIVE_TOUR_STEPS = [
+  { selector: '.category-tabs', title: '뉴스 / 보고서', desc: '먼저 자료 종류를 고르세요. 뉴스는 매일 수집된 기사, 보고서는 리서치·보고서 자료이고, 전체는 둘 다 보여줍니다.' },
+  { selector: '#f-q', title: '검색', desc: '제목·요약 키워드로 찾습니다. 입력 후 Enter를 누르면 바로 적용돼요.' },
+  { selector: '#filter-toggle-btn', title: '필터', desc: '눌러서 패널을 열고 활용처·유형·발행처·기간·섹터(여러 개 선택 가능)를 고른 뒤 "필터 적용"을 누르세요. 적용된 조건은 검색창 옆 칩과 버튼의 숫자로 보이고, "초기화"로 한 번에 해제됩니다. 필터는 아래 전체·내 저장·팀 Pick과 함께 쓸 수 있어요.' },
+  { selector: '.archive-tabs:not(.category-tabs) .archive-tab', title: '전체', desc: '필터 조건에 맞는 발행 자료를 최신순으로 모두 보여줍니다. 기본 보기예요.' },
+  { selector: '.archive-tabs:not(.category-tabs) .archive-tab[href*="view=saved"]', title: '내 저장', desc: '자료 카드의 "☆ 저장"을 눌러 담은 자료만 모아봅니다. 이 브라우저에만 저장되어 다른 기기나 팀원에게는 보이지 않아요. 나중에 다시 볼 자료를 개인적으로 챙기는 용도입니다.' },
+  { selector: '.archive-tabs:not(.category-tabs) .archive-tab[href*="view=team"]', title: '팀 Pick', desc: '자료 카드의 "팀 Pick" 버튼으로 우리 팀을 선택해 표시한 자료를 모아봅니다. 팀의 pick은 모두에게 공유되어 팀원 누구나 같은 목록을 볼 수 있고, 한 팀이라도 pick한 자료만 나옵니다.' },
+];
+function startArchiveTour(replay = false) {
+  if (replay) localStorage.removeItem(ARCHIVE_TOUR_SEEN_KEY);
+  runSpotlightTour(ARCHIVE_TOUR_STEPS, ARCHIVE_TOUR_SEEN_KEY);
+}
+
 // Reference-page tour — walks through adding a new Reference Source: open
 // the add form, paste a representative link, run AI metadata extraction,
 // then submit. The form's fields live in #ref-add-form-wrap, hidden by
@@ -4043,6 +4060,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     } else if (path === 'review') {
       localStorage.removeItem(REVIEW_TOUR_SEEN_KEY);
       startReviewTour();
+    } else if (path === 'archive') {
+      startArchiveTour(true);
     } else if (path === 'reference') {
       localStorage.removeItem(REFERENCE_TOUR_SEEN_KEY);
       startReferenceTour();

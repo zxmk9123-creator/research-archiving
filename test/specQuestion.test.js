@@ -109,3 +109,11 @@ test('methodology page and evidence hook exist in the frontend', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.ok(app.includes('aiEvidenceHtml(sources)') && app.includes('methodology.html') && !app.includes('ai-table-csv'));
 });
+
+test('archive tab guide covers search, filters and the 전체 / 내 저장 / 팀 Pick views and is wired to the 사용 가이드 link', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(app.includes('ARCHIVE_TOUR_STEPS') && app.includes("path === 'archive'") && app.includes('startArchiveTour(true)'));
+  for (const t of ["title: '필터'", "title: '내 저장'", "title: '팀 Pick'", "title: '전체'"]) assert.ok(app.includes(t), t);
+});
