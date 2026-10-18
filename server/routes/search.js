@@ -31,6 +31,7 @@ const workloadPlan = require('../lib/workloadPlan');
 const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const feedstockSupply = require('../lib/feedstockSupply');
 const specQuestion = require('../lib/specQuestion');
+const specTable = require('../lib/specTable');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
 const itemFacts = require('../lib/itemFacts');
 const pool = require('../db/pool');
@@ -1365,7 +1366,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (/\|\s*(미참여|불참)\s*\|/.test(modelText) && !candidates.some((c) => /(미참여|불참|참여하지\s*않)/.test(materialText(c)))) {
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
-  if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
+  if (specQuestion.isSpecQuestion(question)) modelText = specTable.normalizeSpecTables(specQuestion.dropEmptyRows(modelText), { density: datasetPipeline.productDensity(question) || 0.8 });
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
