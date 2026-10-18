@@ -1282,3 +1282,20 @@ ALTER TABLE item_facts ADD COLUMN IF NOT EXISTS role TEXT;
 ALTER TABLE item_facts ADD COLUMN IF NOT EXISTS kind TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS item_facts_dedupe ON item_facts (item_id, entity, COALESCE(site, ''), status, grp, amount);
 CREATE INDEX IF NOT EXISTS item_facts_entity ON item_facts (lower(entity));
+
+-- Company relationship map (lib/companyRelations.js): who owns / holds a stake in / partners with / supplies / works under
+-- contract for whom, with the article it came from. Direction: src <relation> dst ("src owns dst").
+CREATE TABLE IF NOT EXISTS company_relations (
+  id SERIAL PRIMARY KEY,
+  src TEXT NOT NULL,
+  dst TEXT NOT NULL,
+  relation TEXT NOT NULL CHECK (relation IN ('owns','stake','jv_partner','supplies','contractor_for','offtake_from')),
+  share_pct NUMERIC,
+  evidence TEXT,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+  origin TEXT NOT NULL DEFAULT 'ai',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS company_relations_uniq ON company_relations (LOWER(src), LOWER(dst), relation);
+CREATE INDEX IF NOT EXISTS company_relations_dst ON company_relations (LOWER(dst));
+ALTER TABLE items ADD COLUMN IF NOT EXISTS relations_status TEXT;

@@ -12,6 +12,7 @@ const dns = require('dns').promises;
 dns.lookup = async () => ([{ address: '93.184.216.34', family: 4 }]);
 process.env.AI_SEARCH_CACHE = 'off';
 process.env.ITEM_FACTS = 'off';
+process.env.COMPANY_RELATIONS = process.env.COMPANY_RELATIONS || 'off';
 process.env.URL_MEMO = 'off';
 process.env.ROSTER_CACHE = 'off';
 process.env.TERM_EXPANSION = 'off';

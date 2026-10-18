@@ -72,6 +72,7 @@ async function extractFactsForItem(item, { replace = false } = {}) {
 function extractFactsInBackground(item) {
   if (process.env.ITEM_FACTS === 'off') return;
   extractFactsForItem(item).catch(() => {});
+  require('./companyRelations').extractRelationsInBackground(item);
 }
 
 // Facts of the given candidate items, as dataset-pipeline records (source = candidate index + 1).
