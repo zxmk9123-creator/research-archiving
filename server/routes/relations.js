@@ -16,7 +16,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // GET /api/relations/summary — totals for the whole map (the list endpoint is capped at 200 rows).
 router.get('/summary', requireAuth, async (req, res) => {
-  const [tot, byRel, byOrigin, ents, items, top, pubs] = await Promise.all([
+  const [tot, byRel, byOrigin, ents, items, top, pubs, byStatus] = await Promise.all([
     pool.query('SELECT COUNT(*)::int AS n FROM company_relations'),
     pool.query('SELECT relation, COUNT(*)::int AS n FROM company_relations GROUP BY relation ORDER BY n DESC'),
     pool.query('SELECT origin, COUNT(*)::int AS n FROM company_relations GROUP BY origin'),
@@ -24,8 +24,9 @@ router.get('/summary', requireAuth, async (req, res) => {
     pool.query('SELECT COUNT(DISTINCT item_id)::int AS n FROM company_relations WHERE item_id IS NOT NULL'),
     pool.query('SELECT e AS entity, COUNT(*)::int AS n FROM (SELECT src AS e FROM company_relations UNION ALL SELECT dst FROM company_relations) x GROUP BY e ORDER BY n DESC LIMIT 15'),
     pool.query("SELECT COUNT(*)::int AS published, COUNT(*) FILTER (WHERE relations_status IS NOT NULL)::int AS processed, COUNT(*) FILTER (WHERE relations_status = 'done')::int AS with_relations FROM items WHERE status = 'Published'"),
+    pool.query('SELECT status, COUNT(*)::int AS n FROM company_relations GROUP BY status'),
   ]);
-  res.json({ total: tot.rows[0].n, byRelation: byRel.rows, byOrigin: byOrigin.rows, entities: ents.rows[0].n, sourceItems: items.rows[0].n, topEntities: top.rows, coverage: pubs.rows[0] });
+  res.json({ total: tot.rows[0].n, byStatus: byStatus.rows, byRelation: byRel.rows, byOrigin: byOrigin.rows, entities: ents.rows[0].n, sourceItems: items.rows[0].n, topEntities: top.rows, coverage: pubs.rows[0] });
 });
 
 router.get('/status', requireAuth, (req, res) => res.json({ ...rel.getStatus() }));
@@ -35,6 +36,12 @@ router.post('/seed-from-facts', requireAuth, async (req, res) => res.json({ seed
 router.post('/cleanup', requireAuth, async (req, res) => res.json(await rel.cleanupRelations()));
 
 router.post('/requeue', requireAuth, async (req, res) => res.json(await rel.requeueByEvidence(Array.isArray(req.body && req.body.names) ? req.body.names.slice(0, 20) : [])));
+
+// Re-read every item that produced relations (statuses / rules changed): rows stay, an ended marker found now is added.
+router.post('/reextract-all', requireAuth, async (req, res) => {
+  const r = await pool.query("UPDATE items SET relations_status = NULL WHERE id IN (SELECT DISTINCT item_id FROM company_relations WHERE item_id IS NOT NULL)");
+  res.json({ queued: r.rowCount, next: 'POST /api/relations/backfill' });
+});
 
 router.post('/backfill', requireAuth, async (req, res) => res.json(await rel.runBackfill({ limit: req.body && req.body.limit })));
 

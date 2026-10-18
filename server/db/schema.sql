@@ -1311,3 +1311,8 @@ CREATE TABLE IF NOT EXISTS entity_registry (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS entity_registry_entity ON entity_registry (LOWER(entity));
+
+-- Relation lifecycle: a relation the article says is over (stake sold / JV bought out / deal terminated / supplier stopped) is kept
+-- as history with status 'ended' and the phrase that says so; it is never drawn as the current structure.
+ALTER TABLE company_relations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE company_relations ADD COLUMN IF NOT EXISTS ended_note TEXT;

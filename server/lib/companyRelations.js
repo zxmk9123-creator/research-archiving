@@ -14,8 +14,8 @@ const LABEL = {
 const limitCall = createLimiter(1, 4000);
 
 const SYSTEM = `You extract company relationships from ONE article. Respond with ONLY a JSON array (possibly empty).
-Each element: {"src": string, "dst": string, "relation": "owns"|"stake"|"jv_partner"|"supplies"|"contractor_for"|"offtake_from", "share_pct": number|null, "evidence": string}
-Direction: "src <relation> dst". owns = src controls / is the parent of dst (dst is its subsidiary); stake = src holds a minority or unspecified equity stake in dst (associate, investment); jv_partner = src and dst are partners of the same joint venture (use the two partner companies, never the JV itself); supplies = src supplies feedstock / product / equipment to dst; contractor_for = src is the contractor / EPC / licensor / outsourced operator doing work for dst; offtake_from = src is the BUYER (offtaker) and dst the seller. supplies / offtake_from never have an airline as the supplier. When dst is a joint venture that several partners formed, each partner relates to it as stake (owns only if the article says the partner controls it or holds more than 50%) and the partners relate to each other as jv_partner. owns needs a stated acquisition / ownership / subsidiary / percentage; a review, plan or rumour is not ownership. Airports, associations, agencies and governments are not companies.
+Each element: {"src": string, "dst": string, "relation": "owns"|"stake"|"jv_partner"|"supplies"|"contractor_for"|"offtake_from", "share_pct": number|null, "evidence": string, "status": "active"|"ended", "ended_evidence": string|null}
+Direction: "src <relation> dst". owns = src controls / is the parent of dst (dst is its subsidiary); stake = src holds a minority or unspecified equity stake in dst (associate, investment); jv_partner = src and dst are partners of the same joint venture (use the two partner companies, never the JV itself); supplies = src supplies feedstock / product / equipment to dst; contractor_for = src is the contractor / EPC / licensor / outsourced operator doing work for dst; offtake_from = src is the BUYER (offtaker) and dst the seller. supplies / offtake_from never have an airline as the supplier. When dst is a joint venture that several partners formed, each partner relates to it as stake (owns only if the article says the partner controls it or holds more than 50%) and the partners relate to each other as jv_partner. owns needs a stated acquisition / ownership / subsidiary / percentage; a review, plan or rumour is not ownership. Airports, associations, agencies and governments are not companies. status = "ended" ONLY when the article says the relationship is over (a stake sold or the partner's stake fully acquired so the joint venture ended, a deal terminated or cancelled, a supplier or customer that stopped buying, a partner that withdrew); "ended_evidence" = the phrase that says so; otherwise "active".
 Rules: only relationships the article STATES between two named companies (not people, governments or institutions); names exactly as written in the article; "share_pct" only when a percentage is stated; "evidence" = the short phrase from the article that states it. A plant or JV entity may be dst of owns/stake. No inference, no general-knowledge additions.`;
 
 // ---- name hygiene shared by extraction, cleanup and diagrams ------------------------------------------------------------
@@ -30,6 +30,8 @@ const JV_STRICT = /(합작|joint[- ]venture|\bJV\b|공동\s*(출자|투자|설�
 const BRAND_CUE = /(브랜드|상표|brand|trademark|라이선스|licen[cs]e)/i;
 const STRONG_OWNERSHIP = /(인수|acqui|지분|stake|자회사|subsidiar|\d\s*%|모회사|parent|합병|merger|wholly|지배)/i;
 const ASSET_NAME = /(탐사\s*블록|광구|\bblocks?\b|\bfields?\b|유전|가스전|\blicen[cs]e area\b|\bwells?\b|광산|\bmines?\b)/i;
+// wording that says a relationship is over; "ended" is accepted only when the article itself contains such wording
+const END_CUE = /(전량|지분\s*(전부|전체)?\s*(매각|처분)|매각|철수|종료|중단|해지|청산|파기|취소|결렬|무산|buy[- ]?out|bought out|acquired (?:the )?(?:remaining|entire|full)|divest|sold (?:its|the|all)|\bexit(?:ed)?\b|terminat|cancel|ceased|\bended\b|withdr|wound up|stopped (?:buying|purchasing)|구매\s*중단|거래\s*중단)/i;
 const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-?invest|설립한)/i;
 
 // Collective / generic labels ("중국 내 식당", "여러 항공사들", "인도 자회사", "major airlines") name no single company.
@@ -104,7 +106,8 @@ function verifyRelations(rows, text, canon = (n) => n) {
     if (seen.has(key)) continue;
     seen.add(key);
     const pct = Number(r.share_pct);
-    out.push({ src: a, dst: b, relation: relationF, share_pct: pct > 0 && pct <= 100 ? pct : null, evidence: clean(r.evidence).slice(0, 240) || null });
+    const ended = r.status === 'ended' && END_CUE.test(`${text} ${r.ended_evidence || ''}`);
+    out.push({ src: a, dst: b, relation: relationF, share_pct: pct > 0 && pct <= 100 ? pct : null, evidence: clean(r.evidence).slice(0, 240) || null, status: ended ? 'ended' : 'active', ended_note: ended ? clean(r.ended_evidence).slice(0, 200) || null : null });
   }
   return out;
 }
@@ -166,9 +169,11 @@ async function storeRelations(rows, itemId, origin = 'ai') {
   let added = 0;
   for (const r of rows) {
     const res = await pool.query(
-      `INSERT INTO company_relations (src, dst, relation, share_pct, evidence, item_id, origin) VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (LOWER(src), LOWER(dst), relation) DO UPDATE SET share_pct = COALESCE(company_relations.share_pct, EXCLUDED.share_pct)`,
-      [r.src, r.dst, r.relation, r.share_pct, r.evidence, itemId, origin]
+      `INSERT INTO company_relations (src, dst, relation, share_pct, evidence, item_id, origin, status, ended_note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (LOWER(src), LOWER(dst), relation) DO UPDATE SET share_pct = COALESCE(company_relations.share_pct, EXCLUDED.share_pct),
+         status = CASE WHEN EXCLUDED.status = 'ended' THEN 'ended' ELSE company_relations.status END,
+         ended_note = COALESCE(EXCLUDED.ended_note, company_relations.ended_note)`,
+      [r.src, r.dst, r.relation, r.share_pct, r.evidence, itemId, origin, r.status === 'ended' ? 'ended' : 'active', r.ended_note || null]
     );
     added += res.rowCount;
   }
@@ -251,21 +256,26 @@ async function relationsFor(names, { limit = 60 } = {}) {
   const list = [...new Set((names || []).map((n) => String(n || '').trim().toLowerCase()).filter(Boolean))].slice(0, 20);
   if (!list.length) return [];
   const { rows } = await pool.query(
-    `SELECT r.id, r.src, r.dst, r.relation, r.share_pct, r.evidence, r.origin, r.item_id FROM company_relations r
+    `SELECT r.id, r.src, r.dst, r.relation, r.share_pct, r.evidence, r.origin, r.item_id, r.status, r.ended_note FROM company_relations r
       WHERE LOWER(r.src) = ANY($1) OR LOWER(r.dst) = ANY($1) ORDER BY r.relation, r.src, r.dst LIMIT $2`, [list, limit]
   );
   return rows;
 }
 
-const describe = (r) => {
+const describeBase = (r) => {
   const pct = r.share_pct ? ` ${Number(r.share_pct)}%` : '';
   return { owns: `${r.src}는 ${r.dst}의 모회사${pct}`, stake: `${r.src}는 ${r.dst} 지분 보유${pct}`, jv_partner: `${r.src}와 ${r.dst}는 합작 파트너`, supplies: `${r.src}는 ${r.dst}에 공급`, contractor_for: `${r.src}는 ${r.dst}의 하청·시공`, offtake_from: `${r.src}는 ${r.dst}로부터 구매` }[r.relation];
 };
 
+const describe = (r) => `${describeBase(r)}${r.status === 'ended' ? ' (종료)' : ''}`;
+
 // A short block for the answer prompt: only relations stored for the companies the question is about.
-function promptBlock(rows) {
-  if (!rows.length) return '';
-  return `\n\n[기업 관계 DB — 질문 기업의 자회사·관계기업·합작·공급·하청 관계(기사에서 확인된 것만). 이 관계는 답변에서 소속·합작 구분과 중복 합산 방지에 사용하고, DB에 없는 관계는 추정하지 않는다]\n${rows.map((r) => `- ${describe(r)}`).join('\n')}`;
+function promptBlock(rowsAll) {
+  const rows = rowsAll.filter((r) => r.status !== 'ended');
+  const ended = rowsAll.filter((r) => r.status === 'ended');
+  const endedBlock = ended.length ? `\n\n[종료된 관계 — 과거 이력일 뿐이므로 현재 구조·관계도·밸류체인에는 넣지 않고, 필요하면 "과거에는 …였으나 종료됨"으로만 언급한다]\n${ended.map((r) => `- ${describeBase(r)}${r.ended_note ? ` — ${r.ended_note}` : ''}`).join('\n')}` : '';
+  if (!rows.length) return endedBlock;
+  return `\n\n[기업 관계 DB — 질문 기업의 자회사·관계기업·합작·공급·하청 관계(기사에서 확인된 것만). 이 관계는 답변에서 소속·합작 구분과 중복 합산 방지에 사용하고, DB에 없는 관계는 추정하지 않는다]\n${rows.map((r) => `- ${describe(r)}`).join('\n')}${endedBlock}`;
 }
 
 module.exports = { isAggregateName, requeueByEvidence, baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };
