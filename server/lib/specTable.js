@@ -102,7 +102,7 @@ function normalizeSpecTables(text, { density = 0.8, facts = null } = {}) {
         if (bestF.converted) conv.push(`- ${base[0].replace(/[*_`]/g, '')}: 원문 ${bestF.original}`);
         body.push(`| ${base.join(' | ')} |`);
         for (const c of fe.caps) {
-          if (c === bestF) continue;
+          if (c === bestF || Math.round(c.tons) === Math.round(bestF.tons) || fe.caps.some((o) => o !== c && o !== bestF && Math.round(o.tons) === Math.round(c.tons) && fe.caps.indexOf(o) < fe.caps.indexOf(c))) continue;
           refs.push(`- ${rows[0].cells[0]}: ${fmt(c.tons)} 톤/년 (${[c.status === '가동' ? '현재' : c.status, c.year ? `${c.year}년` : ''].filter(Boolean).join(', ')}${c.plant ? '' : ', 기업 합계'})`);
         }
         continue;
