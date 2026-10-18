@@ -77,6 +77,7 @@ function buildGroups(question, { sectors = [], entityTypes = [] } = {}) {
 // A card is shown only for BROAD requests with at least two open dimensions.
 function detectAmbiguity(question, ctx = {}) {
   const q = String(question || '');
+  if (require('./diagram').isDiagramQuestion(q)) return null; // a diagram is not a quantity table: no classification card
   if (!BROAD_WORDS.test(q) && !(ctx.req && (ctx.req.topN || ctx.req.completeness))) return null;
   if (ctx.intentType === 'entity') return null;
   if (!ctx.isDataset && !PLANT_WORDS.test(q) && !COMPANY_WORDS.test(q)) return null;

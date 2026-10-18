@@ -1262,3 +1262,11 @@ ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: s
 
 .ai-evidence { margin: var(--sp-3) 0 var(--sp-2); font-size: 12.5px; color: var(--text-muted, #667085); }
 .ai-evidence a { color: inherit; text-decoration: underline; }
+
+.ai-diagram { margin: 0 0 var(--sp-3); }
+.ai-diagram figcaption { font-size: 13px; font-weight: 700; margin: 0 0 var(--sp-2); }
+.ai-diagram-scroll { overflow-x: auto; padding: var(--sp-2) 0; }
+.ai-diagram-scroll svg { display: block; max-width: none; }
+.dg-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-muted, #667085); }
+.dg-key { display: inline-flex; align-items: center; gap: 6px; }
+.dg-key i { display: inline-block; width: 22px; height: 0; }

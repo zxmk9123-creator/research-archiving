@@ -32,6 +32,7 @@ const { classifyIntent, ENTITY_NOUN } = require('../lib/intent');
 const feedstockSupply = require('../lib/feedstockSupply');
 const specQuestion = require('../lib/specQuestion');
 const specTable = require('../lib/specTable');
+const diagram = require('../lib/diagram');
 const companyRelations = require('../lib/companyRelations');
 const { canonicalizeProperNouns } = require('../lib/nameFix');
 const itemFacts = require('../lib/itemFacts');
@@ -1319,7 +1320,7 @@ function stripStrayScripts(text, candidates) {
 // when neither exists the answer is condensed into one compact table by a short, bounded call.
 const TABULATE_SYSTEM = 'Condense the given answer into ONE compact Markdown pipe table (at most 8 rows, 2 to 5 columns) that makes its key points easy to scan. Copy every figure exactly, keep every [N] citation on the row it supports, add no new facts, and output ONLY the table.';
 async function ensureVisual(text, req, signal) {
-  if (!req.wantsVisual || /```chart/.test(text) || /^\s*\|.+\|\s*$/m.test(text)) return text;
+  if (!req.wantsVisual || /```(chart|diagram)/.test(text) || /^\s*\|.+\|\s*$/m.test(text)) return text;
   try {
     const result = await withTimeout(
       callHedged({ system: TABULATE_SYSTEM, user: String(text).slice(0, 6000) }, { signal, hedgeAfterMs: 8000 }),
@@ -1368,6 +1369,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
   if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
+  if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length });
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
   const verified = dataset ? `${dataset.markdown}\n\n${verifiedModel}` : verifiedModel;
   const covered = ensureCompanyCoverage(verified, required, candidates);
@@ -1530,7 +1532,7 @@ async function handleSearch(req, res, signal) {
   const intent = classifyIntent(question, roster);
   const subjectQ = subjectScope.forQuestion(question);
   const subjectSplit = subjectQ ? subjectScope.splitRoster(roster, subjectQ) : null;
-  const required = quick || feedstockSupply.isFeedstockSupplyQuestion(question) || specQuestion.isSpecQuestion(question) ? [] : requiredCompanies(question, candidates, subjectSplit ? subjectSplit.allowed : roster);
+  const required = quick || feedstockSupply.isFeedstockSupplyQuestion(question) || specQuestion.isSpecQuestion(question) || diagram.isDiagramQuestion(question) ? [] : requiredCompanies(question, candidates, subjectSplit ? subjectSplit.allowed : roster);
   const subjectBlock = subjectSplit
     ? `\n\n[대상 업체 한정 — ${subjectQ.label}] 표·차트·목록의 항목으로 쓸 수 있는 업체는 이 질문의 주제(${subjectQ.label})에 해당하는 업체뿐이다${subjectSplit.allowed.length ? `(관리 대상: ${subjectSplit.allowed.map((c) => c.name).join(', ')} 및 자료가 이 주제의 생산·정제 업체임을 직접 밝힌 업체)` : ''}. 팜유를 원료로 쓰는 바이오연료·재생디젤·SAF·정유 업체, 그리고 주제와 무관한 업체는 항목으로 올리지 않는다. 해당 업체의 자료가 없으면 "미확보"로 밝힌다.`
     : '';
@@ -1599,8 +1601,18 @@ async function handleSearch(req, res, signal) {
       ? `\n\n[질의 유형: 피어 비교 — ${intent.focus.map((c) => c.name).join(', ')}] 질문에 지명된 기업만 같은 항목·같은 단위로 나란히 비교한다(기업별 개요 한 줄, 비교표, 차이를 만드는 요인). 지명되지 않은 기업은 다루지 않는다.`
       : '';
   let relationBlock = '';
-  if (process.env.COMPANY_RELATIONS !== 'off' && intent.focus.length) { try { relationBlock = companyRelations.promptBlock(await companyRelations.relationsFor(intent.focus.map((c) => c.name))); } catch (_) { /* optional context */ } }
-  const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '');
+  if (process.env.COMPANY_RELATIONS !== 'off' && (intent.focus.length || diagram.isDiagramQuestion(question))) {
+    try {
+      let relNames = intent.focus.map((c) => c.name);
+      if (diagram.isDiagramQuestion(question)) {
+        // a diagram also draws on the relations of the companies the retrieved materials mention
+        const blob = candidates.map(materialText).join(' ').toLowerCase();
+        relNames = relNames.concat(roster.filter((c) => (c.rawNames || [c.name]).some((n) => String(n).length >= 4 && blob.includes(String(n).toLowerCase()))).map((c) => c.name)).slice(0, 20);
+      }
+      relationBlock = companyRelations.promptBlock(await companyRelations.relationsFor(relNames, { limit: 80 }));
+    } catch (_) { /* optional context */ }
+  }
+  const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '');
   const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {

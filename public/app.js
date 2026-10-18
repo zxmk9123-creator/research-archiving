@@ -927,6 +927,102 @@ function compactNumber(v) {
   return Number(Math.round(v * 100) / 100).toLocaleString('en-US');
 }
 
+// Value chain / relationship diagram: the answer carries a JSON block (validated server-side); drawn here as SVG.
+// Columns = stages (value chain) or depth along the from->to edges (relations); no model-written markup is ever inserted.
+function renderDiagramHtml(jsonText) {
+  let d;
+  try { d = JSON.parse(jsonText); } catch (_) { return ''; }
+  if (!d || !Array.isArray(d.nodes) || !Array.isArray(d.edges) || d.nodes.length < 2) return '';
+  const nodes = d.nodes.map((n) => ({ ...n, label: String(n.label || ''), group: n.group || null }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = d.edges.filter((e) => byId.has(e.from) && byId.has(e.to));
+  const stages = Array.isArray(d.stages) ? d.stages : [];
+  // column of every node
+  if (d.type === 'valuechain' && stages.length) {
+    const idx = new Map(stages.map((s, i) => [s.id, i]));
+    nodes.forEach((n) => { n.col = idx.has(n.stage) ? idx.get(n.stage) : 0; });
+  } else {
+    const depth = new Map(nodes.map((n) => [n.id, 0]));
+    const dirEdges = edges.filter((e) => e.type !== 'jv');
+    for (let pass = 0; pass < nodes.length; pass++) {
+      let changed = false;
+      for (const e of dirEdges) if (depth.get(e.to) < depth.get(e.from) + 1 && depth.get(e.from) + 1 < nodes.length) { depth.set(e.to, depth.get(e.from) + 1); changed = true; }
+      if (!changed) break;
+    }
+    nodes.forEach((n) => { n.col = depth.get(n.id); });
+  }
+  const cols = [...new Set(nodes.map((n) => n.col))].sort((a, b) => a - b);
+  const colOf = new Map(cols.map((c, i) => [c, i]));
+  const textW = (s) => [...s].reduce((w, ch) => w + (/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u4e00-\u9fff]/.test(ch) ? 13 : 7.4), 0);
+  nodes.forEach((n) => { n.w = Math.max(96, Math.min(210, Math.round(textW(n.label) + 28))); n.h = 36; n.c = colOf.get(n.col); });
+  const colW = cols.map((_, i) => Math.max(...nodes.filter((n) => n.c === i).map((n) => n.w)));
+  const gapX = 96;
+  const padX = 20;
+  const headH = stages.length && d.type === 'valuechain' ? 34 : 26;
+  const x0 = []; let x = padX;
+  colW.forEach((w) => { x0.push(x); x += w + gapX; });
+  const rowGap = 18;
+  const groupOrder = [...new Set(nodes.map((n) => n.group || ''))];
+  const colNodes = cols.map((_, i) => nodes.filter((n) => n.c === i).sort((a, b) => groupOrder.indexOf(a.group || '') - groupOrder.indexOf(b.group || '')));
+  // fewer crossings: reorder each column by the mean position of its neighbours (a few alternating sweeps)
+  const pos = new Map();
+  const reindex = () => colNodes.forEach((list) => list.forEach((n, k) => pos.set(n.id, list.length > 1 ? k / (list.length - 1) : 0.5)));
+  reindex();
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const order = sweep % 2 ? [...colNodes.keys()].reverse() : [...colNodes.keys()];
+    for (const i of order) {
+      const key = (n) => {
+        const ps = edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => byId.get(e.from === n.id ? e.to : e.from)).filter((m) => m.c !== n.c).map((m) => pos.get(m.id));
+        return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : pos.get(n.id);
+      };
+      colNodes[i] = colNodes[i].map((n) => ({ n, k: key(n) })).sort((a, b) => a.k - b.k).map((o) => o.n);
+      reindex();
+    }
+  }
+  const colH = colNodes.map((list) => list.reduce((h, n) => h + n.h + rowGap, -rowGap));
+  const H = Math.max(...colH);
+  colNodes.forEach((list, i) => { let y = headH + 12 + (H - colH[i]) / 2; for (const n of list) { n.x = x0[i] + (colW[i] - n.w) / 2; n.y = y; y += n.h + rowGap; } });
+  const W = x - gapX + padX;
+  const Ht = headH + 12 + H + 20;
+  const palette = ['#2f6fed', '#e8833a', '#2f9e6f', '#9b59b6', '#d94f70', '#3aa7c9', '#a3a33a', '#7d7d7d'];
+  const groupColor = (g) => (g ? palette[groupOrder.indexOf(g) % palette.length] : '#5b6b84');
+  const style = {
+    owns: { c: '#1f2a44', dash: '', arrow: true }, stake: { c: '#1f2a44', dash: '6 4', arrow: true }, jv: { c: '#9b59b6', dash: '2 4', arrow: false },
+    supplies: { c: '#2f6fed', dash: '', arrow: true }, contract: { c: '#e8833a', dash: '', arrow: true }, flow: { c: '#7d7d7d', dash: '', arrow: true },
+  };
+  const typeLabel = { owns: '지배·자회사', stake: '지분', jv: '합작', supplies: '공급', contract: '하청·시공', flow: '흐름' };
+  const used = [...new Set(edges.map((e) => e.type))];
+  const edgeSvg = edges.map((e) => {
+    const a = byId.get(e.from); const b = byId.get(e.to);
+    const st = style[e.type] || style.flow;
+    const left = a.x <= b.x;
+    const sameCol = a.c === b.c;
+    const x1 = sameCol ? a.x + a.w : left ? a.x + a.w : a.x; const y1 = a.y + a.h / 2;
+    const x2 = sameCol ? b.x + b.w : left ? b.x : b.x + b.w; const y2 = b.y + b.h / 2;
+    const bend = sameCol ? 46 : Math.max(24, Math.abs(x2 - x1) / 2);
+    const dir = sameCol ? 1 : left ? 1 : -1;
+    // an edge that skips a column runs through the lane above the nodes instead of behind the boxes in between
+    const skip = Math.abs(a.c - b.c) > 1;
+    const lane = headH - 6;
+    const path = skip
+      ? `M${x1},${y1} C${x1 + bend * dir},${lane} ${x2 - bend * dir},${lane} ${x2},${y2}`
+      : `M${x1},${y1} C${x1 + bend * dir},${y1} ${x2 - bend * dir * (sameCol ? -1 : 1)},${y2} ${x2},${y2}`;
+    const mx = (x1 + x2) / 2 + (sameCol ? bend * 0.75 : 0); const my = skip ? lane + 8 : (y1 + y2) / 2;
+    const op = e.inferred ? 0.55 : 1;
+    const dash = e.inferred ? '2 4' : st.dash;
+    return `<path d="${path}" fill="none" stroke="${st.c}" stroke-width="1.6" ${dash ? `stroke-dasharray="${dash}"` : ''} opacity="${op}" ${st.arrow ? `marker-end="url(#dg-arrow-${e.type in style ? e.type : 'flow'})"` : ''}/>`
+      + (e.label ? `<text x="${mx}" y="${my - 4}" text-anchor="middle" font-size="11" fill="${st.c}" stroke="var(--surface, #fff)" stroke-width="3" paint-order="stroke">${escapeHtml(e.label)}${e.source ? ` [${e.source}]` : ''}</text>` : '');
+  }).join('');
+  const stageSvg = d.type === 'valuechain' ? stages.map((s, i) => (colOf.has(i) ? `<text x="${x0[colOf.get(i)] + colW[colOf.get(i)] / 2}" y="18" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text-muted, #667085)">${escapeHtml(s.label)}</text>` : '')).join('') : '';
+  const nodeSvg = nodes.map((n) => {
+    const col = groupColor(n.group);
+    return `<g><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="var(--surface, #fff)" stroke="${col}" stroke-width="1.6"/><text x="${n.x + n.w / 2}" y="${n.y + n.h / 2 + 4}" text-anchor="middle" font-size="12.5" fill="var(--text, #101828)">${escapeHtml(n.label)}</text></g>`;
+  }).join('');
+  const markers = Object.keys(style).filter((k) => style[k].arrow).map((k) => `<marker id="dg-arrow-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${style[k].c}"/></marker>`).join('');
+  const legend = used.map((t) => `<span class="dg-key"><i style="border-top:2px ${style[t].dash ? 'dashed' : 'solid'} ${style[t].c}"></i>${typeLabel[t] || t}</span>`).join('') + (edges.some((e) => e.inferred) ? '<span class="dg-key"><i style="border-top:2px dotted #7d7d7d"></i>추정</span>' : '');
+  return `<figure class="ai-diagram">${d.title ? `<figcaption>${escapeHtml(String(d.title))}</figcaption>` : ''}<div class="ai-diagram-scroll"><svg viewBox="0 0 ${Math.round(W)} ${Math.round(Ht)}" width="${Math.round(W)}" height="${Math.round(Ht)}" role="img" aria-label="${escapeHtml(String(d.title || '도식'))}"><defs>${markers}</defs>${stageSvg}${edgeSvg}${nodeSvg}</svg></div><div class="dg-legend">${legend}</div></figure>`;
+}
+
 function renderChartHtml(jsonText) {
   let c;
   try { c = JSON.parse(jsonText); } catch (_) { return ''; }
@@ -1178,10 +1274,16 @@ function renderBulletTree(lines, sources, rootClass = 'ai-answer-list') {
 
 function renderAnswerHtml(rawAnswer, sources) {
   // Split out chart fences first; an unfinished fence (mid-stream) is hidden.
-  const text = String(rawAnswer || '').replace(/```chart[^\n]*\n?(?![\s\S]*```)[\s\S]*$/, '');
-  if (/```chart/.test(text)) {
-    const parts = text.split(/```chart[^\n]*\n?([\s\S]*?)```/);
-    return parts.map((p, i) => (i % 2 ? renderChartHtml(p) : (p.trim() ? renderAnswerHtml(p, sources) : ''))).join('');
+  const text = String(rawAnswer || '').replace(/```(?:chart|diagram)[^\n]*\n?(?![\s\S]*```)[\s\S]*$/, '');
+  if (/```(?:chart|diagram)/.test(text)) {
+    const parts = text.split(/```(chart|diagram)[^\n]*\n?([\s\S]*?)```/);
+    // split with two capture groups: [text, kind, body, text, kind, body, ...]
+    let out = '';
+    for (let i = 0; i < parts.length; i += 3) {
+      if (parts[i].trim()) out += renderAnswerHtml(parts[i], sources);
+      if (i + 2 < parts.length) out += parts[i + 1] === 'diagram' ? renderDiagramHtml(parts[i + 2]) : renderChartHtml(parts[i + 2]);
+    }
+    return out;
   }
   const normalized = normalizeAnswerMarkdown(text).trim();
   // The model sometimes emits literal <br>: inside a table cell it means a line
