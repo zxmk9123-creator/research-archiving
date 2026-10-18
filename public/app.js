@@ -182,6 +182,7 @@ async function renderTeamPickMenuContents(itemId) {
       }
       await renderTeamPickMenuContents(itemId);
       await updateCardTeamPickButton(itemId);
+      document.dispatchEvent(new CustomEvent('teampicks-changed'));
     };
   });
   const addBtn = teamPickMenuEl.querySelector('#team-pick-add-btn');
@@ -198,9 +199,16 @@ async function renderTeamPickMenuContents(itemId) {
       }
       await renderTeamPickMenuContents(itemId);
       await updateCardTeamPickButton(itemId);
+      document.dispatchEvent(new CustomEvent('teampicks-changed'));
     };
   }
 }
+
+// On the 자료 tab's 팀 Pick view the team chips and the list follow every change made in a card's 팀 Pick menu right away.
+document.addEventListener('teampicks-changed', () => {
+  const { path, query } = parseHash();
+  if (path === 'archive' && query.view === 'team') renderArchive(query);
+});
 
 window.toggleTeamPickMenu = function toggleTeamPickMenu(ev, itemId) {
   ev.stopPropagation();
@@ -1852,10 +1860,11 @@ async function renderArchive(query = {}) {
   const category = query.category === 'archive' || query.category === 'daily_report' ? query.category : null;
   const itemsQuery = category ? { ...query, category } : query;
   const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
-  const [sectors, usages, sources, itemsPage, ranking, teamPicks, monthCounts] = await Promise.all([
+  const [sectors, usages, sources, itemsPage, ranking, teamPicks, teamRoster, monthCounts] = await Promise.all([
     api('/sectors'), api('/usages'), api('/sources'), api('/items?status=Published' + toQuery({ ...itemsQuery, limit: 100, offset }), { includeMeta: true }),
     api('/picks/ranking').catch(() => []),
     api('/picks?kind=team').catch(() => []),
+    api('/picks/teams').catch(() => []),
     // Independent of this page's limit/offset — see month-counts' own
     // comment in items.js for why the sidebar can't be built from
     // `items` alone (a month before the current 100-item page would
@@ -1899,15 +1908,34 @@ async function renderArchive(query = {}) {
   // with this browser's localStorage save set, "팀 Pick" intersects with
   // the existing server-side team-pick ranking (importantIds).
   const view = query.view === 'saved' || query.view === 'team' ? query.view : 'all';
+  // 팀 Pick view: round team chips (same idea as the Review tab's sector chips); a lit chip limits the list to that team's picks,
+  // several lit chips show the union. Chips come from the shared roster, so a team added in a card's 팀 Pick menu appears at once.
+  const selectedTeams = new Set(String(query.team || '').split(',').map((t) => t.trim()).filter(Boolean));
+  const teamsInUse = new Set(teamPicks.map((p) => p.team).filter(Boolean));
+  const teamNames = [...new Set([...(teamRoster || []), ...teamsInUse])].sort((a, b) => a.localeCompare(b, 'ko'));
+  const pickedBy = (it, teams) => (teamPicksByItem.get(it.id) || []).some((p) => teams.has(p.team));
   const visibleItems = view === 'saved' ? items.filter((it) => savedIds.has(it.id))
-    : view === 'team' ? items.filter((it) => importantIds.has(it.id))
+    : view === 'team' ? items.filter((it) => (selectedTeams.size ? pickedBy(it, selectedTeams) : importantIds.has(it.id)))
     : items;
   const viewTabs = [
     { key: 'all', label: '전체' },
     { key: 'saved', label: '내 저장' },
     { key: 'team', label: '팀 Pick' },
   ];
-  const tabQuery = (key) => toQuery({ ...query, view: key === 'all' ? '' : key }).slice(1);
+  const tabQuery = (key) => toQuery({ ...query, view: key === 'all' ? '' : key, ...(key === 'team' ? {} : { team: '' }) }).slice(1);
+  const teamCount = (t) => items.filter((it) => pickedBy(it, new Set([t]))).length;
+  const teamChipQuery = (t) => {
+    const next = new Set(selectedTeams);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    return toQuery({ ...query, view: 'team', team: [...next].join(',') }).slice(1);
+  };
+  const teamChipsHtml = view === 'team'
+    ? `<div class="team-chip-row" id="team-chip-row" role="group" aria-label="팀 선택">${
+        teamNames.length
+          ? teamNames.map((t) => `<a class="chip team-chip ${selectedTeams.has(t) ? 'is-on' : ''}" href="#/archive?${teamChipQuery(t)}" aria-pressed="${selectedTeams.has(t)}" data-team-chip="${escapeHtml(t)}">${escapeHtml(t)} <span class="team-chip-count">${teamCount(t)}</span></a>`).join('')
+          : '<span class="chip-empty">등록된 팀이 없습니다. 자료 카드의 팀 Pick에서 팀을 추가하세요.</span>'
+      }${selectedTeams.size ? `<a class="team-chip-clear" href="#/archive?${toQuery({ ...query, view: 'team', team: '' }).slice(1)}">전체 팀 보기</a>` : ''}</div>`
+    : '';
   const viewTabsHtml = viewTabs.map((t) =>
     `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(t.key)}">${t.label}</a>`
   ).join('');
@@ -1926,7 +1954,7 @@ async function renderArchive(query = {}) {
     ? ''
     : `<div class="archive-empty">
         <strong>결과가 없습니다</strong>
-        ${view === 'saved' ? '아직 저장한 자료가 없습니다.' : view === 'team' ? '아직 팀 Pick이 없습니다.' : hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
+        ${view === 'saved' ? '아직 저장한 자료가 없습니다.' : view === 'team' ? (selectedTeams.size ? '선택한 팀이 pick한 자료가 없습니다.' : '아직 팀 Pick이 없습니다.') : hasActiveFilters ? '선택한 필터 조건에 맞는 자료가 아직 없습니다. 필터를 조정해보세요.' : '아직 발행된 자료가 없습니다.'}
       </div>`;
 
   // Month-divider list for whichever page is currently loaded (purely a
@@ -1969,6 +1997,7 @@ async function renderArchive(query = {}) {
     ${TRUST_GRADE_EXPLANATION_HTML}
     <div class="archive-tabs category-tabs">${categoryTabsHtml}</div>
     <div class="archive-tabs">${viewTabsHtml}</div>
+    ${teamChipsHtml}
     <div class="archive">
       <div class="archive-search-bar">
         <input id="f-q" placeholder="검색" value="${query.q || ''}">
@@ -3853,7 +3882,7 @@ const ARCHIVE_TOUR_STEPS = [
   { selector: '#filter-toggle-btn', title: '필터', desc: '눌러서 패널을 열고 활용처·유형·발행처·기간·섹터(여러 개 선택 가능)를 고른 뒤 "필터 적용"을 누르세요. 적용된 조건은 검색창 옆 칩과 버튼의 숫자로 보이고, "초기화"로 한 번에 해제됩니다. 필터는 아래 전체·내 저장·팀 Pick과 함께 쓸 수 있어요.' },
   { selector: '.archive-tabs:not(.category-tabs) .archive-tab', title: '전체', desc: '필터 조건에 맞는 발행 자료를 최신순으로 모두 보여줍니다. 기본 보기예요.' },
   { selector: '.archive-tabs:not(.category-tabs) .archive-tab[href*="view=saved"]', title: '내 저장', desc: '자료 카드의 "☆ 저장"을 눌러 담은 자료만 모아봅니다. 이 브라우저에만 저장되어 다른 기기나 팀원에게는 보이지 않아요. 나중에 다시 볼 자료를 개인적으로 챙기는 용도입니다.' },
-  { selector: '.archive-tabs:not(.category-tabs) .archive-tab[href*="view=team"]', title: '팀 Pick', desc: '자료 카드의 "팀 Pick" 버튼으로 우리 팀을 선택해 표시한 자료를 모아봅니다. 팀의 pick은 모두에게 공유되어 팀원 누구나 같은 목록을 볼 수 있고, 한 팀이라도 pick한 자료만 나옵니다.' },
+  { selector: '.archive-tabs:not(.category-tabs) .archive-tab[href*="view=team"]', title: '팀 Pick', desc: '자료 카드의 "팀 Pick" 버튼으로 우리 팀을 선택해 표시한 자료를 모아봅니다. 팀의 pick은 모두에게 공유되어 팀원 누구나 같은 목록을 볼 수 있고, 한 팀이라도 pick한 자료만 나옵니다. 이 보기에서는 위에 팀이 동그란 칩으로 나열되고, 칩을 누르면 파란 불이 켜져 그 팀이 pick한 자료만 보여요(여러 팀 선택 가능). 카드의 팀 Pick에서 팀을 추가하면 칩에 바로 반영됩니다.' },
 ];
 function startArchiveTour(replay = false) {
   if (replay) localStorage.removeItem(ARCHIVE_TOUR_SEEN_KEY);
