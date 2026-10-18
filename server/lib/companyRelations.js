@@ -187,6 +187,20 @@ async function seedFromFacts() {
   return n;
 }
 
+// Re-extract the relations of every item whose stored evidence mentions one of the names (after a naming fix): the AI rows of
+// those items are deleted and the items go back into the backfill queue. Manual rows stay.
+async function requeueByEvidence(names) {
+  const pats = (names || []).map((n) => `%${String(n).trim()}%`).filter((p) => p.length > 4);
+  if (!pats.length) return { items: 0 };
+  const { rows } = await pool.query("SELECT DISTINCT item_id FROM company_relations WHERE item_id IS NOT NULL AND origin = 'ai' AND (evidence ILIKE ANY($1) OR src ILIKE ANY($1) OR dst ILIKE ANY($1))", [pats]);
+  const ids = rows.map((r) => r.item_id);
+  if (ids.length) {
+    await pool.query("DELETE FROM company_relations WHERE item_id = ANY($1) AND origin = 'ai'", [ids]);
+    await pool.query('UPDATE items SET relations_status = NULL WHERE id = ANY($1)', [ids]);
+  }
+  return { items: ids.length };
+}
+
 const status = { running: false, startedAt: null, finishedAt: null, total: 0, done: 0, withRelations: 0, relations: 0, errors: 0 };
 async function runBackfill({ limit = 300 } = {}) {
   if (status.running) return { started: false, reason: 'already_running' };
@@ -234,4 +248,4 @@ function promptBlock(rows) {
   return `\n\n[기업 관계 DB — 질문 기업의 자회사·관계기업·합작·공급·하청 관계(기사에서 확인된 것만). 이 관계는 답변에서 소속·합작 구분과 중복 합산 방지에 사용하고, DB에 없는 관계는 추정하지 않는다]\n${rows.map((r) => `- ${describe(r)}`).join('\n')}`;
 }
 
-module.exports = { baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };
+module.exports = { requeueByEvidence, baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };

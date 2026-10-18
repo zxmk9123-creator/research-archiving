@@ -14,3 +14,13 @@ test('cluster: suffix variants, roster aliases and learned bilingual spellings b
   assert.equal(by('Neste').same_names.includes('Neste Oyj'), true);
   assert.ok(!out.some((g) => g.entity === 'Group' && g.same_names.length));
 });
+
+test('sameCompanyName: spellings of one company merge; subsidiaries, sites and partners do not', () => {
+  const s = reg.sameCompanyName;
+  assert.ok(s('Chevron', '셰브론') && s('Chevron', 'Chevron Corp.') && s('COSMO Oil', 'Cosmo Oil'));
+  assert.ok(s('Diamond Green Diesel', 'DGD') && s('Carbon Neutral Fuels', 'CNF'));
+  assert.ok(s('포스코인터내셔널', '포스코인터') && s('Wilmar', 'Wilmar International Limited'));
+  assert.ok(!s('BP plc', 'Archaea Energy') && !s('BP plc', 'bp Castellón') && !s('BP plc', 'bp Kwinana'));
+  assert.ok(!s('Diamond Green Diesel', 'Darling Ingredients'));
+  assert.ok(!s('Eni', 'Enilive'));
+});

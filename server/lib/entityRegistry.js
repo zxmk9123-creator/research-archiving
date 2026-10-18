@@ -38,6 +38,26 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
   return out;
 }
 
+// Roster aliases are sometimes a subsidiary, a site or a partner ("Archaea Energy", "bp Castellón", "Darling Ingredients"
+// listed under BP / Diamond Green Diesel). Only spellings of the SAME company are merged: equal base name, one script vs the
+// other (Latin / Hangul), a Hangul prefix, a base name plus only generic words, or an acronym of the name.
+const GENERIC = new Set(['international', 'global', 'energy', 'group', 'holdings', 'holding', 'oil', 'oils', 'corporation', 'resources', 'biofuels', 'bioenergy', 'renewables', 'renewable', 'petroleum', 'chemical', 'chemicals', 'industries', 'industry', 'company', 'limited']);
+function sameCompanyName(a, b) {
+  const x = baseKey(a);
+  const y = baseKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const hx = /[가-힣]/.test(x); const hy = /[가-힣]/.test(y);
+  const lx = /[a-z]/.test(x); const ly = /[a-z]/.test(y);
+  if ((hx && !lx && ly && !hy) || (hy && !ly && lx && !hx)) return true;          // Hangul spelling vs Latin spelling
+  if (hx && hy) { const [s, l] = x.length <= y.length ? [x, y] : [y, x]; return s.length >= 3 && l.startsWith(s); }
+  const tx = x.split(' '); const ty = y.split(' ');
+  const [small, big] = tx.length <= ty.length ? [tx, ty] : [ty, tx];
+  if (small.every((t) => big.includes(t)) && big.filter((t) => !small.includes(t)).every((t) => GENERIC.has(t))) return true;
+  const acr = (raw, other) => { const u = String(raw).replace(/[^A-Za-z]/g, ''); return u.length >= 2 && u.length <= 5 && u === u.toUpperCase() && other.split(' ').map((t) => t[0]).join('') === u.toLowerCase(); };
+  return acr(a, y) || acr(b, x);
+}
+
 async function loadInputs() {
   const names = [];
   const add = (rows, col) => { for (const r of rows) if (r[col]) names.push({ name: r[col], n: Number(r.n) || 1 }); };
@@ -50,7 +70,7 @@ async function loadInputs() {
   for (const c of companies) {
     rosterNames.push(c.name);
     names.push({ name: c.name, n: 50 });
-    for (const a of c.aliases || []) { if (a) { names.push({ name: a, n: 1 }); links.push([c.name, a]); } }
+    for (const a of c.aliases || []) { if (a) { names.push({ name: a, n: 1 }); if (sameCompanyName(c.name, a)) links.push([c.name, a]); } }
   }
   try {
     const { rows } = await pool.query('SELECT term, alt FROM term_aliases WHERE alt IS NOT NULL');
@@ -138,4 +158,4 @@ async function lookup(q) {
   return rows;
 }
 
-module.exports = { cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
+module.exports = { sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
