@@ -79,6 +79,33 @@ async function loadInputs() {
   return { names, links, rosterNames };
 }
 
+// Hangul-only names with no Latin counterpart: ask once for the official English name and keep it ONLY when it is the same
+// company as a Latin name already in the data (so nothing is merged on a guess). Stored in term_aliases.
+const TRANSLATE_SYSTEM = 'For each Korean company name give its official English name, or null when you are not sure. Respond with ONLY a JSON array of {"ko": string, "en": string|null}.';
+async function learnBilingual({ limit = 120 } = {}) {
+  const { names } = await loadInputs();
+  const all = [...new Set(names.map((n) => String(n.name).trim()))];
+  const latin = all.filter((n) => /[A-Za-z]/.test(n) && !/[가-힣]/.test(n));
+  const hangul = all.filter((n) => /[가-힣]/.test(n) && !/[A-Za-z]/.test(n) && !latin.some((l) => sameCompanyName(l, n))).slice(0, limit);
+  let linked = 0;
+  for (let i = 0; i < hangul.length; i += 40) {
+    const batch = hangul.slice(i, i + 40);
+    try {
+      const result = await limitCall(() => provider.callProviderWithFallback({ system: TRANSLATE_SYSTEM, user: batch.map((b) => `- ${b}`).join('\n') }));
+      const text = String(result.text || '');
+      const arr = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
+      for (const a of Array.isArray(arr) ? arr : []) {
+        if (!a || !a.en || !batch.includes(a.ko)) continue;
+        const match = latin.find((l) => sameCompanyName(l, a.en));
+        if (!match) continue;
+        await pool.query('INSERT INTO term_aliases (term, alt) VALUES ($1, $2) ON CONFLICT DO NOTHING', [a.ko, match]);
+        linked++;
+      }
+    } catch (err) { console.error(`bilingual name batch failed: ${err.message}`); }
+  }
+  return { hangulChecked: hangul.length, linked };
+}
+
 async function rebuild() {
   const { names, links, rosterNames } = await loadInputs();
   const groups = cluster(names, { links, rosterNames });
@@ -158,4 +185,4 @@ async function lookup(q) {
   return rows;
 }
 
-module.exports = { sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
+module.exports = { learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
