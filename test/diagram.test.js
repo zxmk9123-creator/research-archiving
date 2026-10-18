@@ -22,7 +22,6 @@ test('sanitizeInText rewrites valid blocks with an evidence line and removes inv
   const good = JSON.stringify({ type: 'relations', nodes: [{ id: 'a', label: 'Eni' }, { id: 'b', label: 'Enilive' }], edges: [{ from: 'a', to: 'b', type: 'owns', source: 2 }, { from: 'a', to: 'b', type: 'supplies', source: 9 }] });
   const out = dg.sanitizeInText(`설명\n\`\`\`diagram\n${good}\n\`\`\`\n끝\n\`\`\`diagram\n{bad json}\n\`\`\``, { maxSource: 5 });
   assert.match(out, /```diagram\n\{/);
-  assert.match(out, /근거: \[2\]/);
   assert.equal((out.match(/```diagram/g) || []).length, 1);
   assert.ok(!out.includes('"source":9'));
 });

@@ -1343,8 +1343,30 @@ function diagramHelpers(roster) {
   for (const c of roster || []) for (const n of c.rawNames || [c.name]) canonMap.set(String(n).toLowerCase().trim(), c.name);
   return {
     canon: (label) => canonMap.get(String(label).toLowerCase().trim()) || label,
-    isNonCompany: (label) => classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()),
+    isNonCompany: (label) => classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()) || /^[A-Za-z가-힣]{1,2}사$|^company [a-z]$/i.test(String(label).trim()) || /[®™]/.test(label),
   };
+}
+
+// Palm value-chain diagrams: the tagged palm companies' recent relationship / supply / ownership materials join the candidates
+// (appended at the end, so source numbers of the retrieved ones do not change).
+async function diagramPalmExtras(roster, have) {
+  const out = [];
+  const seen = new Set(have.map((c) => c.id));
+  const REL = ['%자회사%', '%합작%', '%공급%', '%지분%', '%인수%', '%정제%', '%농장%', '%subsidiar%', '%joint venture%', '%supply%', '%acqui%', '%refiner%', '%plantation%', '%estate%'];
+  for (const c of roster.filter((r) => r.segment === 'palm').slice(0, 10)) {
+    const pats = (c.rawNames || [c.name]).filter((n) => String(n).trim().length >= 3).map((n) => `%${String(n).trim()}%`);
+    if (!pats.length) continue;
+    try {
+      const { rows } = await pool.query(
+        `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name, 0 AS relevance_score
+           FROM items i LEFT JOIN sources s ON s.id = i.source_id
+          WHERE i.status = 'Published' AND (i.title ILIKE ANY($1) OR i.ai_summary ILIKE ANY($1) OR i.summary ILIKE ANY($1))
+            AND (i.title ILIKE ANY($2) OR i.ai_summary ILIKE ANY($2) OR i.summary ILIKE ANY($2))
+          ORDER BY i.published_at DESC NULLS LAST LIMIT 2`, [pats, REL]);
+      for (const r of rows) if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+    } catch (_) { /* optional context */ }
+  }
+  return out.slice(0, 12);
 }
 
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
@@ -1485,6 +1507,7 @@ async function handleSearch(req, res, signal) {
     candidates = await retrieveCandidates(`${feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
     {
       const rosterForFresh = await getRoster();
+      if (diagram.isDiagramQuestion(question) && /(팜|palm)/i.test(question)) candidates = candidates.concat(await diagramPalmExtras(rosterForFresh, candidates));
       const intentForFresh = classifyIntent(question, rosterForFresh);
       // Old articles are dropped only where the answer rests on CURRENT figures (a table/ranking/capacity question).
       // A relationship or event ("who joined project X") does not expire: those materials stay, dated in the prompt.
