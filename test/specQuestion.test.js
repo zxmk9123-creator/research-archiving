@@ -35,5 +35,12 @@ test('normalizeSpecTables: one row per company, tons/year in the capacity column
   const rows = out.split('\n').filter((l) => /^\| (EcoCeres|Chevron)/.test(l));
   assert.equal(rows.length, 2);
   assert.ok(rows[0].includes('770,000') && out.includes('생산능력 (톤/년)'));
-  assert.ok(rows[1].includes('환산') && out.includes('참고') && out.includes('450,000 톤/년'));
+  assert.ok(rows[1].includes('※') && out.includes('원문 3.4억 갤런') && out.includes('참고') && out.includes('450,000 톤/년'));
+});
+
+test('normalizeSpecTables: running beats a later planned year even without a status column', () => {
+  const st = require('../server/lib/specTable');
+  const t = ['| 업체 | 생산능력 | 가동 시점 |', '| :-- | :-- | :-- |', '| A | 45만 톤 | 2030년 예정 |', '| A | 77만 톤 | 현재 가동 |'].join('\n');
+  const out = st.normalizeSpecTables(t);
+  assert.ok(/\| A \| 770,000/.test(out) && out.includes('450,000 톤/년'));
 });

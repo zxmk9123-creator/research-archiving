@@ -50,11 +50,12 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
       if (cells.length !== head.length) { order.push({ raw: l }); continue; }
       const cap = parseCapacity(cells[capIdx], density);
       const key = keyOf(cells[0]);
-      const row = { cells, cap, rank: stIdx >= 0 ? RANK(cells[stIdx]) : 1, year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
+      const row = { cells, cap, rank: RANK(stIdx >= 0 ? cells[stIdx] : (yrIdx >= 0 ? cells[yrIdx] : cells.join(' '))), year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
       if (!groups.has(key)) { groups.set(key, []); order.push({ key }); }
       groups.get(key).push(row);
     }
     const refs = [];
+    const conv = [];
     const body = [];
     for (const o of order) {
       if (o.raw) { body.push(o.raw); continue; }
@@ -66,12 +67,14 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
       if (best.cap) {
         const orig = cells[capIdx].replace(/\s*\[\d+\]/g, '').trim();
         const cites = (cells[capIdx].match(/\[\d+\]/g) || []).join('');
-        cells[capIdx] = `${fmt(best.cap.tons)}${best.cap.converted ? ` (환산, 원문 ${orig})` : ''}${cites ? ` ${cites}` : ''}`;
+        cells[capIdx] = `${fmt(best.cap.tons)}${best.cap.converted ? ' ※' : ''}${cites ? ` ${cites}` : ''}`;
+        if (best.cap.converted) conv.push(`- ${cells[0].replace(/[*_`]/g, '')}: 원문 ${orig}`);
       }
       body.push(`| ${cells.join(' | ')} |`);
       for (const r of rows) {
         if (r === best) continue;
         const stat = stIdx >= 0 ? r.cells[stIdx] : '';
+        if (!r.cap) continue;
         const when = yrIdx >= 0 ? r.cells[yrIdx] : '';
         const val = r.cap ? `${fmt(r.cap.tons)} 톤/년` : r.cells[capIdx];
         if (!r.cap && !r.cells[capIdx]) continue;
@@ -80,6 +83,7 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
     }
     const newHead = head.map((h, k) => (k === capIdx && !/톤/.test(h) ? `${h.replace(/\s*\(.*?\)\s*$/, '')} (톤/년)` : h));
     out.push(`| ${newHead.join(' | ')} |`, lines[i + 1], ...body);
+    if (conv.length) out.push('', '※ 환산한 값 (갤런·배럴·리터→톤, 일 단위는 ×365, 밀도 가정 포함)', ...conv);
     if (refs.length) out.push('', '**참고 (표에 올리지 않은 같은 업체의 다른 값)**', ...refs);
     i = j;
   }
