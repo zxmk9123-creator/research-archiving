@@ -29,10 +29,10 @@ async function storeFacts(itemId, records, { replace = false } = {}) {
     if (replace && records.length) await client.query('DELETE FROM item_facts WHERE item_id = $1', [itemId]);
     for (const r of records) {
       await client.query(
-        `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        `INSERT INTO item_facts (item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role, kind)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          ON CONFLICT (item_id, entity, COALESCE(site,''), status, grp, amount) DO NOTHING`,
-        [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null, r.product || null, r.role || null]
+        [itemId, r.entity, r.site, r.metric, r.status, r.year, r.group, r.amount, r.basis, r.original, r.etype || null, r.country || null, r.parent || null, r.product || null, r.role || null, r.kind || null]
       );
     }
     await client.query('COMMIT');
@@ -80,13 +80,13 @@ async function loadFactRecords(candidates) {
   if (!ids.length) return { records: [], statusById: new Map() };
   const { rows: statuses } = await pool.query('SELECT id, facts_status FROM items WHERE id = ANY($1)', [ids]);
   const statusById = new Map(statuses.map((r) => [r.id, r.facts_status]));
-  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role FROM item_facts WHERE item_id = ANY($1)', [ids]);
+  const { rows } = await pool.query('SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role, kind FROM item_facts WHERE item_id = ANY($1)', [ids]);
   const indexById = new Map(candidates.map((c, i) => [c.id, i + 1]));
   const pubById = new Map(candidates.map((c) => [c.id, c.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
     group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null,
-    etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, tons: null,
+    etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, kind: r.kind, tons: null,
   }));
   return { records, statusById };
 }
@@ -124,14 +124,14 @@ async function loadFactsByTopic(topicForms, { excludeIds = [], baseIndex = 0, ma
   const items = [...(dated.rows || []), ...(undated.rows || [])].filter((i) => !seen.has(i.id) && seen.add(i.id));
   if (!items.length) return { records: [], items: [] };
   const { rows } = await pool.query(
-    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role FROM item_facts WHERE item_id = ANY($1)',
+    'SELECT item_id, entity, site, metric, status, year, grp, amount, basis, original, entity_type, country, parent, product, role, kind FROM item_facts WHERE item_id = ANY($1)',
     [items.map((i) => i.id)]
   );
   const indexById = new Map(items.map((it, k) => [it.id, baseIndex + k + 1]));
   const pubById = new Map(items.map((it) => [it.id, it.published_at || null]));
   const records = rows.map((r) => ({
     entity: r.entity, site: r.site, metric: r.metric, status: r.status, year: r.year, source: indexById.get(r.item_id),
-    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, tons: null,
+    group: r.grp, amount: Number(r.amount), basis: r.basis, original: r.original, pubAt: pubById.get(r.item_id) || null, etype: r.entity_type, country: r.country, parent: r.parent, product: r.product, role: r.role, kind: r.kind, tons: null,
   }));
   return { records, items };
 }
@@ -142,7 +142,12 @@ const backfillStatus = { running: false, startedAt: null, finishedAt: null, tota
 async function runBackfill({ limit = 300, mode = 'new' } = {}) {
   if (backfillStatus.running) return { started: false, reason: 'already_running' };
   const { rows } = await pool.query(
-    mode === 'product'
+    mode === 'kind'
+      ? `SELECT i.id, i.title, i.summary, i.ai_summary, i.insight, i.ai_insight FROM items i
+          WHERE i.status = 'Published' AND EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id)
+            AND NOT EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id AND f.kind IS NOT NULL)
+          ORDER BY i.published_at DESC NULLS LAST, i.id DESC LIMIT $1`
+    : mode === 'product'
       ? `SELECT i.id, i.title, i.summary, i.ai_summary, i.insight, i.ai_insight FROM items i
           WHERE i.status = 'Published' AND EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id)
             AND NOT EXISTS (SELECT 1 FROM item_facts f WHERE f.item_id = i.id AND f.product IS NOT NULL)
@@ -156,7 +161,7 @@ async function runBackfill({ limit = 300, mode = 'new' } = {}) {
   (async () => {
     try {
       for (const item of rows) {
-        const r = await extractFactsForItem(item, { replace: mode === 'product' });
+        const r = await extractFactsForItem(item, { replace: mode === 'product' || mode === 'kind' });
         backfillStatus.done++;
         if (r.status === 'done') backfillStatus.withFacts++;
         else if (r.status === 'none') backfillStatus.none++;

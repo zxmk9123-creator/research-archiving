@@ -37,7 +37,28 @@ const splitCells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) =>
 const keyOf = (name) => String(name || '').replace(/\[\d+\]/g, '').replace(/\(.*?\)|（.*?）/g, '').replace(/\b(inc|corp|co|ltd|plc|s\.p\.a|sa|ag|gmbh|group)\b\.?/gi, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 const yearOf = (s) => { const m = String(s || '').match(/(20\d\d)/); return m ? Number(m[1]) : 0; };
 
-function normalizeSpecTables(text, { density = 0.8 } = {}) {
+// Stored facts (item_facts, classified at extraction) -> per company key: capacity facts in tons/year, and whether any
+// classified-but-not-capacity fact exists. Facts with kind = null are unclassified and ignored (the table text decides).
+const CAP_KINDS = new Set(['plant_capacity', 'company_capacity']);
+function factIndex(facts, { density = 0.8, safOnly = false } = {}) {
+  const idx = new Map();
+  for (const f of facts || []) {
+    if (!f || !f.kind) continue;
+    const key = keyOf(f.entity);
+    if (!key) continue;
+    const e = idx.get(key) || { caps: [], other: 0 };
+    if (CAP_KINDS.has(f.kind)) {
+      const tons = f.group === 'mass' ? f.amount : f.group === 'volume' ? (f.amount * density) / 1000 : null;
+      if (tons > 0) e.caps.push({ tons, status: f.status, year: f.year || 0, product: f.product, converted: f.group === 'volume', original: f.original, source: f.source, plant: f.kind === 'plant_capacity' });
+    } else e.other++;
+    idx.set(key, e);
+  }
+  for (const e of idx.values()) if (safOnly && e.caps.some((c) => c.product === 'saf')) e.caps = e.caps.filter((c) => c.product === 'saf');
+  return idx;
+}
+const lookupFacts = (idx, key) => idx.get(key) || [...idx.entries()].find(([k]) => k.length >= 4 && (key.includes(k) || k.includes(key)))?.[1] || null;
+
+function normalizeSpecTables(text, { density = 0.8, facts = null } = {}) {
   const lines = String(text || '').split('\n');
   const out = [];
   let i = 0;
@@ -55,10 +76,12 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
     for (const l of lines.slice(i + 2, j)) {
       const cells = splitCells(l);
       if (cells.length !== head.length) { order.push({ raw: l }); continue; }
-      const cap = nonCapacity(cells, capIdx) ? null : parseCapacity(cells[capIdx], density);
       const key = keyOf(cells[0]);
+      const fe = facts ? lookupFacts(facts, key) : null;
+      // classified facts exist for this company: they decide (the model's cell is only a fallback for unclassified ones)
+      const cap = fe && (fe.caps.length || fe.other) ? null : (nonCapacity(cells, capIdx) ? null : parseCapacity(cells[capIdx], density));
       const nonCap = nonCapacity(cells, capIdx);
-      const row = { nonCap, cells, cap, rank: RANK(stIdx >= 0 ? cells[stIdx] : (yrIdx >= 0 ? cells[yrIdx] : cells.join(' '))), year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
+      const row = { fe, nonCap, cells, cap, rank: RANK(stIdx >= 0 ? cells[stIdx] : (yrIdx >= 0 ? cells[yrIdx] : cells.join(' '))), year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
       if (!groups.has(key)) { groups.set(key, []); order.push({ key }); }
       groups.get(key).push(row);
     }
@@ -68,6 +91,28 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
     for (const o of order) {
       if (o.raw) { body.push(o.raw); continue; }
       const rows = groups.get(o.key);
+      const fe = rows[0].fe;
+      if (fe && fe.caps.length) {
+        const bestF = fe.caps.slice().sort((a, b) => RANK(b.status) - RANK(a.status) || b.year - a.year || b.tons - a.tons)[0];
+        const base = rows[0].cells.slice();
+        const cites = bestF.source ? ` [${bestF.source}]` : '';
+        base[capIdx] = `${fmt(bestF.tons)}${bestF.converted ? ' ※' : ''}${cites}`;
+        if (stIdx >= 0) base[stIdx] = bestF.status === '가동' ? '현재' : bestF.status;
+        if (yrIdx >= 0 && bestF.year) base[yrIdx] = String(bestF.year) + (bestF.status === '가동' ? '년 기준' : '년');
+        if (bestF.converted) conv.push(`- ${base[0].replace(/[*_`]/g, '')}: 원문 ${bestF.original}`);
+        body.push(`| ${base.join(' | ')} |`);
+        for (const c of fe.caps) {
+          if (c === bestF) continue;
+          refs.push(`- ${rows[0].cells[0]}: ${fmt(c.tons)} 톤/년 (${[c.status === '가동' ? '현재' : c.status, c.year ? `${c.year}년` : ''].filter(Boolean).join(', ')}${c.plant ? '' : ', 기업 합계'})`);
+        }
+        continue;
+      }
+      if (fe && fe.other) {
+        const base = rows[0].cells.slice();
+        base[capIdx] = '-';
+        body.push(`| ${base.join(' | ')} |`);
+        continue;
+      }
       const withCap = rows.filter((r) => r.cap);
       const pool = withCap.length ? withCap : rows;
       const best = pool.slice().sort((a, b) => b.rank - a.rank || b.year - a.year || (b.cap ? b.cap.tons : 0) - (a.cap ? a.cap.tons : 0))[0];
@@ -100,4 +145,4 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
   return out.join('\n');
 }
 
-module.exports = { normalizeSpecTables, parseCapacity, nonCapacity };
+module.exports = { normalizeSpecTables, parseCapacity, nonCapacity, factIndex };

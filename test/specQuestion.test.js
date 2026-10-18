@@ -59,3 +59,27 @@ test('normalizeSpecTables: market-supply targets and feedstock throughput are no
   assert.ok(/\| LG-Eni \| -/.test(out) && !out.includes('400,000'));
   assert.ok(/\| Neste \| 1,500,000/.test(out));
 });
+
+test('spec table: classified facts decide the capacity column; unclassified companies fall back to the text', () => {
+  const st = require('../server/lib/specTable');
+  const facts = st.factIndex([
+    { entity: 'Moeve', kind: 'market_target', group: 'mass', amount: 2500000, status: '목표', year: 2030, source: 9 },
+    { entity: 'Moeve', kind: 'plant_capacity', group: 'mass', amount: 500000, status: '계획', year: 2027, source: 9, product: 'saf' },
+    { entity: 'LG-Eni', kind: 'feed_throughput', group: 'mass', amount: 400000, status: '계획', year: 2027, source: 6 },
+    { entity: 'Petrobras', kind: 'plant_capacity', group: 'volume', amount: 10500 * 158.987 * 365, status: '가동', year: 2026, source: 14, original: '10,500 b/d' },
+    { entity: 'Unclassified Co', kind: null, group: 'mass', amount: 1, status: '가동' },
+  ], { density: 0.8 });
+  const t = ['| 업체 | 생산능력 | 가동 시점 |', '| :-- | :-- | :-- |', '| Moeve | 250만 톤 | 2030년 |', '| LG-Eni | 40만 톤 | 2027년 |', '| Petrobras | ⚠원문 확인 | 미공시 |', '| Neste | 150만 톤 | 현재 |'].join('\n');
+  const out = st.normalizeSpecTables(t, { density: 0.8, facts });
+  assert.ok(/\| Moeve \| 500,000 \[9\]/.test(out) && !out.includes('2,500,000'));
+  assert.ok(/\| LG-Eni \| - \|/.test(out));
+  assert.ok(/\| Petrobras \| 484,/.test(out) || /\| Petrobras \| 48\d,\d{3} ※/.test(out));
+  assert.ok(/\| Neste \| 1,500,000/.test(out));
+});
+
+test('recordsForQuestion: a capacity question drops facts classified as throughput / market target', () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const base = { status: '계획', year: 2030, group: 'mass', site: null, source: 1, pubAt: new Date().toISOString(), metric: '생산능력' };
+  const out = dp.recordsForQuestion([{ ...base, entity: 'A', amount: 5, original: '5 톤', kind: 'market_target' }, { ...base, entity: 'B', amount: 6, original: '6 톤', kind: 'plant_capacity' }, { ...base, entity: 'C', amount: 7, original: '7 톤', kind: null }], '업체별 생산능력', null).map((r) => r.entity);
+  assert.deepEqual(out, ['B', 'C']);
+});

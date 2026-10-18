@@ -42,7 +42,7 @@ function titleFromUrlPath(url) {
 // Resumable: only items with facts_status IS NULL are picked, so repeating continues.
 router.post('/backfill-facts', requireAuth, async (req, res) => {
   const itemFacts = require('../lib/itemFacts');
-  const r = await itemFacts.runBackfill({ limit: req.body && req.body.limit, mode: req.body && req.body.mode === 'product' ? 'product' : 'new' });
+  const r = await itemFacts.runBackfill({ limit: req.body && req.body.limit, mode: req.body && ['product', 'kind'].includes(req.body.mode) ? req.body.mode : 'new' });
   res.status(r.started ? 202 : 409).json(r);
 });
 // Annual-report extraction TRIAL (lib/annualReport.js): downloads a PDF, selects the few pages that state
