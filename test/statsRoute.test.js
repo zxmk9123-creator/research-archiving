@@ -201,3 +201,25 @@ test('GET /overview: one failing section degrades only that section, not the who
     restore();
   }
 }));
+
+test('GET /ai-search-usage: admin session required; with it, returns daily rows, totals and providers (no question text)', () => withServer(async (base) => {
+  const { issueSessionToken, SESSION_COOKIE } = require('../server/lib/auth');
+  const unauth = await fetch(`${base}/ai-search-usage`);
+  assert.equal(unauth.status, 401);
+  const restore = mockPool([
+    ['GROUP BY 1 ORDER BY 1', () => ({ rows: [{ day: '2026-10-17', requests: 5, success: 4, insufficient: 1, failed: 0 }] })],
+    ['AS unique_questions', () => ({ rows: [{ requests: 5, unique_questions: 4, followups: 1, success: 4, insufficient: 1, failed: 0, avg_latency_ms: 9000, p50_latency_ms: 8000, p95_latency_ms: 20000, avg_ttft_ms: 3000 }] })],
+    ['AS provider', () => ({ rows: [{ provider: 'freellmapi', requests: 5 }] })],
+  ]);
+  try {
+    const token = issueSessionToken();
+    const res = await fetch(`${base}/ai-search-usage?days=7`, { headers: { cookie: `${SESSION_COOKIE}=${token}` } });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(body.days, 7);
+    assert.equal(body.daily[0].requests, 5);
+    assert.equal(body.totals.unique_questions, 4);
+    assert.equal(body.providers[0].provider, 'freellmapi');
+    assert.ok(!JSON.stringify(body).includes('question_text'));
+  } finally { restore(); }
+}));

@@ -2884,6 +2884,31 @@ window.runScopeAnalysisNow = async function runScopeAnalysisNow(button) {
   }
 };
 
+// Admin-only panel: AI search usage of the last 14 days (counts, outcomes, latency) from /stats/ai-search-usage.
+function renderAiUsageHtml(u) {
+  if (!u || !u.totals) return '<section class="section ai-usage"><div class="section-header"><h2>AI 검색 사용량</h2></div><p class="meta">사용량을 불러오지 못했습니다.</p></section>';
+  const t = u.totals;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US') : '-');
+  const ms = (v) => (Number.isFinite(Number(v)) && v !== null ? `${(Number(v) / 1000).toFixed(1)}초` : '-');
+  const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '-');
+  const max = Math.max(1, ...(u.daily || []).map((d) => d.requests));
+  const bars = (u.daily || []).map((d) => `<div class="ai-usage-row"><span class="ai-usage-day">${escapeHtml(d.day.slice(5))}</span><span class="ai-usage-bar" title="성공 ${d.success} · 근거 부족 ${d.insufficient} · 실패 ${d.failed}"><i class="ok" style="width:${(d.success / max) * 100}%"></i><i class="warn" style="width:${(d.insufficient / max) * 100}%"></i><i class="bad" style="width:${(d.failed / max) * 100}%"></i></span><span class="ai-usage-n">${n(d.requests)}</span></div>`).join('') || '<p class="meta">최근 기록이 없습니다.</p>';
+  return `<section class="section ai-usage">
+    <div class="section-header"><h2>AI 검색 사용량</h2><span class="count">최근 ${u.days}일 · 관리자 전용</span></div>
+    <div class="ai-usage-kpis">
+      <div><strong>${n(t.requests)}</strong><span>검색 요청</span></div>
+      <div><strong>${n(t.unique_questions)}</strong><span>서로 다른 질문</span></div>
+      <div><strong>${pct(t.followups, t.requests)}</strong><span>후속 질문 비율</span></div>
+      <div><strong>${pct(t.success, t.requests)}</strong><span>성공 · 근거 부족 ${pct(t.insufficient, t.requests)} · 실패 ${pct(t.failed, t.requests)}</span></div>
+      <div><strong>${ms(t.p50_latency_ms)}</strong><span>응답 중앙값 · 95% ${ms(t.p95_latency_ms)}</span></div>
+      <div><strong>${ms(t.avg_ttft_ms)}</strong><span>첫 글자까지 평균</span></div>
+    </div>
+    <div class="ai-usage-chart" aria-label="일별 검색 요청">${bars}</div>
+    ${(u.providers || []).length ? `<p class="meta">모델별: ${u.providers.map((p) => `${escapeHtml(p.provider)} ${n(p.requests)}건`).join(' · ')}</p>` : ''}
+    <p class="meta">질문·답변 본문은 저장하지 않고 건수·결과·응답 시간만 집계합니다. 날짜는 한국 시간 기준입니다.</p>
+  </section>`;
+}
+
 function renderOpsHtml(stats, triage, scope, isAdmin) {
   const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
@@ -2991,7 +3016,10 @@ async function renderOps() {
     isAdminAuthenticated(),
   ]);
   const body = stats ? renderOpsHtml(stats, triage, scope, isAdmin) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
-  app.innerHTML = banner + body;
+  // AI search usage: admin sessions only (the endpoint itself also requires the admin session)
+  let usageHtml = '';
+  if (isAdmin) usageHtml = renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null));
+  app.innerHTML = banner + body + usageHtml;
 }
 
 

@@ -211,6 +211,44 @@ router.get('/overview', async (req, res) => {
 
 // Draft failure/backlog triage is confined to the Ops workflow:
 // failed, gate-held, stale pending, and Drafts waiting longer than 24h.
+// GET /api/stats/ai-search-usage?days=14 — admin only. Usage of the AI search from ai_search_logs (metadata only, no question text):
+// per-day requests with outcome split, latency percentiles, follow-up share, unique questions. Days are KST calendar days.
+router.get('/ai-search-usage', requireAuth, async (req, res) => {
+  const days = Math.min(Math.max(Number.parseInt(req.query.days, 10) || 14, 1), 90);
+  try {
+    const [daily, totals, byProvider] = await Promise.all([
+      pool.query(
+        `SELECT to_char((created_at AT TIME ZONE 'Asia/Seoul')::date, 'YYYY-MM-DD') AS day,
+                COUNT(*)::int AS requests,
+                COUNT(*) FILTER (WHERE outcome = 'success')::int AS success,
+                COUNT(*) FILTER (WHERE outcome = 'insufficient_evidence')::int AS insufficient,
+                COUNT(*) FILTER (WHERE outcome NOT IN ('success', 'insufficient_evidence'))::int AS failed
+           FROM ai_search_logs WHERE created_at >= now() - ($1 || ' days')::interval AND operation = 'ai_search'
+          GROUP BY 1 ORDER BY 1`, [String(days)]),
+      pool.query(
+        `SELECT COUNT(*)::int AS requests,
+                COUNT(DISTINCT question_fingerprint)::int AS unique_questions,
+                COUNT(*) FILTER (WHERE is_followup)::int AS followups,
+                COUNT(*) FILTER (WHERE outcome = 'success')::int AS success,
+                COUNT(*) FILTER (WHERE outcome = 'insufficient_evidence')::int AS insufficient,
+                COUNT(*) FILTER (WHERE outcome NOT IN ('success', 'insufficient_evidence'))::int AS failed,
+                ROUND(AVG(latency_ms))::int AS avg_latency_ms,
+                ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms))::int AS p50_latency_ms,
+                ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms))::int AS p95_latency_ms,
+                ROUND(AVG(ttft_ms))::int AS avg_ttft_ms
+           FROM ai_search_logs WHERE created_at >= now() - ($1 || ' days')::interval AND operation = 'ai_search'`, [String(days)]),
+      pool.query(
+        `SELECT COALESCE(provider, '-') AS provider, COUNT(*)::int AS requests
+           FROM ai_search_logs WHERE created_at >= now() - ($1 || ' days')::interval AND operation = 'ai_search'
+          GROUP BY 1 ORDER BY 2 DESC LIMIT 6`, [String(days)]),
+    ]);
+    res.json({ days, daily: daily.rows, totals: totals.rows[0] || {}, providers: byProvider.rows, generatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('ai-search-usage failed:', err.message);
+    res.status(500).json({ error: '사용량을 불러오지 못했습니다.' });
+  }
+});
+
 router.get('/draft-triage', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
   const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));

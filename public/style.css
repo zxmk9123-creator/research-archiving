@@ -1280,3 +1280,19 @@ a.chip.team-chip.is-on { background: var(--action); border-color: var(--action);
 .team-chip-count { font-size: 11px; font-weight: 600; opacity: .7; }
 a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .team-chip-clear { font-size: 12px; color: var(--text-tertiary); text-decoration: underline; margin-left: 4px; }
+
+/* 운영 현황 > AI 검색 사용량 (admin only) */
+.ai-usage { margin-top: 28px; }
+.ai-usage-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.ai-usage-kpis > div { background: var(--surface-sunken); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.ai-usage-kpis strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.ai-usage-kpis span { font-size: 12px; color: var(--text-tertiary); }
+.ai-usage-chart { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.ai-usage-row { display: grid; grid-template-columns: 44px 1fr 48px; align-items: center; gap: 10px; font-size: 12px; }
+.ai-usage-day { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.ai-usage-bar { display: flex; height: 14px; background: var(--surface-sunken); border-radius: 4px; overflow: hidden; }
+.ai-usage-bar i { display: block; height: 100%; }
+.ai-usage-bar .ok { background: var(--action); }
+.ai-usage-bar .warn { background: #e8a33a; }
+.ai-usage-bar .bad { background: #d94f70; }
+.ai-usage-n { text-align: right; font-variant-numeric: tabular-nums; }
