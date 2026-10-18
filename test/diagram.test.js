@@ -39,3 +39,22 @@ test('sanitize: canonical names merge the same company, markets/countries are dr
   assert.ok(out.nodes.length <= 16 && out.edges.length <= 24);
   assert.ok(out.edges.every((e) => out.nodes.some((n) => n.id === e.from) && out.nodes.some((n) => n.id === e.to)));
 });
+
+test('sanitize applies the relation rules to edges: JV owners are stakes, cue-less ownership is a flow, airline is a buyer, one jv line per pair', () => {
+  const d = dg.sanitize({ type: 'relations', nodes: [
+    { id: 'a', label: 'LG화학' }, { id: 'b', label: 'Eni' }, { id: 'c', label: 'LG Eni BioRefining' }, { id: 'd', label: '대산 HVO 공장' }, { id: 'e', label: 'Air France-KLM' }, { id: 'f', label: 'TotalEnergies' }, { id: 'g', label: 'KLK' }, { id: 'h', label: 'PT Putra' },
+  ], edges: [
+    { from: 'a', to: 'c', type: 'owns', label: '합작법인 설립' }, { from: 'b', to: 'c', type: 'owns', label: '합작법인 설립' },
+    { from: 'a', to: 'b', type: 'jv', label: '합작' }, { from: 'b', to: 'a', type: 'jv', label: '합작' },
+    { from: 'c', to: 'd', type: 'owns', label: '공장 건설' },
+    { from: 'e', to: 'f', type: 'supplies', label: 'SAF 구매' },
+    { from: 'g', to: 'h', type: 'owns', label: '95% 지분 인수' },
+  ] });
+  const t = (from, to) => d.edges.find((e) => e.from === from && e.to === to);
+  assert.equal(t('a', 'c').type, 'stake');
+  assert.equal(t('b', 'c').type, 'stake');
+  assert.equal(d.edges.filter((e) => e.type === 'jv').length, 1);
+  assert.equal(t('c', 'd').type, 'flow');
+  assert.equal(t('f', 'e').type, 'supplies');
+  assert.equal(t('g', 'h').type, 'owns');
+});

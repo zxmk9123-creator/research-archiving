@@ -20,6 +20,38 @@ function parse(body) {
 
 const str = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
 
+// The relationship DB's rules, applied to the model's edges (the label is the only evidence a diagram edge carries):
+//   a JV / joint partner or a share <= 50% is a stake, never the parent; two or more owners of one box without a stated
+//   majority are all stakes; ownership with no ownership wording becomes a plain flow; an airline is never the seller;
+//   one jv line per pair.
+function applyRelationRules(edges, nodes) {
+  const rel = require('./companyRelations');
+  const label = new Map(nodes.map((n) => [n.id, n.label]));
+  const pctOf = (e) => { const m = String(e.label || '').match(/(\d+(?:\.\d+)?)\s*%/); return m ? Number(m[1]) : 0; };
+  let out = edges.map((e) => {
+    const f = rel.fixRelation({ src: label.get(e.from), dst: label.get(e.to), relation: e.type === 'jv' ? 'jv_partner' : e.type === 'contract' ? 'contractor_for' : e.type === 'owns' || e.type === 'stake' || e.type === 'supplies' ? e.type : 'flow', share_pct: pctOf(e) || null, evidence: e.label });
+    if (e.type === 'owns' || e.type === 'stake') {
+      if (!f) return { ...e, type: 'flow' };                      // no ownership wording: a flow, not a parent link
+      return { ...e, type: f.relation === 'stake' ? 'stake' : e.type };
+    }
+    if (e.type === 'supplies' && f && f.src !== label.get(e.from)) return { ...e, from: e.to, to: e.from }; // an airline is a buyer
+    return e;
+  });
+  // several owners of one box, none with a stated majority: all stakes
+  const incoming = new Map();
+  for (const e of out) if (e.type === 'owns') incoming.set(e.to, (incoming.get(e.to) || []).concat(e));
+  for (const list of incoming.values()) if (list.length >= 2 && !list.some((e) => pctOf(e) > 50)) for (const e of list) e.type = 'stake';
+  // one jv line per pair, one line per (from, to, type)
+  const seen = new Set();
+  out = out.filter((e) => {
+    const key = e.type === 'jv' ? [e.from, e.to].sort().join('|') + '|jv' : `${e.from}|${e.to}|${e.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return out;
+}
+
 // -> normalized object or null
 function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
   const d = raw && typeof raw === 'object' ? raw : null;
@@ -62,6 +94,7 @@ function sanitize(raw, { canon = (n) => n, isNonCompany = () => false } = {}) {
     edges.push({ from, to, type: t, label: str(e.label, 14) || null, source: Number.isInteger(src) && src > 0 ? src : null, inferred: e.inferred === true });
   }
   if (!edges.length) return null;
+  edges = applyRelationRules(edges, nodes);
   // ceiling: keep the best-connected nodes (then the earliest listed), drop edges to removed nodes and isolated nodes
   if (nodes.length > MAX_NODES) {
     const deg = new Map(nodes.map((n) => [n.id, 0]));
