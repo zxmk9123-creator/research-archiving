@@ -100,3 +100,12 @@ test('feed_throughput: dropped for fuel plants, kept as capacity for refineries 
   const idx = st.factIndex([{ entity: 'Taiko', kind: 'feed_throughput', product: 'other', group: 'mass', amount: 500000, status: '가동' }]);
   assert.equal(idx.get('taiko').caps.length, 1);
 });
+
+test('methodology page and evidence/CSV hooks exist in the frontend', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'methodology.html'), 'utf8');
+  assert.match(page, /데이터 출처·방법론/);
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(app.includes('aiEvidenceHtml(sources)') && app.includes('ai-table-csv') && app.includes('methodology.html'));
+});

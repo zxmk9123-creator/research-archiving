@@ -875,7 +875,7 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
         return vals.length > 0 && vals.filter((v) => /^[+-]?[$€£₩]?\d/.test(v)).length / vals.length >= 0.6;
       });
       const cls = (i) => (numCol[i] ? ' class="num"' : '');
-      return `<div class="ai-answer-table-wrap"><table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
+      return `<div class="ai-answer-table-wrap"><button type="button" class="ai-table-csv" title="표를 CSV로 내려받기" aria-label="표를 CSV로 내려받기">CSV ↓</button><table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
         body.map((r) => `<tr>${r.map((c, i) => `<td${cls(i)}>${renderCellHtml(c, sources)}</td>`).join('')}</tr>`).join('')
       }</tbody></table></div>`;
     }
@@ -1284,6 +1284,17 @@ function renderAnswerHtml(rawAnswer, sources) {
 // renderInlineAnswerText() just linked inline — the leading number chip
 // is the same [N], so a reader can match an inline citation back to this
 // list (or just click the inline [N] itself) without guessing.
+// Evidence summary under every answer: how many materials, how recent, how many older than the freshness window.
+function aiEvidenceHtml(sources) {
+  const list = Array.isArray(sources) ? sources : [];
+  if (!list.length) return '';
+  const dates = list.map((s) => Date.parse(s && s.published_at)).filter((t) => Number.isFinite(t));
+  const ym = (t) => new Date(t).toISOString().slice(0, 7);
+  const stale = dates.filter((t) => Date.now() - t > 548 * 86400000).length;
+  const range = dates.length ? `발행 ${ym(Math.min(...dates))}${Math.min(...dates) === Math.max(...dates) ? '' : ` ~ ${ym(Math.max(...dates))}`}` : '발행일 미확인';
+  return `<p class="ai-evidence">근거 자료 ${list.length}건 · ${range}${stale ? ` · 18개월 초과 ${stale}건` : ''} · 숫자는 원문 대조, 기준 시점 표기 · <a href="methodology.html" target="_blank" rel="noopener">데이터 출처·방법론</a></p>`;
+}
+
 function aiSearchSourcesHtml(sources) {
   if (!sources || !sources.length) return '';
   return `<div class="ai-search-sources">
@@ -1334,6 +1345,7 @@ function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources) {
   bodyEl.innerHTML = `
     ${renderAnswerHtml(answer, sources)}
     <button type="button" class="ai-copy-btn" title="답변 복사" aria-label="답변 복사" data-answer="${escapeHtml(String(answer || '').replace(/```chart[\s\S]*?```/g, '').trim())}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    ${aiEvidenceHtml(sources)}
     ${aiSearchSourcesHtml(sources)}
   `;
   // On a retry, this turn wasn't recorded the first time around (only a
@@ -3940,6 +3952,24 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Delegated: works for freshly rendered and replayed (outerHTML) turns.
+// Table -> CSV (UTF-8 with BOM so Excel opens Korean text correctly); citation markers are dropped from the cells.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.ai-table-csv');
+  if (!b) return;
+  const table = b.parentElement && b.parentElement.querySelector('table');
+  if (!table) return;
+  const cell = (c) => `"${c.textContent.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim().replace(/"/g, '""')}"`;
+  const csv = [...table.rows].map((r) => [...r.cells].map(cell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `oilfat-table-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest && e.target.closest('.ai-copy-btn');
   if (!btn) return;

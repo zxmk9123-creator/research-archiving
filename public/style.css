@@ -1259,3 +1259,9 @@ ul.ai-answer-sublist.ai-depth-2, ul.ai-answer-sublist.ai-depth-3 { list-style: s
 .ai-chart:hover .ai-chart-save, .ai-chart-save:focus-visible { opacity: 1; }
 .ai-chart-save:hover { color: var(--text, #1f2933); border-color: var(--accent, #2f6fed); }
 @media (hover: none) { .ai-chart-save { opacity: 1; } }
+
+.ai-answer-table-wrap { position: relative; }
+.ai-table-csv { float: right; margin: 0 0 var(--sp-1) var(--sp-2); padding: 2px 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted, #667085); background: transparent; border: 1px solid var(--border, #d0d5dd); border-radius: 6px; cursor: pointer; }
+.ai-table-csv:hover { color: var(--text, #101828); border-color: var(--text-muted, #667085); }
+.ai-evidence { margin: var(--sp-3) 0 var(--sp-2); font-size: 12.5px; color: var(--text-muted, #667085); }
+.ai-evidence a { color: inherit; text-decoration: underline; }
