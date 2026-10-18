@@ -27,7 +27,7 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
   }
   // "Golden Agri" / "Golden Agri Resources" / "Golden Agri-Resources": the same base name plus generic words only
   const latinNames = [...count.keys()].filter((k) => /[A-Za-z]/.test(k) && !/[가-힣]/.test(k));
-  for (let i = 0; i < latinNames.length; i++) for (let j = i + 1; j < latinNames.length; j++) if (sameCompanyName(latinNames[i], latinNames[j], { crossScript: false })) union(latinNames[i], latinNames[j]);
+  for (let i = 0; i < latinNames.length; i++) for (let j = i + 1; j < latinNames.length; j++) if (sameCompanyName(latinNames[i], latinNames[j], { crossScript: false, acronym: false })) union(latinNames[i], latinNames[j]);
   const lower = new Map([...count.keys()].map((k) => [k.toLowerCase(), k]));
   for (const [a, b] of links) { const x = lower.get(String(a).toLowerCase().trim()); const y = lower.get(String(b).toLowerCase().trim()); if (x && y) union(x, y); }
   const roster = new Set(rosterNames.map((r) => String(r).toLowerCase().trim()));
@@ -44,8 +44,9 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
 // Roster aliases are sometimes a subsidiary, a site or a partner ("Archaea Energy", "bp Castellón", "Darling Ingredients"
 // listed under BP / Diamond Green Diesel). Only spellings of the SAME company are merged: equal base name, one script vs the
 // other (Latin / Hangul), a Hangul prefix, a base name plus only generic words, or an acronym of the name.
-const GENERIC = new Set(['international', 'global', 'energy', 'group', 'holdings', 'holding', 'oil', 'oils', 'corporation', 'resources', 'biofuels', 'bioenergy', 'renewables', 'renewable', 'petroleum', 'chemical', 'chemicals', 'industries', 'industry', 'company', 'limited']);
-function sameCompanyName(a, b, { crossScript = true } = {}) {
+// corporate-form words only: "Chevron" vs "Chevron Renewable Energy Group" or "Mitsui" vs "Mitsui Chemicals" are different companies
+const GENERIC = new Set(['international', 'global', 'group', 'holdings', 'holding', 'corporation', 'company', 'limited', 'industries', 'resources']);
+function sameCompanyName(a, b, { crossScript = true, acronym = true } = {}) {
   const x = baseKey(a);
   const y = baseKey(b);
   if (!x || !y) return false;
@@ -58,7 +59,7 @@ function sameCompanyName(a, b, { crossScript = true } = {}) {
   const [small, big] = tx.length <= ty.length ? [tx, ty] : [ty, tx];
   if (small.every((t) => big.includes(t)) && big.filter((t) => !small.includes(t)).every((t) => GENERIC.has(t))) return true;
   const acr = (raw, other) => { const u = String(raw).replace(/[^A-Za-z]/g, ''); return u.length >= 2 && u.length <= 5 && u === u.toUpperCase() && other.split(' ').map((t) => t[0]).join('') === u.toLowerCase(); };
-  return acr(a, y) || acr(b, x);
+  return acronym && (acr(a, y) || acr(b, x));
 }
 
 async function loadInputs() {
@@ -72,7 +73,7 @@ async function loadInputs() {
   // to the canonical name): entity <-> each of its same_names
   try {
     const { rows: prev } = await pool.query('SELECT entity, same_names FROM entity_registry');
-    for (const p of prev) for (const sn of p.same_names || []) { names.push({ name: sn, n: 0 }); links.push([p.entity, sn]); }
+    for (const p of prev) for (const sn of p.same_names || []) { names.push({ name: sn, n: 0 }); if (sameCompanyName(p.entity, sn, { acronym: false })) links.push([p.entity, sn]); } // a wrong merge stored earlier is not kept alive
   } catch (_) { /* first build */ }
   const { rows: companies } = await pool.query('SELECT name, aliases FROM companies');
   const rosterNames = [];
@@ -107,7 +108,7 @@ async function learnBilingual({ limit = 120 } = {}) {
       const arr = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
       for (const a of Array.isArray(arr) ? arr : []) {
         if (!a || !a.en || !batch.includes(a.ko)) continue;
-        const match = latin.find((l) => sameCompanyName(l, a.en, { crossScript: false }));
+        const match = latin.find((l) => sameCompanyName(l, a.en, { crossScript: false, acronym: false }));
         if (!match) continue;
         await pool.query('INSERT INTO term_aliases (term, alt) VALUES ($1, $2) ON CONFLICT DO NOTHING', [a.ko, match]);
         linked++;
@@ -120,25 +121,25 @@ async function learnBilingual({ limit = 120 } = {}) {
 async function rebuild() {
   const { names, links, rosterNames } = await loadInputs();
   const groups = cluster(names.filter((n) => !isNonCompanyName(n.name)), { links, rosterNames });
-  let written = 0;
-  for (const g of groups) {
-    await pool.query(
-      `INSERT INTO entity_registry (entity, same_names) VALUES ($1, $2)
-       ON CONFLICT (LOWER(entity)) DO UPDATE SET same_names = EXCLUDED.same_names, updated_at = now()`,
-      [g.entity, g.same_names]
-    );
-    written++;
-  }
-  // collective labels that an earlier build stored are removed (a hand-set role keeps its row)
-  const { rows: all } = await pool.query('SELECT id, entity FROM entity_registry WHERE role IS NULL OR role = $1', ['other']);
-  const stale = all.filter((r) => isNonCompanyName(r.entity)).map((r) => r.id);
-  if (stale.length) await pool.query('DELETE FROM entity_registry WHERE id = ANY($1)', [stale]);
-  // a spelling that became a same_name of another row no longer keeps its own row (unless a role was set by hand)
-  await pool.query(
-    `DELETE FROM entity_registry r WHERE r.role IS NULL AND EXISTS (SELECT 1 FROM entity_registry o WHERE o.id <> r.id AND LOWER(r.entity) = ANY (SELECT LOWER(x) FROM unnest(o.same_names) x))`
-  );
+  const { rows: old } = await pool.query('SELECT entity, same_names, role FROM entity_registry');
+  const roleOf = new Map();
+  for (const o of old) if (o.role) for (const n of [o.entity, ...(o.same_names || [])]) if (!roleOf.has(String(n).toLowerCase())) roleOf.set(String(n).toLowerCase(), o.role);
+  // the rows are replaced as a whole: a spelling is either a representative or a same_name, never both (roles are carried over)
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM entity_registry');
+    for (const g of groups) {
+      const role = [g.entity, ...g.same_names].map((n) => roleOf.get(n.toLowerCase())).find(Boolean) || null;
+      await client.query('INSERT INTO entity_registry (entity, same_names, role) VALUES ($1, $2, $3) ON CONFLICT (LOWER(entity)) DO NOTHING', [g.entity, g.same_names, role]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally { client.release(); }
   cache.at = 0;
-  return { clusters: groups.length, written, multi: groups.filter((g) => g.same_names.length).length };
+  return { clusters: groups.length, written: groups.length, multi: groups.filter((g) => g.same_names.length).length };
 }
 
 // ---- roles --------------------------------------------------------------------------------------------------------------

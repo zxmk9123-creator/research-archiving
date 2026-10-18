@@ -23,6 +23,7 @@ test('sameCompanyName: spellings of one company merge; subsidiaries, sites and p
   assert.ok(!s('BP plc', 'Archaea Energy') && !s('BP plc', 'bp Castellón') && !s('BP plc', 'bp Kwinana'));
   assert.ok(!s('Diamond Green Diesel', 'Darling Ingredients'));
   assert.ok(!s('Eni', 'Enilive'));
+  assert.ok(!s('Mitsui', 'Mitsui Chemicals') && !s('Chevron', 'Chevron Renewable Energy Group'));
 });
 
 test('sameCompanyName crossScript can be switched off (English name vs an existing Latin name must really match)', () => {
@@ -38,4 +39,12 @@ test('cluster: generic-word variants merge; a name that only survives as a store
   assert.equal(grp('Golden Agri Resources'), grp('Golden Agri-Resources'));
   assert.notEqual(grp('Chevron-REG'), grp('Chevron'));
   assert.equal(grp('버거킹'), grp('Burger King'));
+});
+
+test('cluster never merges by acronym on its own (BP vs Bharat Petroleum, P&G vs Phelan Green Group)', () => {
+  const out = reg.cluster([{ name: 'Bharat Petroleum Corp. Ltd', n: 3 }, { name: 'BP', n: 9 }, { name: 'bp', n: 4 }, { name: 'Phelan Green Group', n: 1 }, { name: 'P&G', n: 2 }]);
+  const grp = (n) => out.find((g) => [g.entity, ...g.same_names].includes(n));
+  assert.notEqual(grp('BP'), grp('Bharat Petroleum Corp. Ltd'));
+  assert.notEqual(grp('P&G'), grp('Phelan Green Group'));
+  assert.equal(grp('BP'), grp('bp'));
 });
