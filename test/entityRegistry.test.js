@@ -70,3 +70,14 @@ test('refineRole: a supplier without feedstock evidence is a producer (processor
   assert.equal(reg.refineRole('supplier', { name: 'Avfuel Corporation', evidence: ['fuel'] }), 'trader');
   assert.equal(reg.refineRole('supplier', { name: 'Restaurant Technologies', evidence: ['used cooking oil collection'] }), 'supplier');
 });
+
+test('matchExisting: a known spelling is known, a same-company spelling joins its row, anything else is a new company', () => {
+  const rows = [{ id: 1, entity: 'Eni', same_names: ['Eni S.p.A.'] }, { id: 2, entity: 'Golden Agri-Resources', same_names: [] }, { id: 3, entity: 'Bharat Petroleum Corp. Ltd', same_names: [] }];
+  assert.equal(reg.matchExisting(rows, 'eni s.p.a.').known, true);
+  const m = reg.matchExisting(rows, 'Golden Agri Resources');
+  assert.equal(m.row.id, 2);
+  assert.equal(m.known, false);
+  assert.equal(reg.matchExisting(rows, 'Enilive'), null);
+  assert.equal(reg.matchExisting(rows, 'BP'), null);       // no acronym-only merge on publish
+  assert.equal(reg.matchExisting(rows, '버거킹'), null);   // cross-script is left to the daily job
+});

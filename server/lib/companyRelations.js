@@ -188,6 +188,7 @@ async function extractRelationsForItem(item, { canon = null } = {}) {
     const result = await limitCall(() => provider.callProviderWithFallback({ system: SYSTEM, user: `제목: ${item.title}\n${text}` }));
     const rows = verifyRelations(parseRelations(result.text), text, canon || (await canonicalizer()));
     if (rows.length) await storeRelations(rows, item.id);
+    if (rows.length) require('./entityRegistry').registerNames(rows.flatMap((r) => [r.src, r.dst])); // new companies join the registry at once
     await pool.query('UPDATE items SET relations_status = $2 WHERE id = $1', [item.id, rows.length ? 'done' : 'none']);
     return { status: rows.length ? 'done' : 'none', relations: rows.length };
   } catch (err) {

@@ -196,8 +196,8 @@ function refineRole(ai, ctx) {
   return role;
 }
 
-async function reclassifyRoles({ limit = 600 } = {}) {
-  const { rows } = await pool.query('SELECT entity, same_names FROM entity_registry ORDER BY id LIMIT $1', [Math.min(Number(limit) || 600, 1500)]);
+async function reclassifyRoles({ limit = 600, onlyNull = false } = {}) {
+  const { rows } = await pool.query(`SELECT entity, same_names FROM entity_registry ${onlyNull ? 'WHERE role IS NULL' : ''} ORDER BY id LIMIT $1`, [Math.min(Number(limit) || 600, 1500)]);
   let changed = 0;
   for (let i = 0; i < rows.length; i += 25) {
     const batch = rows.slice(i, i + 25);
@@ -225,6 +225,50 @@ async function reclassifyRoles({ limit = 600 } = {}) {
   }
   cache.at = 0;
   return { checked: rows.length, changed };
+}
+
+// ---- incremental registration (on publish) ------------------------------------------------------------------------------
+// The existing row that a new spelling belongs to, by the same strict rule the full rebuild uses (no acronym-only or cross-script
+// guesses here: those are settled by the daily maintenance), or null when it is a new company.
+function matchExisting(rows, name) {
+  const key = String(name).toLowerCase().trim();
+  for (const r of rows) {
+    if (String(r.entity).toLowerCase().trim() === key || (r.same_names || []).some((n) => String(n).toLowerCase().trim() === key)) return { row: r, known: true };
+  }
+  for (const r of rows) {
+    if ([r.entity, ...(r.same_names || [])].some((n) => sameCompanyName(n, name, { crossScript: false, acronym: false }))) return { row: r, known: false };
+  }
+  return null;
+}
+
+// Called after an item's facts / relations are stored: every company name that is not in the registry yet is merged into the company
+// it is a spelling of, or becomes a new row (role is filled in by the next maintenance run). Never throws.
+async function registerNames(rawNames) {
+  try {
+    if (process.env.ENTITY_REGISTRY === 'off') return { added: 0, merged: 0 };
+    const names = [...new Set((rawNames || []).map((n) => String(n || '').trim()).filter((n) => n.length >= 2 && !isNonCompanyName(n)))];
+    if (!names.length) return { added: 0, merged: 0 };
+    const { rows } = await pool.query('SELECT id, entity, same_names FROM entity_registry');
+    let added = 0;
+    let merged = 0;
+    for (const name of names) {
+      const m = matchExisting(rows, name);
+      if (m && m.known) continue;
+      if (m) {
+        await pool.query('UPDATE entity_registry SET same_names = array_append(same_names, $2), updated_at = now() WHERE id = $1 AND NOT ($2 = ANY(same_names))', [m.row.id, name]);
+        m.row.same_names = [...(m.row.same_names || []), name];
+        merged++;
+      } else {
+        const r = await pool.query("INSERT INTO entity_registry (entity, same_names) VALUES ($1, '{}') ON CONFLICT (LOWER(entity)) DO NOTHING RETURNING id", [name]);
+        if (r.rowCount) { rows.push({ id: r.rows[0].id, entity: name, same_names: [] }); added++; }
+      }
+    }
+    if (added || merged) cache.at = 0;
+    return { added, merged };
+  } catch (err) {
+    console.error(`entity registration failed: ${err.message}`);
+    return { added: 0, merged: 0 };
+  }
 }
 
 // ---- lookup (cached) -----------------------------------------------------------------------------------------------------
@@ -270,4 +314,4 @@ async function rejectAlias(term) {
   return { removed: a.rowCount, rosterAliasesRemoved: b.rowCount };
 }
 
-module.exports = { refineRole, reclassifyRoles, rejectAlias, learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
+module.exports = { matchExisting, registerNames, refineRole, reclassifyRoles, rejectAlias, learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };

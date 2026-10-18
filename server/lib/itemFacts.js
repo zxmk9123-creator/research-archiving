@@ -60,6 +60,7 @@ async function extractFactsForItem(item, { replace = false } = {}) {
     }));
     const records = dp.verifyRecords(dp.parseRecords(result.text).map((r) => ({ ...r, source: 1 })), [item], textOf, { density: null });
     await storeFacts(item.id, records, { replace });
+    if (records.length) require('./entityRegistry').registerNames(records.filter((r) => r.etype === '기업').map((r) => r.entity)); // new companies join the registry at once
     await markStatus(item.id, records.length ? 'done' : 'none');
     return { status: records.length ? 'done' : 'none', facts: records.length };
   } catch (err) {

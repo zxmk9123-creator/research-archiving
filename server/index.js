@@ -119,6 +119,14 @@ setInterval(() => {
   reviewAutopilot.runAutopilot().catch((err) => console.error('review autopilot failed', err));
 }, 10 * 60 * 1000);
 
+// Entity registry maintenance: once a day after 03:00 KST (bilingual names, roles of new companies, relation cleanup). New companies
+// are registered when their item is published; this settles the rest (ENTITY_MAINTENANCE=off disables).
+const entityMaintenance = require('./lib/entityMaintenance');
+setTimeout(() => entityMaintenance.maybeRunEntityMaintenance().catch((err) => console.error('entity maintenance failed', err)), 10 * 60 * 1000);
+setInterval(() => {
+  entityMaintenance.maybeRunEntityMaintenance().catch((err) => console.error('entity maintenance failed', err));
+}, COLLECTION_CHECK_INTERVAL_MS);
+
 // Recovers Review-tab items stuck forever at ai_status='pending' — see
 // requeueStalledPendingDrafts()'s own comment for the full root cause
 // (a redeploy killing the process mid-generateAiDraftForItem call, with
