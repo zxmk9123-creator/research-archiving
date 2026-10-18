@@ -46,6 +46,7 @@ const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|
 const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
 // Industry bodies / agencies are sources of estimates, not producers: never charted as a company
 // unless the question names them. Unlabelled (older) facts fall back to a name list.
+const BIOFUEL_PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total']); // feedstock intake of a fuel plant is not its capacity; a refinery's / crusher's processing capacity is
 const KINDS = new Set(['plant_capacity', 'company_capacity', 'feed_throughput', 'market_target', 'investment', 'output', 'other']);
 const ROLES = new Set(['producer', 'consumer', 'engineering', 'trader', 'finance', 'other']);
 // capacity / output questions about companies list PRODUCERS: buyers, contractors, traders and financiers are not
@@ -78,7 +79,7 @@ function recordsForQuestion(records, question, density = null, { level = 'compan
       }
       if ((wantsCap || wantsOut) && !EMISSION_Q.test(q) && EMISSION_UNIT.test(`${r.original || ''} ${r.metric || ''} ${r.basis || ''}`)) return false;
       // a capacity question: figures classified (at extraction, from their sentence) as feedstock throughput, market / sales targets or money are not capacities
-      if (wantsCap && !wantsOut && r.kind && ['feed_throughput', 'market_target', 'investment'].includes(r.kind)) return false;
+      if (wantsCap && !wantsOut && r.kind && (['market_target', 'investment'].includes(r.kind) || (r.kind === 'feed_throughput' && BIOFUEL_PRODUCTS.has(r.product)))) return false;
       if (r.group === 'area') return wantsArea;
       if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
@@ -209,7 +210,7 @@ Rules:
 - "source" is the 자료 number the figure comes from.
 - "entity" is the company/country/organisation the figure belongs to; "site" the plant/location/segment or null.
 - "product" = what the quantity is the capacity/output OF: saf = sustainable aviation fuel only (SAF / 지속가능항공유 / bio-jet); renewable_diesel = renewable diesel / HVO / biodiesel only; biofuel_total = all renewable fuels together (SAF plus renewable diesel, or a combined "renewable fuels" figure, or unspecified biofuel); other = anything else (ethanol, crude, feedstock, palm oil ...). When one plant states both a total and a SAF share, they are TWO elements.
-- "kind" = what the figure MEASURES, decided from the sentence it is stated in: plant_capacity = nameplate production capacity of ONE named plant/unit (what it can produce per year/day); company_capacity = production capacity of the whole company/group across plants; feed_throughput = feedstock the plant PROCESSES/consumes (处理量, intake), not what it produces; market_target = a supply, sales, market-share or volume-to-be-delivered target for a market/region/customer (e.g. "supply 2.5 Mt/y to the Iberian market"); investment = money; output = actual produced/delivered volume in a period; other = anything else. When unsure choose other — never guess plant_capacity.
+- "kind" = what the figure MEASURES, decided from the sentence it is stated in: plant_capacity = nameplate production capacity of ONE named plant/unit (what it can produce per year/day); company_capacity = production capacity of the whole company/group across plants; feed_throughput = feedstock a BIOFUEL plant takes in (explicitly stated as feedstock / biomass / 원료 intake), not what it produces — but the "processing capacity" of a palm / edible-oil refinery, crusher or oleochemical plant IS its plant_capacity; market_target = a supply, sales, market-share or volume-to-be-delivered target for a market/region/customer (e.g. "supply 2.5 Mt/y to the Iberian market"); investment = money; output = actual produced/delivered volume in a period; other = anything else. When unsure choose other — never guess plant_capacity.
 - "role" = what the entity IS in this material: producer = it makes / will make the product (operator or owner of the plant); consumer = it buys or uses it (airline, shipper, fleet); engineering = designs or builds plants for others; trader = distributes / trades; finance = investor or lender; other. A figure that is a PURCHASE, offtake, order or design scope of a non-producer is still extracted, with that role.
 - "entity_type": 기업 = a company or its plant operator; 기관 = an industry body, agency, regulator, NGO, research house or exchange (IATA, ICAO, IEA, USDA, EU, ISCC...) that merely reports/estimates a figure; 국가 = a country/region; 기타 otherwise. "country" = the country (Korean) where the entity is headquartered (or the country itself for 국가), null if not stated or not certain. "parent" = the owning group when the entity is a subsidiary/JV named so in the material, else null.`;
 

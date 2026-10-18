@@ -90,3 +90,13 @@ test('normalizeSpecTables: a capacity cell the number check could not ground (�
   const out = st.normalizeSpecTables(t);
   assert.ok(/\| Petrobras \| - \|/.test(out) && /\| Neste \| 1,500,000/.test(out));
 });
+
+test('feed_throughput: dropped for fuel plants, kept as capacity for refineries / crushers (product other)', () => {
+  const dp = require('../server/lib/datasetPipeline');
+  const base = { status: '가동', year: 2026, group: 'mass', site: null, source: 1, pubAt: new Date().toISOString(), metric: '처리 용량', kind: 'feed_throughput' };
+  const out = dp.recordsForQuestion([{ ...base, entity: 'FuelCo', amount: 5, original: '5 톤', product: 'saf' }, { ...base, entity: 'Taiko', amount: 6, original: '6 톤', product: 'other' }], '업체별 생산능력', null).map((r) => r.entity);
+  assert.deepEqual(out, ['Taiko']);
+  const st = require('../server/lib/specTable');
+  const idx = st.factIndex([{ entity: 'Taiko', kind: 'feed_throughput', product: 'other', group: 'mass', amount: 500000, status: '가동' }]);
+  assert.equal(idx.get('taiko').caps.length, 1);
+});
