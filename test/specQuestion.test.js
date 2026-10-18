@@ -117,3 +117,15 @@ test('archive tab guide covers search, filters and the 전체 / 내 저장 / 팀
   assert.ok(app.includes('ARCHIVE_TOUR_STEPS') && app.includes("path === 'archive'") && app.includes('startArchiveTour(true)'));
   for (const t of ["title: '필터'", "title: '내 저장'", "title: '팀 Pick'", "title: '전체'"]) assert.ok(app.includes(t), t);
 });
+
+test('Umami analytics: script in index.html with auto-track off, app.js reports each screen without query strings', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  assert.match(html, /cloud\.umami\.is\/script\.js/);
+  assert.match(html, /data-website-id="a67938f9-6234-43bb-9b48-d4e43825b48b"/);
+  assert.match(html, /data-auto-track="false"/);
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(app.includes('function trackPageview') && app.includes('trackPageview(path, param);'));
+  assert.ok(!/umami\.track\([^)]*query/.test(app));
+});

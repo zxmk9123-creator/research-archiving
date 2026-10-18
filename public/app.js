@@ -3972,8 +3972,32 @@ function startHomeTour() { runSpotlightTour(HOME_TOUR_STEPS, HOME_TOUR_SEEN_KEY)
 let skipNextScrollReset = false;
 let initialRouteToursReady = false;
 
+// Web analytics (Umami): one pageview per screen — the route path (plus the item id on a detail page), never the query string
+// (filters, search words). Reported only when the screen changes, so applying a filter is not a new "visit". If the script has not
+// loaded yet (first screen), the pageview is sent on window load; without the script (ad blocker) nothing happens.
+let lastTrackedScreen = null;
+let pendingTrackedScreen = null;
+function trackPageview(path, param) {
+  const screen = `/${path || 'home'}${path === 'detail' && param ? `/${param}` : ''}`;
+  if (screen === lastTrackedScreen) return;
+  lastTrackedScreen = screen;
+  if (window.umami && typeof window.umami.track === 'function') {
+    try { window.umami.track((props) => ({ ...props, url: screen })); } catch (_) { /* analytics must never break the app */ }
+  } else {
+    pendingTrackedScreen = screen;
+  }
+}
+window.addEventListener('load', () => {
+  if (pendingTrackedScreen && window.umami && typeof window.umami.track === 'function') {
+    const screen = pendingTrackedScreen;
+    pendingTrackedScreen = null;
+    try { window.umami.track((props) => ({ ...props, url: screen })); } catch (_) { /* ignore */ }
+  }
+});
+
 async function router() {
   const { path, param, query } = parseHash();
+  trackPageview(path, param);
   cancelActiveSpotlightTour();
   updateActiveNavTab(path);
   // Leaving Home (or re-rendering it) must stop its carousels' setInterval
