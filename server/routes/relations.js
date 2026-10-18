@@ -14,6 +14,20 @@ router.get('/', requireAuth, async (req, res) => {
   res.json({ count: rows.length, labels: rel.LABEL, rows: rows.map((r) => ({ ...r, text: rel.describe(r) })) });
 });
 
+// GET /api/relations/summary — totals for the whole map (the list endpoint is capped at 200 rows).
+router.get('/summary', requireAuth, async (req, res) => {
+  const [tot, byRel, byOrigin, ents, items, top, pubs] = await Promise.all([
+    pool.query('SELECT COUNT(*)::int AS n FROM company_relations'),
+    pool.query('SELECT relation, COUNT(*)::int AS n FROM company_relations GROUP BY relation ORDER BY n DESC'),
+    pool.query('SELECT origin, COUNT(*)::int AS n FROM company_relations GROUP BY origin'),
+    pool.query('SELECT COUNT(DISTINCT LOWER(e))::int AS n FROM (SELECT src AS e FROM company_relations UNION ALL SELECT dst FROM company_relations) x'),
+    pool.query('SELECT COUNT(DISTINCT item_id)::int AS n FROM company_relations WHERE item_id IS NOT NULL'),
+    pool.query('SELECT e AS entity, COUNT(*)::int AS n FROM (SELECT src AS e FROM company_relations UNION ALL SELECT dst FROM company_relations) x GROUP BY e ORDER BY n DESC LIMIT 15'),
+    pool.query("SELECT COUNT(*)::int AS published, COUNT(*) FILTER (WHERE relations_status IS NOT NULL)::int AS processed, COUNT(*) FILTER (WHERE relations_status = 'done')::int AS with_relations FROM items WHERE status = 'Published'"),
+  ]);
+  res.json({ total: tot.rows[0].n, byRelation: byRel.rows, byOrigin: byOrigin.rows, entities: ents.rows[0].n, sourceItems: items.rows[0].n, topEntities: top.rows, coverage: pubs.rows[0] });
+});
+
 router.get('/status', requireAuth, (req, res) => res.json({ ...rel.getStatus() }));
 
 router.post('/seed-from-facts', requireAuth, async (req, res) => res.json({ seeded: await rel.seedFromFacts() }));
