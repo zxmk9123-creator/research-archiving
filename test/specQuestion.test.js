@@ -50,3 +50,12 @@ test('parseCapacity handles "4만 2,000톤" and drops warning text', () => {
   assert.equal(st.parseCapacity('4만 2,000톤').tons, 42000);
   assert.equal(st.parseCapacity('10,500 bpd ⚠원문 수치 확인 필요').converted, true);
 });
+
+test('normalizeSpecTables: market-supply targets and feedstock throughput are not capacity rows', () => {
+  const st = require('../server/lib/specTable');
+  const t = ['| 업체 | 생산능력 | 비고 |', '| :-- | :-- | :-- |', '| Moeve | 250만 톤 | 2030년 이베리아 시장 내 공급 목표 |', '| Moeve | 50만 톤 | La Rábida 공장 |', '| LG-Eni | 40만 톤 | 원료 처리량 |', '| Neste | 150만 톤 | |'].join('\n');
+  const out = st.normalizeSpecTables(t);
+  assert.ok(/\| Moeve \| 500,000/.test(out) && !out.includes('2,500,000'));
+  assert.ok(/\| LG-Eni \| -/.test(out) && !out.includes('400,000'));
+  assert.ok(/\| Neste \| 1,500,000/.test(out));
+});

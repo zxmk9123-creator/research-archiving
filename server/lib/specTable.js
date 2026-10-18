@@ -27,6 +27,11 @@ function parseCapacity(cell, density = 0.8) {
   return { tons: (liters * density) / 1000, converted: true };
 }
 
+// A figure that is a market / sales / supply target or a feedstock throughput is not a plant's production capacity.
+const NON_CAPACITY = /(시장\s*(내|규모|점유|공급)|공급\s*(능력|목표|량)|판매(량|\s*목표)?|수요|점유율|처리량|투입량|원료\s*처리|market|sales|supply (?:target|capacity)|throughput|feedstock (?:capacity|processing))/i;
+const REAL_CAPACITY = /(생산\s*능력|공장|정제소|플랜트|plant|refinery|production capacity)/i;
+const nonCapacity = (cells, capIdx) => NON_CAPACITY.test(cells.join(' ')) && !REAL_CAPACITY.test(cells[capIdx] || '');
+
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 const splitCells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
 const keyOf = (name) => String(name || '').replace(/\[\d+\]/g, '').replace(/\(.*?\)|（.*?）/g, '').replace(/\b(inc|corp|co|ltd|plc|s\.p\.a|sa|ag|gmbh|group)\b\.?/gi, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -50,9 +55,10 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
     for (const l of lines.slice(i + 2, j)) {
       const cells = splitCells(l);
       if (cells.length !== head.length) { order.push({ raw: l }); continue; }
-      const cap = parseCapacity(cells[capIdx], density);
+      const cap = nonCapacity(cells, capIdx) ? null : parseCapacity(cells[capIdx], density);
       const key = keyOf(cells[0]);
-      const row = { cells, cap, rank: RANK(stIdx >= 0 ? cells[stIdx] : (yrIdx >= 0 ? cells[yrIdx] : cells.join(' '))), year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
+      const nonCap = nonCapacity(cells, capIdx);
+      const row = { nonCap, cells, cap, rank: RANK(stIdx >= 0 ? cells[stIdx] : (yrIdx >= 0 ? cells[yrIdx] : cells.join(' '))), year: yearOf(yrIdx >= 0 ? cells[yrIdx] : cells.join(' ')), key };
       if (!groups.has(key)) { groups.set(key, []); order.push({ key }); }
       groups.get(key).push(row);
     }
@@ -72,10 +78,12 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
         cells[capIdx] = `${fmt(best.cap.tons)}${best.cap.converted ? ' ※' : ''}${cites ? ` ${cites}` : ''}`;
         if (best.cap.converted) conv.push(`- ${cells[0].replace(/[*_`]/g, '')}: 원문 ${orig}`);
       }
+      if (!best.cap && best.nonCap) cells[capIdx] = '-';
       body.push(`| ${cells.join(' | ')} |`);
       for (const r of rows) {
         if (r === best) continue;
         const stat = stIdx >= 0 ? r.cells[stIdx] : '';
+        if (!r.cap && r.nonCap) { refs.push(`- ${r.cells[0]}: ${r.cells[capIdx].replace(/\s*\[\d+\]/g, '')} — 생산능력이 아닌 값(시장 공급 목표·원료 처리량 등)이라 표에서 제외`); continue; }
         if (!r.cap) continue;
         const when = yrIdx >= 0 ? r.cells[yrIdx] : '';
         const val = r.cap ? `${fmt(r.cap.tons)} 톤/년` : r.cells[capIdx];
@@ -92,4 +100,4 @@ function normalizeSpecTables(text, { density = 0.8 } = {}) {
   return out.join('\n');
 }
 
-module.exports = { normalizeSpecTables, parseCapacity };
+module.exports = { normalizeSpecTables, parseCapacity, nonCapacity };
