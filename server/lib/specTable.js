@@ -48,7 +48,7 @@ function factIndex(facts, { density = 0.8, safOnly = false } = {}) {
     const key = keyOf(f.entity);
     if (!key) continue;
     const e = idx.get(key) || { caps: [], other: 0 };
-    const fuelFeed = f.kind === 'feed_throughput' && ['saf', 'renewable_diesel', 'biofuel_total'].includes(f.product);
+    const fuelFeed = f.kind === 'feed_throughput' && f.product !== 'other';
     if (CAP_KINDS.has(f.kind) || (f.kind === 'feed_throughput' && !fuelFeed)) {
       const tons = f.group === 'mass' ? f.amount : f.group === 'volume' ? (f.amount * density) / 1000 : null;
       if (tons > 0) e.caps.push({ tons, status: f.status, year: f.year || 0, product: f.product, converted: f.group === 'volume', original: f.original, source: f.source, plant: f.kind === 'plant_capacity' });

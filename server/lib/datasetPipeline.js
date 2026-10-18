@@ -46,7 +46,7 @@ const OUT_METRIC = /(생산량|출하|판매|수출|수입|소비|재고|물량|
 const MONEY_METRIC = /(투자|매출|금액|자금|인수|예산|capex)/i;
 // Industry bodies / agencies are sources of estimates, not producers: never charted as a company
 // unless the question names them. Unlabelled (older) facts fall back to a name list.
-const BIOFUEL_PRODUCTS = new Set(['saf', 'renewable_diesel', 'biofuel_total']); // feedstock intake of a fuel plant is not its capacity; a refinery's / crusher's processing capacity is
+// feedstock intake of a fuel plant (or unlabelled product) is not its capacity; a refinery's / crusher's processing capacity (product 'other') is
 const KINDS = new Set(['plant_capacity', 'company_capacity', 'feed_throughput', 'market_target', 'investment', 'output', 'other']);
 const ROLES = new Set(['producer', 'consumer', 'engineering', 'trader', 'finance', 'other']);
 // capacity / output questions about companies list PRODUCERS: buyers, contractors, traders and financiers are not
@@ -79,7 +79,7 @@ function recordsForQuestion(records, question, density = null, { level = 'compan
       }
       if ((wantsCap || wantsOut) && !EMISSION_Q.test(q) && EMISSION_UNIT.test(`${r.original || ''} ${r.metric || ''} ${r.basis || ''}`)) return false;
       // a capacity question: figures classified (at extraction, from their sentence) as feedstock throughput, market / sales targets or money are not capacities
-      if (wantsCap && !wantsOut && r.kind && (['market_target', 'investment'].includes(r.kind) || (r.kind === 'feed_throughput' && BIOFUEL_PRODUCTS.has(r.product)))) return false;
+      if (wantsCap && !wantsOut && r.kind && (['market_target', 'investment'].includes(r.kind) || (r.kind === 'feed_throughput' && r.product !== 'other'))) return false;
       if (r.group === 'area') return wantsArea;
       if (wantsArea && !wantsCap && !wantsOut && !/(생산|output|production)/i.test(q)) return false; // an area question: quantities of goods are out
       const isMoney = r.group === 'usd' || r.group === 'eur' || r.group === 'krw';
