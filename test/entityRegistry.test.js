@@ -24,3 +24,9 @@ test('sameCompanyName: spellings of one company merge; subsidiaries, sites and p
   assert.ok(!s('Diamond Green Diesel', 'Darling Ingredients'));
   assert.ok(!s('Eni', 'Enilive'));
 });
+
+test('sameCompanyName crossScript can be switched off (English name vs an existing Latin name must really match)', () => {
+  assert.equal(reg.sameCompanyName('Burger King', '버거킹'), true);
+  assert.equal(reg.sameCompanyName('Burger King', '버거킹', { crossScript: false }), false);
+  assert.equal(reg.sameCompanyName('Burger King', 'Burger King Corp.', { crossScript: false }), true);
+});

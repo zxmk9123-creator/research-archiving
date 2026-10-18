@@ -42,14 +42,14 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
 // listed under BP / Diamond Green Diesel). Only spellings of the SAME company are merged: equal base name, one script vs the
 // other (Latin / Hangul), a Hangul prefix, a base name plus only generic words, or an acronym of the name.
 const GENERIC = new Set(['international', 'global', 'energy', 'group', 'holdings', 'holding', 'oil', 'oils', 'corporation', 'resources', 'biofuels', 'bioenergy', 'renewables', 'renewable', 'petroleum', 'chemical', 'chemicals', 'industries', 'industry', 'company', 'limited']);
-function sameCompanyName(a, b) {
+function sameCompanyName(a, b, { crossScript = true } = {}) {
   const x = baseKey(a);
   const y = baseKey(b);
   if (!x || !y) return false;
   if (x === y) return true;
   const hx = /[가-힣]/.test(x); const hy = /[가-힣]/.test(y);
   const lx = /[a-z]/.test(x); const ly = /[a-z]/.test(y);
-  if ((hx && !lx && ly && !hy) || (hy && !ly && lx && !hx)) return true;          // Hangul spelling vs Latin spelling
+  if ((hx && !lx && ly && !hy) || (hy && !ly && lx && !hx)) return crossScript;   // Hangul spelling vs Latin spelling (roster aliases only: the pair is already known to be one company)
   if (hx && hy) { const [s, l] = x.length <= y.length ? [x, y] : [y, x]; return s.length >= 3 && l.startsWith(s); }
   const tx = x.split(' '); const ty = y.split(' ');
   const [small, big] = tx.length <= ty.length ? [tx, ty] : [ty, tx];
@@ -86,7 +86,9 @@ async function learnBilingual({ limit = 120 } = {}) {
   const { names } = await loadInputs();
   const all = [...new Set(names.map((n) => String(n.name).trim()))];
   const latin = all.filter((n) => /[A-Za-z]/.test(n) && !/[가-힣]/.test(n));
-  const hangul = all.filter((n) => /[가-힣]/.test(n) && !/[A-Za-z]/.test(n) && !latin.some((l) => sameCompanyName(l, n))).slice(0, limit);
+  const { rows: known } = await pool.query('SELECT term FROM term_aliases');
+  const have = new Set(known.map((r) => r.term));
+  const hangul = all.filter((n) => /[가-힣]/.test(n) && !/[A-Za-z]/.test(n) && !have.has(n)).slice(0, limit);
   let linked = 0;
   for (let i = 0; i < hangul.length; i += 40) {
     const batch = hangul.slice(i, i + 40);
@@ -96,7 +98,7 @@ async function learnBilingual({ limit = 120 } = {}) {
       const arr = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
       for (const a of Array.isArray(arr) ? arr : []) {
         if (!a || !a.en || !batch.includes(a.ko)) continue;
-        const match = latin.find((l) => sameCompanyName(l, a.en));
+        const match = latin.find((l) => sameCompanyName(l, a.en, { crossScript: false }));
         if (!match) continue;
         await pool.query('INSERT INTO term_aliases (term, alt) VALUES ($1, $2) ON CONFLICT DO NOTHING', [a.ko, match]);
         linked++;
