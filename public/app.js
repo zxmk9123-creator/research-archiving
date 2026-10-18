@@ -875,7 +875,7 @@ function renderAnswerBlock(block, sources, orderedStart = 1) {
         return vals.length > 0 && vals.filter((v) => /^[+-]?[$€£₩]?\d/.test(v)).length / vals.length >= 0.6;
       });
       const cls = (i) => (numCol[i] ? ' class="num"' : '');
-      return `<div class="ai-answer-table-wrap"><button type="button" class="ai-table-csv" title="표를 CSV로 내려받기" aria-label="표를 CSV로 내려받기">CSV ↓</button><table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
+      return `<div class="ai-answer-table-wrap"><table class="ai-answer-table"><thead><tr>${header.map((c) => `<th>${renderCellHtml(c, sources)}</th>`).join('')}</tr></thead><tbody>${
         body.map((r) => `<tr>${r.map((c, i) => `<td${cls(i)}>${renderCellHtml(c, sources)}</td>`).join('')}</tr>`).join('')
       }</tbody></table></div>`;
     }
@@ -3952,24 +3952,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Delegated: works for freshly rendered and replayed (outerHTML) turns.
-// Table -> CSV (UTF-8 with BOM so Excel opens Korean text correctly); citation markers are dropped from the cells.
-document.addEventListener('click', (e) => {
-  const b = e.target.closest && e.target.closest('.ai-table-csv');
-  if (!b) return;
-  const table = b.parentElement && b.parentElement.querySelector('table');
-  if (!table) return;
-  const cell = (c) => `"${c.textContent.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim().replace(/"/g, '""')}"`;
-  const csv = [...table.rows].map((r) => [...r.cells].map(cell).join(',')).join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `oilfat-table-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest && e.target.closest('.ai-copy-btn');
   if (!btn) return;
