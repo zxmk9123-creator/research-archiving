@@ -53,7 +53,7 @@ function applyRelationRules(edges, nodes) {
 }
 
 // -> normalized object or null
-function sanitize(raw, { canon = (n) => n, isNonCompany = () => false, roleOf = () => null } = {}) {
+function sanitize(raw, { canon = (n) => n, isNonCompany = (n) => require('./companyRelations').isNonCompanyName(n), roleOf = () => null } = {}) {
   const d = raw && typeof raw === 'object' ? raw : null;
   if (!d || !Array.isArray(d.nodes)) return null;
   const type = d.type === 'relations' ? 'relations' : 'valuechain';

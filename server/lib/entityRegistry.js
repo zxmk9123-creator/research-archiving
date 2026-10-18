@@ -5,7 +5,7 @@
 const pool = require('../db/pool');
 const provider = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
-const { baseKey } = require('./companyRelations');
+const { baseKey, isNonCompanyName } = require('./companyRelations');
 
 const ROLES = ['emitter', 'supplier', 'producer', 'consumer', 'trader', 'engineering', 'finance', 'other'];
 const limitCall = createLimiter(1, 4000);
@@ -110,7 +110,7 @@ async function learnBilingual({ limit = 120 } = {}) {
 
 async function rebuild() {
   const { names, links, rosterNames } = await loadInputs();
-  const groups = cluster(names, { links, rosterNames });
+  const groups = cluster(names.filter((n) => !isNonCompanyName(n.name)), { links, rosterNames });
   let written = 0;
   for (const g of groups) {
     await pool.query(
@@ -120,6 +120,10 @@ async function rebuild() {
     );
     written++;
   }
+  // collective labels that an earlier build stored are removed (a hand-set role keeps its row)
+  const { rows: all } = await pool.query('SELECT id, entity FROM entity_registry WHERE role IS NULL OR role = $1', ['other']);
+  const stale = all.filter((r) => isNonCompanyName(r.entity)).map((r) => r.id);
+  if (stale.length) await pool.query('DELETE FROM entity_registry WHERE id = ANY($1)', [stale]);
   // a spelling that became a same_name of another row no longer keeps its own row (unless a role was set by hand)
   await pool.query(
     `DELETE FROM entity_registry r WHERE r.role IS NULL AND EXISTS (SELECT 1 FROM entity_registry o WHERE o.id <> r.id AND LOWER(r.entity) = ANY (SELECT LOWER(x) FROM unnest(o.same_names) x))`
@@ -187,4 +191,16 @@ async function lookup(q) {
   return rows;
 }
 
-module.exports = { learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };
+// A merge the data owner rejects: the learned Hangul/English pair is dropped (an empty-alt marker keeps it from being learned again)
+// and the spelling is removed from every roster alias list.
+async function rejectAlias(term) {
+  const t = String(term || '').trim();
+  if (!t) return { removed: 0 };
+  const a = await pool.query('DELETE FROM term_aliases WHERE term = $1 AND alt <> $2', [t, '']);
+  await pool.query("INSERT INTO term_aliases (term, alt) VALUES ($1, '') ON CONFLICT DO NOTHING", [t]);
+  const b = await pool.query('UPDATE companies SET aliases = array_remove(aliases, $1) WHERE $1 = ANY(aliases)', [t]);
+  cache.at = 0;
+  return { removed: a.rowCount, rosterAliasesRemoved: b.rowCount };
+}
+
+module.exports = { rejectAlias, learnBilingual, sameCompanyName, cluster, rebuild, classifyRoles, getRegistry, lookup, ROLES };

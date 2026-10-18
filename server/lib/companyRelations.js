@@ -26,7 +26,13 @@ const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|sout
 const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
 const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-?invest|설립한)/i;
 
+// Collective / generic labels ("중국 내 식당", "여러 항공사들", "인도 자회사", "major airlines") name no single company.
+const AGG_KO = /^(주요|글로벌|여러|다수|일부|각국|현지|국내|해외|대형|중소|기타|모든|전\s*세계)\s|(\s|^)(업체|기업|회사|항공사|제조업체|시추업체|식당|자회사|고객사|고객|공급사|판매점|업계)(들|\s*(중\s*)?(하나|\d+곳))?$|^(항공사|식당|업체|기업|고객|고객사)들?$|\s(내|산하)\s/;
+const AGG_EN = /^(?:(?:major|leading|local|various|several|other|many|some|multiple)\s+)?(?:restaurants|airlines|companies|customers|suppliers|producers|retailers|households|refiners|others?)$/i;
+const isAggregateName = (name) => AGG_KO.test(String(name || '').trim()) || AGG_EN.test(String(name || '').trim());
+
 function isNonCompanyName(name) {
+  if (isAggregateName(name)) return true;
   try {
     const level = require('./classificationScope').levelOf({ entity: name });
     if (level !== 'company') return true;
@@ -248,4 +254,4 @@ function promptBlock(rows) {
   return `\n\n[기업 관계 DB — 질문 기업의 자회사·관계기업·합작·공급·하청 관계(기사에서 확인된 것만). 이 관계는 답변에서 소속·합작 구분과 중복 합산 방지에 사용하고, DB에 없는 관계는 추정하지 않는다]\n${rows.map((r) => `- ${describe(r)}`).join('\n')}`;
 }
 
-module.exports = { requeueByEvidence, baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };
+module.exports = { isAggregateName, requeueByEvidence, baseKey, isNonCompanyName, fixRelation, cleanupRelations, RELATIONS, LABEL, parseRelations, verifyRelations, extractRelationsForItem, extractRelationsInBackground, seedFromFacts, runBackfill, getStatus: () => status, relationsFor, promptBlock, describe, storeRelations };

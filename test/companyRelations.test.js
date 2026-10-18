@@ -49,3 +49,8 @@ test('baseKey merges corporate-suffix variants', () => {
   assert.equal(rel.baseKey('Wilmar International Limited'), 'wilmar international');
   assert.equal(rel.baseKey('(주)LG화학'), rel.baseKey('LG화학'));
 });
+
+test('collective labels are not companies; real names that merely contain such words are kept', () => {
+  for (const n of ['중국 내 식당', '여러 항공사들', '인도 자회사', '주요 항공사', '항공사', '코린도 산하 플랜테이션 회사 2곳', '카자흐스탄 내 최대 식용유 제조업체', 'major airlines', 'Restaurants', 'various suppliers']) assert.equal(rel.isNonCompanyName(n), true, n);
+  for (const n of ['Restaurant Technologies', '대상주식회사', '이라크 국영 유조선 회사(IOTC)', 'Neste', '현대오일뱅크', 'Air bp', 'Customers Bancorp']) assert.equal(rel.isNonCompanyName(n), false, n);
+});

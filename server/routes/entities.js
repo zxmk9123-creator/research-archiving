@@ -9,6 +9,7 @@ router.get('/', requireAuth, async (req, res) => {
   res.json({ count: rows.length, rows });
 });
 router.post('/learn-bilingual', requireAuth, async (req, res) => res.json(await reg.learnBilingual({ limit: req.body && req.body.limit })));
+router.post('/reject-alias', requireAuth, async (req, res) => res.json(await reg.rejectAlias(req.body && req.body.term)));
 router.post('/rebuild', requireAuth, async (req, res) => res.json(await reg.rebuild()));
 router.post('/classify-roles', requireAuth, async (req, res) => res.json(await reg.classifyRoles({ limit: req.body && req.body.limit })));
 

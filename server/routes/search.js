@@ -1345,7 +1345,7 @@ function diagramHelpers(roster, registry = { canon: (n) => n, roleOf: () => null
   return {
     canon: (label) => registry.canon(canonMap.get(String(label).toLowerCase().trim()) || label),
     roleOf: (label) => registry.roleOf(label),
-    isNonCompany: (label) => classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()) || /^[A-Za-z가-힣]{1,2}사$|^company [a-z]$/i.test(String(label).trim()) || /[®™]/.test(label),
+    isNonCompany: (label) => companyRelations.isNonCompanyName(label) || classificationScope.levelOf({ entity: label }) !== 'company' || /(시장|market|국가|정부|협회)$/i.test(String(label).trim()) || /^[A-Za-z가-힣]{1,2}사$|^company [a-z]$/i.test(String(label).trim()) || /[®™]/.test(label),
   };
 }
 
