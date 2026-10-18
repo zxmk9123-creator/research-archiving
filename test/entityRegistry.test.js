@@ -64,3 +64,9 @@ test('refineRole: code rules correct the model (finance only for financiers, emi
   assert.equal(r('other', { name: 'Metro Atlanta Chamber', factRoles: { producer: 3 } }), 'other');
   assert.equal(r('bogus', { name: 'X' }), 'other');
 });
+
+test('refineRole: a supplier without feedstock evidence is a producer (processor) unless it is a fuel distributor', () => {
+  assert.equal(reg.refineRole('supplier', { name: 'Musim Mas', evidence: ['palm oil refinery'] }), 'producer');
+  assert.equal(reg.refineRole('supplier', { name: 'Avfuel Corporation', evidence: ['fuel'] }), 'trader');
+  assert.equal(reg.refineRole('supplier', { name: 'Restaurant Technologies', evidence: ['used cooking oil collection'] }), 'supplier');
+});

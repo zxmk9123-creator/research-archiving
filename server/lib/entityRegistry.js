@@ -179,6 +179,7 @@ const FINANCE_NAME = /(capital|bank|fund|asset management|investment|infrastruct
 const TRADER_NAME = /(trading|trade\b|상사|商事|mitsui|mitsubishi|itochu|marubeni|sumitomo|gunvor|trafigura|glencore|cargill|dreyfus|물산|posco international|포스코인터)/i;
 const USED_OIL = /(used cooking oil|\bUCO\b|폐식용유|waste (cooking )?oil|waste fat|식당|restaurant|튀김|fryer)/i;
 const FEEDSTOCK_EVIDENCE = /(collect|aggregat|\bUCO\b|used cooking|feedstock|rendering|수거|집하|폐식용유|원료|supply|공급)/i;
+const FUEL_DISTRIBUTOR = /(air bp|avfuel|aviation|world fuel|\bq8\b|fuel services|jet\b|fuel supply|distribut)/i;
 const FACT_TO_ROLE = { producer: 'producer', consumer: 'consumer', engineering: 'engineering', trader: 'trader', finance: 'finance', other: 'other' };
 
 // ai: the model's role; ctx: { name, evidence: [text], factRoles: { role: count } } -> the role to store
@@ -190,7 +191,7 @@ function refineRole(ai, ctx) {
   let role = ROLES.includes(ai) ? ai : 'other';
   if (role === 'finance' && !FINANCE_NAME.test(name)) role = TRADER_NAME.test(name) ? 'trader' : (factRole && factRole !== 'finance' ? factRole : 'other');
   if (role === 'emitter' && !USED_OIL.test(ev)) role = 'consumer';                      // a food brand that buys oil is not a 배출처
-  if (role === 'supplier' && !FEEDSTOCK_EVIDENCE.test(ev)) role = factRole && factRole !== 'supplier' ? factRole : 'trader';
+  if (role === 'supplier' && !FEEDSTOCK_EVIDENCE.test(ev)) role = factRole && factRole !== 'supplier' ? factRole : FUEL_DISTRIBUTOR.test(name) ? 'trader' : 'producer'; // processors / crushers are producers; fuel distributors are traders
   if (role === 'other' && factRole === 'producer' && !/(association|agency|institute|consult|coalition|chamber|ministry|협회|연합|정부)/i.test(name)) role = 'producer';
   return role;
 }
