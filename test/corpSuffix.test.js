@@ -36,3 +36,12 @@ test('the typo corrector never rewrites a legal-form word ("Incorporated", "Limi
   const text = 'XCF Global Incorporated and Foo Limited signed.';
   assert.equal(canonicalizeProperNouns(text, vocab, []), text);
 });
+
+test('"Capex" / "CAPEX" stay as written and are not "corrected" into the company name Caltex; real typos are still fixed', () => {
+  const roster = [{ name: 'GS칼텍스', rawNames: ['GS칼텍스', 'GS Caltex', 'Caltex'] }];
+  const mats = ['GS Caltex announced a new unit', 'EcoCeres builds a plant'];
+  assert.equal(canonicalizeProperNouns('Capex는 20억 달러이고 CAPEX 규모는 크다. Opex와 EBITDA도 있다.', mats, roster), 'Capex는 20억 달러이고 CAPEX 규모는 크다. Opex와 EBITDA도 있다.');
+  assert.equal(canonicalizeProperNouns('Ecoseas는 Caltex와 협력한다', mats, roster), 'EcoCeres는 Caltex와 협력한다');
+  // a short name with a single wrong letter is still repaired
+  assert.equal(canonicalizeProperNouns('Caltax 발표', mats, roster), 'Caltex 발표');
+});

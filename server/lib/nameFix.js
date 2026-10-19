@@ -16,6 +16,8 @@ function lev(a, b) {
 }
 
 const WORD_RE = /\b[A-Z][A-Za-z]{4,}\b/g;
+// Business / finance / industry terms that are real words, not mis-spelt names ("Capex" must never become "Caltex")
+const COMMON_TERMS = new Set(['capex', 'opex', 'ebitda', 'ebit', 'margin', 'output', 'export', 'import', 'policy', 'market', 'supply', 'demand', 'volume', 'target', 'scope', 'credit', 'tender', 'tariff', 'quota', 'mandate', 'blend', 'feedstock', 'refinery', 'capacity', 'profit', 'revenue', 'sales', 'price', 'prices', 'index', 'spot', 'swap', 'hedge', 'future', 'futures', 'basis', 'spread', 'freight', 'cargo', 'tanker', 'plant', 'plants', 'pilot', 'unit', 'units', 'phase', 'stage', 'total', 'average', 'annual', 'yearly', 'monthly', 'weekly', 'daily', 'global', 'region', 'sector', 'segment', 'budget', 'funding', 'invest', 'equity', 'stake', 'merger', 'tender', 'permit', 'permits', 'license', 'carbon', 'credits', 'offset']);
 const LEGAL_FORM_WORDS = new Set(require('./corpSuffix').FORM_WORDS_LONG); // "Incorporated", "Corporation", "Limited" ... are never "corrected" into another word
 
 
@@ -40,8 +42,9 @@ function canonicalizeProperNouns(text, materialTexts, roster = []) {
   const keys = [...vocab.keys()];
   return String(text || '').replace(WORD_RE, (word) => {
     const k = word.toLowerCase();
-    if (vocab.has(k) || LEGAL_FORM_WORDS.has(k)) return word;
-    const limit = word.length >= 7 ? 3 : 2;
+    if (vocab.has(k) || LEGAL_FORM_WORDS.has(k) || COMMON_TERMS.has(k)) return word;
+    if (word === word.toUpperCase()) return word; // an acronym (CAPEX, EBITDA, HEFA, NEXBTL) is not a mis-spelt name
+    const limit = word.length >= 7 ? 3 : 1;       // short words: one wrong letter at most ("Capex" is 2 away from "Caltex" — a different word)
     let best = null;
     for (const cand of keys) {
       if (Math.abs(cand.length - k.length) > limit || cand[0] !== k[0]) continue;
