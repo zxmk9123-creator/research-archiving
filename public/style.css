@@ -532,7 +532,7 @@ p { margin: 0; }
 .card-team-pick-btn.is-picked { color: var(--action); border-color: var(--action); background: #eff6ff; }
 
 .team-pick-menu {
-  position: absolute; z-index: 1000; min-width: 200px; max-width: 260px; /* page coordinates: stays under its 팀 Pick button while the page scrolls */
+  position: absolute; z-index: 9; min-width: 200px; max-width: 260px; /* page coordinates: stays under its 팀 Pick button while the page scrolls; z-index stays below the sticky top bar (10) so the bar is never covered */
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-control);
   box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: var(--sp-2);
 }

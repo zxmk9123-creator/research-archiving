@@ -140,3 +140,20 @@ test('팀 Pick menu is anchored in page coordinates (absolute), not the viewport
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.ok(app.includes('rect.bottom + window.scrollY + 4'));
 });
+
+test('a bold label followed by a semicolon becomes a colon (server and client), real semicolons stay', () => {
+  const { fixLabelColons } = require('../server/routes/search');
+  const raw = '- **합작 법인 및 규모**; LG화학은 합작했다.\n1. **활용 계획**； 생산된 HVO.\n**제목**;내용\n- 문장 안의 세미콜론; 그대로 둔다 **굵게**; 이건 문장 중간\n| a | b; c |';
+  const out = fixLabelColons(raw);
+  assert.match(out, /- \*\*합작 법인 및 규모\*\*: LG화학은 합작했다\./);
+  assert.match(out, /1\. \*\*활용 계획\*\*: 생산된 HVO\./);
+  assert.match(out, /\*\*제목\*\*: 내용/);
+  assert.match(out, /문장 안의 세미콜론; 그대로 둔다 \*\*굵게\*\*; 이건 문장 중간/);
+  assert.match(out, /\| a \| b; c \|/);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(app.includes("[;；][ \\t]*/g, (m, nl, bullet, label)"));
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
+  assert.match(css.match(/\.team-pick-menu \{[^}]*\}/)[0], /z-index: 9;/);
+});

@@ -565,6 +565,7 @@ Formatting:
 - Length (hard rule): keep the whole answer within about 450 Korean words — tables and chart JSON count — or about 700 for a single-company profile. Lead with the answer, then the most decision-relevant facts; merge duplicate materials and cite each fact once. Never try to cover everything: if more material exists than fits, say in one short line what was left out and offer to continue. The answer must always END COMPLETE — never stop mid-sentence, mid-list, mid-table or mid-chart.
 - Comparisons across several targets: show every target the materials give a figure for, side by side with the same fields and the same unit; name in one line any requested target with no usable figure.
 - SUBJECT FIT: list an entity only if the materials tie it to the product/subject the question names (e.g. a palm-oil question lists palm-oil handlers, not producers of an unrelated fuel that merely appear in the archive). If the archive lacks the major players of that subject, say so in one line instead of filling the list with off-subject entities.
+- Punctuation: a bold label before its explanation is followed by a colon ("- **라벨**: 설명"), never a semicolon.
 - Charts and tables (only when asked, or when 3+ comparable numbers make one clearly better): tables use Markdown pipe tables with the unit stated once in the header, one number format per column (commas for thousands, a dot for decimals, ranges as "50만~120만 톤"), current/plan/target in separate columns, "-" for no data, "미공시" for undisclosed. A chart is a fenced block \`\`\`chart containing one JSON object {"type":"bar"|"hbar"|"stacked"|"line"|"area"|"pie"|"donut"|"scatter","title":"...","unit":"...","labels":[...],"series":[{"name":"...","data":[numbers or null]}]} (hbar for rankings, line for time trends, pie/donut only for shares of one whole, at most 10 items and 4 series). To merge the parts of one company that add up (its plants), use one series with "groups":[company per label] and "combine":"sum" and optional "notes":[detail per label]. Use ONLY figures stated in the materials; put the unit in "unit"; follow with 1-3 sentences of takeaways, each cited.
 - NUMBER FIDELITY (critical): copy every figure EXACTLY as the material writes it, with its own scale and unit ("50만 톤" stays "50만 톤", never "5만 톤"; "1.2 Mt" stays "1.2 Mt"). Do not convert between 만/천/백만/억, kt/Mt/톤 or gallons/barrels/tonnes yourself — write each figure in the unit its material uses (when the user asks for one common unit, the system converts and states the basis). A range uses the material's two endpoints. A figure not found in the cited material must not be written.
 - Never write the words "이전 답변"/"이전 질문" as a citation, and never cite as [1, 2], [1-3] or [자료 3]: always separate brackets with plain numbers, [1][2]. Every table row and every chart's lead-in sentence needs at least one [N] (put it at the end of the row's last cell).
@@ -1387,6 +1388,11 @@ async function feedstockSupplyExtras(have) {
   } catch (_) { return []; }
 }
 
+// A bold label followed by a semicolon ("- **합작 법인 및 규모**; 설명") is a mistyped colon: "- **합작 법인 및 규모**: 설명".
+function fixLabelColons(text) {
+  return String(text || '').replace(/(^|\n)([ \t]*(?:[-*•]|\d+[.)])[ \t]+)?(\*\*[^*\n]{1,60}\*\*)[ \t]*[;；][ \t]*/g, (m, nl, bullet, label) => `${nl}${bullet || ''}${label}: `);
+}
+
 async function finalizeAnswer(rawText, candidates, signal, required = [], question = '', dataset = null, { quick = false } = {}) {
   let rawBody = String(rawText || '');
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
@@ -1418,6 +1424,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (/\|\s*(미참여|불참)\s*\|/.test(modelText) && !candidates.some((c) => /(미참여|불참|참여하지\s*않)/.test(materialText(c)))) {
     modelText = modelText.replace(/\|\s*(미참여|불참)\s*\|/g, '| 자료에 언급 없음 |');
   }
+  modelText = fixLabelColons(modelText);
   if (specQuestion.isSpecQuestion(question)) modelText = specQuestion.dropEmptyRows(modelText);
   if (/```diagram/.test(modelText)) modelText = diagram.sanitizeInText(modelText, { maxSource: candidates.length, ...diagramHelpers(rosterForScope, await entityRegistry.getRegistry()) });
   const verifiedModel = await verifyCitations(modelText, candidates, signal);
@@ -1783,6 +1790,7 @@ module.exports._clearAnswerCache = () => answerCache.clear();
 module.exports.enrichChartBlocks = enrichChartBlocks;
 module.exports.dropTotalFromSiteChart = dropTotalFromSiteChart;
 module.exports.requiredCompanies = requiredCompanies;
+module.exports.fixLabelColons = fixLabelColons;
 module.exports.ensureCompanyCoverage = ensureCompanyCoverage;
 module.exports.buildCoverageBlock = buildCoverageBlock;
 module.exports.normalizeCitationMarkers = normalizeCitationMarkers;

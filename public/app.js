@@ -838,6 +838,8 @@ function renderInlineAnswerText(line, sources) {
 
 function normalizeAnswerMarkdown(rawAnswer) {
   return LatexText.latexToPlainText(String(rawAnswer || ''))
+    // "- **라벨**; 설명" is a mistyped "- **라벨**: 설명" (also fixes streamed text before the server's final pass)
+    .replace(/(^|\n)([ \t]*(?:[-*•]|\d+[.)])[ \t]+)?(\*\*[^*\n]{1,60}\*\*)[ \t]*[;；][ \t]*/g, (m, nl, bullet, label) => `${nl}${bullet || ''}${label}: `)
     // Some model responses escape Markdown markers even though this UI
     // intentionally renders a small, safe Markdown subset.
     .replace(/(^|\n)\\+(?=\s*#{1,6}\s)/g, '$1')
