@@ -129,3 +129,14 @@ test('Umami analytics: script in index.html with auto-track off, app.js reports 
   assert.ok(app.includes('function trackPageview') && app.includes('trackPageview(path, param);'));
   assert.ok(!/umami\.track\([^)]*query/.test(app));
 });
+
+test('팀 Pick menu is anchored in page coordinates (absolute), not the viewport (fixed)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
+  const rule = css.match(/\.team-pick-menu \{[^}]*\}/)[0];
+  assert.match(rule, /position: absolute/);
+  assert.ok(!/position: fixed/.test(rule));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.ok(app.includes('rect.bottom + window.scrollY + 4'));
+});

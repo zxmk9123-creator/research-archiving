@@ -226,8 +226,10 @@ window.toggleTeamPickMenu = function toggleTeamPickMenu(ev, itemId) {
   teamPickMenuEl = document.createElement('div');
   teamPickMenuItemId = itemId;
   teamPickMenuEl.className = 'team-pick-menu';
-  teamPickMenuEl.style.top = `${rect.bottom + 4}px`;
-  teamPickMenuEl.style.left = `${rect.left}px`;
+  // Anchored in PAGE coordinates (position: absolute): the menu stays right under its 팀 Pick button when the page scrolls,
+  // instead of staying put on the screen (position: fixed) while the button moves away. Clamped so it never leaves the window.
+  teamPickMenuEl.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  teamPickMenuEl.style.left = `${Math.max(8 + window.scrollX, Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - 268))}px`;
   teamPickMenuEl.innerHTML = '<p class="meta">불러오는 중…</p>';
   document.body.appendChild(teamPickMenuEl);
   // capture phase so this registers before the click that opened the menu
