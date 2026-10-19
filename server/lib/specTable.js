@@ -35,7 +35,7 @@ const nonCapacity = (cells, capIdx) => UNVERIFIED.test(cells[capIdx] || '') || (
 
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 const splitCells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-const keyOf = (name) => String(name || '').replace(/\[\d+\]/g, '').replace(/\(.*?\)|（.*?）/g, '').replace(/\b(inc|corp|co|ltd|plc|s\.p\.a|sa|ag|gmbh|group)\b\.?/gi, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+const keyOf = (name) => require('./corpSuffix').stripForms(String(name || '').replace(/\[\d+\]/g, '').replace(/[*_`]/g, '')).replace(/\bgroup\b/g, '').replace(/\s+/g, ' ').trim();
 const yearOf = (s) => { const m = String(s || '').match(/(20\d\d)/); return m ? Number(m[1]) : 0; };
 
 // Stored facts (item_facts, classified at extraction) -> per company key: capacity facts in tons/year, and whether any

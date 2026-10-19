@@ -99,7 +99,8 @@ function recordsForQuestion(records, question, density = null, { level = 'compan
 const CORP_SUFFIX = /(?:\b(?:inc|corp|corporation|co|ltd|limited|llc|plc|gmbh|sa|ag|bv|oyj|asa|bhd|berhad)\b\.?|\bs\.?\s?p\.?\s?a\.?(?=\s|$)|주식회사|\(주\)|㈜|유한회사)/gi;
 // "Phillips 66 Aviation", "Infinium Energy": a roster company name followed only by a generic qualifier is that company.
 const QUALIFIER = /^(aviation|energy|renewables?|oil|group|holdings?|international|refining|biofuels?|fuels?|corp|company|산업|에너지)$/;
-const nameKey = (s) => String(s || '').toLowerCase().replace(CORP_SUFFIX, '').replace(/[^a-z0-9가-힣]/g, '');
+const { stripForms } = require('./corpSuffix');
+const nameKey = (s) => stripForms(s).replace(CORP_SUFFIX, '').replace(/[^a-z0-9가-힣]/g, '');
 function canonicalizeEntities(records, roster = []) {
   const byKey = new Map();
   for (const c of roster) for (const n of c.rawNames || [c.name]) { const k = nameKey(n); if (k.length >= 2 && !byKey.has(k)) byKey.set(k, c.name); }

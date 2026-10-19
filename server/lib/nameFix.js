@@ -16,6 +16,8 @@ function lev(a, b) {
 }
 
 const WORD_RE = /\b[A-Z][A-Za-z]{4,}\b/g;
+const LEGAL_FORM_WORDS = new Set(require('./corpSuffix').FORM_WORDS_LONG); // "Incorporated", "Corporation", "Limited" ... are never "corrected" into another word
+
 
 function buildVocabulary(texts, roster) {
   const vocab = new Map(); // lower -> canonical spelling (most frequent wins)
@@ -38,7 +40,7 @@ function canonicalizeProperNouns(text, materialTexts, roster = []) {
   const keys = [...vocab.keys()];
   return String(text || '').replace(WORD_RE, (word) => {
     const k = word.toLowerCase();
-    if (vocab.has(k)) return word;
+    if (vocab.has(k) || LEGAL_FORM_WORDS.has(k)) return word;
     const limit = word.length >= 7 ? 3 : 2;
     let best = null;
     for (const cand of keys) {

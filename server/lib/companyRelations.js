@@ -20,7 +20,8 @@ Rules: only relationships the article STATES between two named companies (not pe
 
 // ---- name hygiene shared by extraction, cleanup and diagrams ------------------------------------------------------------
 const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\.?|limited|inc\.?|corp\.?|corporation|co\.?|company|llc|gmbh|ag|nv|bv|ab|asa|oyj|holdings?|group)\b|\(.*?\)|（.*?）|㈜|주식회사|\(주\)|그룹|홀딩스/gi;
-const baseKey = (n) => String(n || '').replace(SUFFIX, ' ').replace(/[.,&®™*_`‐–-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+const { stripForms } = require('./corpSuffix');
+const baseKey = (n) => stripForms(n).replace(SUFFIX, ' ').replace(/[.,&®™*_`‐–-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학)$/i;
 const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
 const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
@@ -40,7 +41,8 @@ const AGG_EN = /^(?:(?:major|leading|local|various|several|other|many|some|multi
 // "Valero, Darling Ingredients" / "Neste, Marathon Petroleum": several companies in one label ("Foo, Inc." is one company)
 const multiCompany = (name) => {
   const parts = String(name || '').split(/\s*,\s*/).filter(Boolean);
-  return parts.length >= 2 && !parts.slice(1).every((p) => /^(inc|ltd|llc|co|corp|plc|limited|s\.a|sa|ag|gmbh|bhd|tbk)\.?$/i.test(p));
+  const isForm = (p) => p.split(/\s+/).every((w) => require('./corpSuffix').FORMS.has(w.toLowerCase().replace(/[.]/g, '')));
+  return parts.length >= 2 && !parts.slice(1).every(isForm); // "Foo, Inc." / "Foo, Co., Ltd." / "Foo, Pte. Ltd." are one company
 };
 const isAggregateName = (name) => AGG_KO.test(String(name || '').trim()) || AGG_EN.test(String(name || '').trim()) || multiCompany(name);
 
