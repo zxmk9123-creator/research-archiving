@@ -110,3 +110,72 @@ test('searchWeb: SERPAPI_API_KEY is merged into the rotation alongside SERPAPI_A
     delete process.env.SERPAPI_API_KEYS;
   }
 }));
+
+test('searchWeb: a key reported out of searches is parked and the next key takes over; later calls skip it without spending a request', async () => {
+  const sa = require('../server/lib/adapters/serpApiSearch');
+  sa._resetKeyState();
+  const prev = process.env.SERPAPI_API_KEYS;
+  const prevSingle = process.env.SERPAPI_API_KEY;
+  delete process.env.SERPAPI_API_KEY;
+  process.env.SERPAPI_API_KEYS = 'primary-0001,backup-0002';
+  const seen = [];
+  const restore = mockFetch(async (url) => {
+    const k = new URL(url).searchParams.get('api_key');
+    seen.push(k);
+    if (k === 'primary-0001') return { ok: false, status: 429, text: async () => 'Your account has run out of searches.' };
+    return serpApiResponse([{ title: 't', link: 'https://example.org/x' }]);
+  });
+  try {
+    const first = await searchWeb('q');
+    assert.deepEqual(first, [{ title: 't', link: 'https://example.org/x' }]);
+    assert.deepEqual(seen, ['primary-0001', 'backup-0002']);
+    seen.length = 0;
+    await searchWeb('q2');
+    assert.deepEqual(seen, ['backup-0002']);                 // the exhausted key is not asked again
+    const st = sa.getKeyStatus();
+    assert.equal(st.configured, 2);
+    assert.equal(st.available, 1);
+    assert.deepEqual(st.reasons, [{ key: '…0001', reason: 'exhausted' }]);
+  } finally {
+    restore();
+    sa._resetKeyState();
+    if (prev === undefined) delete process.env.SERPAPI_API_KEYS; else process.env.SERPAPI_API_KEYS = prev;
+    if (prevSingle !== undefined) process.env.SERPAPI_API_KEY = prevSingle;
+  }
+});
+
+test('searchWeb: a 200 answer carrying an out-of-searches error moves on; when every key is parked it fails at once (the next tier answers); 5xx parks nothing', async () => {
+  const sa = require('../server/lib/adapters/serpApiSearch');
+  sa._resetKeyState();
+  const prev = process.env.SERPAPI_API_KEYS;
+  const prevSingle = process.env.SERPAPI_API_KEY;
+  delete process.env.SERPAPI_API_KEY;
+  process.env.SERPAPI_API_KEYS = 'one-1111,two-2222';
+  let calls = 0;
+  let mode = 'quota';
+  const restore = mockFetch(async () => {
+    calls++;
+    if (mode === 'quota') return { ok: true, status: 200, json: async () => ({ error: 'Your account has run out of searches.' }) };
+    if (mode === 'empty') return { ok: true, status: 200, json: async () => ({ error: "Google hasn't returned any results for this query." }) };
+    return { ok: false, status: 503, text: async () => 'busy' };
+  });
+  try {
+    await assert.rejects(() => searchWeb('q'), /search failed/);
+    assert.equal(calls, 2);                                   // both keys tried once, both parked
+    calls = 0;
+    await assert.rejects(() => searchWeb('q'), /exhausted or invalid/);
+    assert.equal(calls, 0);                                   // fails at once, no request spent
+    sa._resetKeyState();
+    mode = 'empty';
+    assert.deepEqual(await searchWeb('q'), []);               // "no results" is an empty answer, not a key problem
+    assert.equal(sa.getKeyStatus().parked, 0);
+    mode = '503';
+    await assert.rejects(() => searchWeb('q'), /search failed: 503/);
+    assert.equal(sa.getKeyStatus().parked, 0);                // server errors park nothing
+  } finally {
+    restore();
+    sa._resetKeyState();
+    if (prev === undefined) delete process.env.SERPAPI_API_KEYS; else process.env.SERPAPI_API_KEYS = prev;
+    if (prevSingle !== undefined) process.env.SERPAPI_API_KEY = prevSingle;
+  }
+});
