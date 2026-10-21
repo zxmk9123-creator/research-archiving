@@ -930,6 +930,38 @@
       "evidence": "LanzaJet는 Freedom Pines Fuels를 운영",
       "expect": true,
       "note": "법인 약명이 달라도 같은 이름"
+    },
+    {
+      "id": "e6",
+      "src": "Fluor",
+      "dst": "SGP BioEnergy",
+      "title": "SGP BioEnergy Announces World's Largest Advanced Biofuel Production Facility",
+      "evidence": "Fluor와 ICA Fluor가 기본설계(FEED)를 수행하고",
+      "expect": true,
+      "note": "기사 제목의 주제 회사는 문장에서 생략될 수 있음"
+    },
+    {
+      "id": "e7",
+      "src": "Ngo Chew Hong Edible Oil",
+      "dst": "Rafinole",
+      "title": "Singapore edible oil makers expand",
+      "evidence": "싱가포르의 Ngo Chew Hong Edible Oil은 팜유 기반 조리유를 공급하며",
+      "expect": false
+    },
+    {
+      "id": "e8",
+      "src": "Eni",
+      "dst": "Euglena Co., Ltd.",
+      "evidence": "두 회사는 Enilive, Euglena와 함께 말레이시아 조호르주 펭게랑에 Pengerang Biorefinery Sdn. Bhd. 합작법인을 설립했으며",
+      "expect": false,
+      "note": "판정 live: Eni는 Enilive 안의 부분 문자열일 뿐"
+    },
+    {
+      "id": "e9",
+      "src": "Enilive",
+      "dst": "Euglena Co., Ltd.",
+      "evidence": "두 회사는 Enilive, Euglena와 함께 말레이시아 조호르주 펭게랑에 Pengerang Biorefinery Sdn. Bhd. 합작법인을 설립했으며",
+      "expect": true
     }
   ],
   "roster_aliases": [

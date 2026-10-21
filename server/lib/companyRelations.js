@@ -66,10 +66,14 @@ function isNonCompanyName(name) {
 //   owns needs an ownership cue and, for a joint venture or a share <= 50%, is a stake instead (a JV partner is not its parent);
 //   offtake_from / supplies run seller -> buyer, so an airline can never be the seller; non-companies never become nodes.
 // The evidence phrase must name both companies; otherwise two names that merely sit in the same list / paragraph become a "relation".
-function evidenceNamesBoth(evidence, src, dst) {
+// A name the phrase leaves out is accepted when the article's title names it (the article's subject is the implied actor).
+function evidenceNamesBoth(evidence, src, dst, title = '') {
   const ev = String(evidence || '').toLowerCase();
   if (!ev) return false;
-  const has = (n) => { const raw = String(n || '').toLowerCase().trim(); const bare = stripForms(n); return (raw && ev.includes(raw)) || (bare && ev.includes(bare)); };
+  const tl = String(title || '').toLowerCase();
+  // whole-word for latin names: "Eni" is not found inside "Enilive"
+  const inText = (h, n) => { for (let i = h.indexOf(n); i >= 0; i = h.indexOf(n, i + 1)) { if (!/[a-z0-9]/.test(h[i - 1] || '') && !/[a-z0-9]/.test(h[i + n.length] || '')) return true; } return false; };
+  const has = (n) => { const raw = String(n || '').toLowerCase().trim(); const bare = stripForms(n); return (raw && (inText(ev, raw) || inText(tl, raw))) || (bare && (inText(ev, bare) || inText(tl, bare))); };
   return has(src) && has(dst);
 }
 
@@ -107,6 +111,7 @@ function parseRelations(raw) {
 // Keeps only rows whose two names both occur in the article text; names are mapped to the roster's canonical spelling.
 function verifyRelations(rows, text, canon = (n) => n) {
   const low = String(text || '').toLowerCase();
+  const title = String(text || '').split('\n')[0]; // textOf() puts the title first
   const out = [];
   const seen = new Set();
   for (const r of rows || []) {
@@ -115,7 +120,7 @@ function verifyRelations(rows, text, canon = (n) => n) {
     const dst = clean(r && r.dst);
     if (!relation || src.length < 2 || dst.length < 2 || src.toLowerCase() === dst.toLowerCase()) continue;
     if (!low.includes(src.toLowerCase()) || !low.includes(dst.toLowerCase())) continue;
-    if (!evidenceNamesBoth(r.evidence, src, dst)) continue;
+    if (!evidenceNamesBoth(r.evidence, src, dst, title)) continue;
     const fixed = fixRelation({ src, dst, relation, share_pct: r.share_pct, evidence: r.evidence });
     if (!fixed) continue;
     let [a, b] = [canon(fixed.src), canon(fixed.dst)];

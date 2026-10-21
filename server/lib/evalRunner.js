@@ -34,7 +34,7 @@ const SUITES = {
     return got === c.expect ? null : `got "${got}"`;
   },
   evidence_names: (c) => {
-    const got = rel.evidenceNamesBoth(c.evidence, c.src, c.dst);
+    const got = rel.evidenceNamesBoth(c.evidence, c.src, c.dst, c.title);
     return got === c.expect ? null : `names both = ${got} (expected ${c.expect})`;
   },
   roster_aliases: (c) => {
