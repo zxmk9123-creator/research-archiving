@@ -58,7 +58,7 @@ function runDeterministic(g = golden) {
 async function runLiveAudit(pool, g = golden) {
   const cases = g.live_relations || [];
   const { rows } = await pool.query('SELECT src, dst, relation, status FROM company_relations');
-  const key = (n) => rel.baseKey(n);
+  const key = (n) => rel.baseKey(n).replace(/\s+/g, '');
   const find = (c) => rows.filter((r) => r.relation === c.relation && ((key(r.src) === key(c.src) && key(r.dst) === key(c.dst)) || (c.relation === 'jv_partner' && key(r.src) === key(c.dst) && key(r.dst) === key(c.src))));
   const failures = [];
   for (const c of cases) {

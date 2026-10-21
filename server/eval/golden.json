@@ -41,7 +41,8 @@
     { "id": "m16", "a": "Carbon Neutral Fuels", "b": "CNF", "same": true },
     { "id": "m17", "a": "Burger King", "b": "버거킹", "same": true },
     { "id": "m18", "a": "Phelan Green Group", "b": "P&G", "same": false, "opts": { "acronym": false } },
-    { "id": "m19", "a": "Air bp", "b": "bp", "same": false }
+    { "id": "m19", "a": "Air bp", "b": "bp", "same": false },
+    { "id": "m20", "a": "JetBlue", "b": "Jet Blue", "same": true, "note": "spacing variant" }
   ],
   "roles": [
     { "id": "ro1", "ai": "finance", "ctx": { "name": "포스코인터내셔널" }, "expect": "trader" },

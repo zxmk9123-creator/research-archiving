@@ -21,7 +21,7 @@ function cluster(names, { links = [], rosterNames = [] } = {}) {
   for (const { name, n } of names) { const k = String(name).trim(); if (k.length < 2) continue; count.set(k, (count.get(k) || 0) + (n || 1)); if (!parent.has(k)) parent.set(k, k); }
   const byKey = new Map();
   for (const k of count.keys()) {
-    const bk = baseKey(k);
+    const bk = baseKey(k).replace(/\s+/g, ''); // spacing variants ("Jet Blue" / "JetBlue") are one key
     if (bk.length < 3) continue;
     if (byKey.has(bk)) union(k, byKey.get(bk)); else byKey.set(bk, k);
   }
@@ -50,7 +50,7 @@ function sameCompanyName(a, b, { crossScript = true, acronym = true } = {}) {
   const x = baseKey(a);
   const y = baseKey(b);
   if (!x || !y) return false;
-  if (x === y) return true;
+  if (x === y || x.replace(/\s+/g, '') === y.replace(/\s+/g, '')) return true; // "Jet Blue" = "JetBlue"
   const hx = /[가-힣]/.test(x); const hy = /[가-힣]/.test(y);
   const lx = /[a-z]/.test(x); const ly = /[a-z]/.test(y);
   if ((hx && !lx && ly && !hy) || (hy && !ly && lx && !hx)) return crossScript;   // Hangul spelling vs Latin spelling (roster aliases only: the pair is already known to be one company)
