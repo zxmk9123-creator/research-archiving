@@ -177,7 +177,6 @@ async function cleanupRelations() {
   try { roleOf = (await require('./entityRegistry').getRegistry()).roleOf; } catch (_) { /* optional */ }
   const stats = { checked: rows.length, dropped: 0, changed: 0, merged: 0 };
   for (const r of rows) {
-    if (r.origin === 'ai' && !evidenceNamesBoth(r.evidence, r.src, r.dst)) { await pool.query('DELETE FROM company_relations WHERE id = $1', [r.id]); stats.dropped++; continue; }
     // a parent taken from the facts that is an investor (Bain Capital -> EcoCeres) is a stake, not ownership
     const input = r.origin === 'facts' && r.relation === 'owns' && roleOf(r.src) === 'finance' ? { ...r, relation: 'stake' } : r;
     const fixed = fixRelation(input);
