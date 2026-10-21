@@ -68,7 +68,14 @@ async function runLiveAudit(pool, g = golden) {
   const cases = g.live_relations || [];
   const { rows } = await pool.query('SELECT src, dst, relation, status FROM company_relations');
   const key = (n) => rel.baseKey(n).replace(/\s+/g, '');
-  const find = (c) => rows.filter((r) => r.relation === c.relation && ((key(r.src) === key(c.src) && key(r.dst) === key(c.dst)) || (c.relation === 'jv_partner' && key(r.src) === key(c.dst) && key(r.dst) === key(c.src))));
+  // supplies(B -> A) says the same as offtake_from(A -> B); JV / partnership rows are symmetric
+  const norm = (r) => {
+    const a = key(r.src), b = key(r.dst);
+    if (r.relation === 'supplies') return `offtake_from|${b}|${a}`;
+    if (r.relation === 'jv_partner' || r.relation === 'partner_with') return `${r.relation}|${[a, b].sort().join('|')}`;
+    return `${r.relation}|${a}|${b}`;
+  };
+  const find = (c) => rows.filter((r) => norm(r) === norm(c));
   const failures = [];
   for (const c of cases) {
     const hits = find(c);
