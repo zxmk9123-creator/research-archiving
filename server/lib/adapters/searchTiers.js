@@ -1,4 +1,4 @@
-// Tiered web search for Web Research Discovery: Brave Search (tier 1,
+// Tiered web search for Web Research Discovery (order: Brave, Tavily, Firecrawl, SerpApi): Brave Search (tier 1,
 // adapters/webSearch.js) is tried first; Firecrawl (tier 2, adapters/
 // firecrawlSearch.js) and then SerpApi (tier 3, adapters/serpApiSearch.js)
 // are tried in order only when every earlier tier itself throws (e.g.
@@ -14,16 +14,18 @@
 const braveAdapter = require('./webSearch');
 const firecrawlAdapter = require('./firecrawlSearch');
 const serpApiAdapter = require('./serpApiSearch');
+const tavilyAdapter = require('./tavilySearch');
 
 const TIERS = [
   ['brave', braveAdapter],
+  ['tavily', tavilyAdapter],
   ['firecrawl', firecrawlAdapter],
   ['serpapi', serpApiAdapter],
 ];
 
 // Each tier has a request-per-minute ceiling (Firecrawl's plan: 60/min). Daily Discovery fires its queries back to back, and with
 // Brave failing instantly the whole burst lands on the next tier, so calls to one tier are spaced out instead of bursting.
-const MIN_GAP_MS = { brave: 0, firecrawl: Number(process.env.FIRECRAWL_MIN_GAP_MS) || 1100, serpapi: Number(process.env.SERPAPI_MIN_GAP_MS) || 400 };
+const MIN_GAP_MS = { brave: 0, tavily: Number(process.env.TAVILY_MIN_GAP_MS) || 700, firecrawl: Number(process.env.FIRECRAWL_MIN_GAP_MS) || 1100, serpapi: Number(process.env.SERPAPI_MIN_GAP_MS) || 400 };
 const nextSlot = {};
 async function pace(name) {
   const gap = MIN_GAP_MS[name] || 0;
