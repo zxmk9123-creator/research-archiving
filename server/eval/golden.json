@@ -351,6 +351,63 @@
         "relation": "offtake_from"
       },
       "note": "판정 #16 O"
+    },
+    {
+      "id": "r27",
+      "input": {
+        "src": "Pivot Methanol",
+        "dst": "GoVerde Energia",
+        "relation": "stake",
+        "evidence": "피벗 메탄올은 스페인의 HyFive, 브라질의 GoVerde Energia, 캐나다의 StormFisher를 자사 포트폴리오의 선도적인 e-메탄올 프로젝트 개발사로 확보했다고 밝혔으며"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "partner_with"
+      },
+      "note": "2차 판정 #3/#25: 포트폴리오 개발사 확보는 지분이 아님"
+    },
+    {
+      "id": "r28",
+      "input": {
+        "src": "Neste",
+        "dst": "Martinez",
+        "relation": "stake",
+        "evidence": "Marathon Petroleum과 Neste의 캘리포니아 재생 연료 합작 투자 시설인 Martinez 공장"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "2차 판정 #12: 공장 이름은 회사가 아님"
+    },
+    {
+      "id": "r29",
+      "input": {
+        "src": "TotalEnergies",
+        "dst": "Volotea",
+        "relation": "offtake_from",
+        "evidence": "Air France-KLM과 10년간 150만 톤, Volotea와 2029년까지의 장기 오프테이크 계약을 체결했으며"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "offtake_from",
+        "src": "Volotea",
+        "dst": "TotalEnergies"
+      },
+      "note": "2차 판정 #24: 항공사가 구매자"
+    },
+    {
+      "id": "r30",
+      "input": {
+        "src": "SK에너지",
+        "dst": "Infinium",
+        "relation": "stake",
+        "evidence": "SK에너지는 미국 인피니움사에 투자"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "stake"
+      },
+      "note": "2차 판정 #1 O: 투자 문구는 지분으로 유지"
     }
   ],
   "merge_pairs": [
@@ -890,6 +947,83 @@
       "dst": "Valero",
       "relation": "offtake_from",
       "verdict": "wrong"
+    },
+    {
+      "id": "l37",
+      "src": "Pivot Methanol",
+      "dst": "GoVerde Energia",
+      "relation": "stake",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l38",
+      "src": "Pivot Methanol",
+      "dst": "StormFisher",
+      "relation": "stake",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l39",
+      "src": "Neste",
+      "dst": "Martinez",
+      "relation": "stake",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l40",
+      "src": "TotalEnergies",
+      "dst": "Volotea",
+      "relation": "offtake_from",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l41",
+      "src": "Technip Energies",
+      "dst": "Cosmo Oil",
+      "relation": "contractor_for",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l42",
+      "src": "Marathon Petroleum",
+      "dst": "Neste",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l43",
+      "src": "Neste",
+      "dst": "Mahoney Environmental",
+      "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l44",
+      "src": "TotalEnergies",
+      "dst": "Santa Fe Bio",
+      "relation": "offtake_from",
+      "verdict": "correct"
+    },
+    {
+      "id": "l45",
+      "src": "LG화학",
+      "dst": "Eni",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l46",
+      "src": "Honeywell UOP",
+      "dst": "Petrobras",
+      "relation": "licensor_for",
+      "verdict": "correct"
+    },
+    {
+      "id": "l47",
+      "src": "SD Guthrie",
+      "dst": "Minamas Plantation",
+      "relation": "owns",
+      "verdict": "correct"
     }
   ],
   "evidence_names": [

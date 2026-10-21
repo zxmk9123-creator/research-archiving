@@ -24,7 +24,7 @@ const SUFFIX = /\b(s\.p\.a\.?|s\.a\.?|sdn\.? bhd\.?|bhd\.?|tbk\.?|pt\.?|plc|ltd\
 const { stripForms } = require('./corpSuffix');
 const baseKey = (n) => stripForms(n).replace(SUFFIX, ' ').replace(/[.,&®™*_`‐–-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 const NON_COMPANY = /(공항|airport|터미널|\bterminal\b|협회|association|institute|council|ministry|부처|정부|government|commission|위원회|agency|거래소|exchange|university|대학|reserve|비축유|stockpile|\bmarkets?|\bindustry|\bsector|시장)$/i;
-const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
+const AIRLINE = /(airlines?|airways|항공|\b(delta|united|american|jetblue|southwest|lufthansa|klm|iag|qantas|cathay|ryanair|easyjet|alaska|volotea|iberia|vueling|wizz|finnair|latam|westjet|emirates|etihad|singapore air|air (france|canada|china|india|new zealand))\b)/i;
 const OWNERSHIP_CUE = /(인수|소유|자회사|지분|보유|취득|합병|모회사|계열|지배|%|acqui|own|subsidiar|parent|stake|merger|merged|wholly|controlling)/i;
 // a joint venture must be stated as one (a "collaboration" or a "business combination" is not); brand ownership is not company
 // ownership; an exploration block / field / mine is an asset, not a company
@@ -39,6 +39,8 @@ const LICENSE_CUE = /(라이선스|라이센스|licen[cs]e|licen[cs]ing|기술\s
 const BUILD_CUE = /(EPC|FEED|건설|시공|설계|engineering|construct|\bbuild|수주|발주)/i;
 const PARTNER_CUE = /(협력|파트너십|partnership|collaborat|제휴|MoU|협약)/i;
 const SUPPLY_ACT = /(공급(했|하고|하는|한다|합니다|해|할|하기로|받|계약)|공급\s*계약|supply (agreement|contract|deal)|supplies|supplied|supply to|납품|delivered|인도|판매|사용하고|offtake|오프테이크)/i;
+const STAKE_CUE = /(지분|투자|인수|보유|취득|출자|stake|invest|acqui|own|equity|shares?)/i;
+const FACILITY_SUFFIX = '(공장|시설|정유소|정제소|단지|plant|refinery|facility|complex|terminal)';
 const ASSET_EVIDENCE = /((oil|gas|오일|가스|유전|광구)[^.]{0,12}(field|block|필드|블록|광구)|exploration block|탐사\s*블록)/i;
 const JV_CUE = /(합작|joint venture|\bJV\b|공동\s*(출자|투자|설립)|co-?invest|설립한)/i;
 
@@ -89,6 +91,9 @@ function fixRelation(r) {
   const ev = String(r.evidence || '');
   const pct = Number(r.share_pct) || 0;
   if (['owns', 'stake', 'jv_partner'].includes(relation) && (ASSET_NAME.test(dst) || ASSET_NAME.test(src) || ASSET_EVIDENCE.test(ev))) return null; // assets (blocks, oil & gas fields) are not companies
+  // a plant or refinery named after its site ("Martinez 공장") is an asset, not a company
+  if (['owns', 'stake', 'jv_partner'].includes(relation) && ev && [src, dst].some((n) => { const e = String(n || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return e && new RegExp(`(^|[^\\p{L}\\d])${e}\\s*${FACILITY_SUFFIX}`, 'iu').test(ev); })) return null;
+  if (relation === 'stake' && ev && !STAKE_CUE.test(ev)) relation = 'partner_with'; // naming a developer in a portfolio is not an equity stake
   if (relation === 'contractor_for' && LICENSE_CUE.test(ev) && !BUILD_CUE.test(ev)) relation = 'licensor_for';      // a licence is not construction work
   if ((relation === 'supplies' || relation === 'offtake_from') && PARTNER_CUE.test(ev) && !SUPPLY_ACT.test(ev)) relation = 'partner_with'; // a collaboration states no sale
   if (relation === 'jv_partner' && !JV_STRICT.test(ev)) return null;                    // "협력", "기업 결합" are not a joint venture
