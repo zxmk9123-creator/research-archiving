@@ -954,7 +954,8 @@
       "dst": "Euglena Co., Ltd.",
       "evidence": "두 회사는 Enilive, Euglena와 함께 말레이시아 조호르주 펭게랑에 Pengerang Biorefinery Sdn. Bhd. 합작법인을 설립했으며",
       "expect": false,
-      "note": "판정 live: Eni는 Enilive 안의 부분 문자열일 뿐"
+      "note": "판정 live: Eni는 Enilive 안의 부분 문자열일 뿐",
+      "title": "Eni and PETRONAS Sign Feasibility Agreement for Bio-Gasoline Development"
     },
     {
       "id": "e9",

@@ -73,7 +73,13 @@ function evidenceNamesBoth(evidence, src, dst, title = '') {
   const tl = String(title || '').toLowerCase();
   // whole-word for latin names: "Eni" is not found inside "Enilive"
   const inText = (h, n) => { for (let i = h.indexOf(n); i >= 0; i = h.indexOf(n, i + 1)) { if (!/[a-z0-9]/.test(h[i - 1] || '') && !/[a-z0-9]/.test(h[i + n.length] || '')) return true; } return false; };
-  const has = (n) => { const raw = String(n || '').toLowerCase().trim(); const bare = stripForms(n); return (raw && (inText(ev, raw) || inText(tl, raw))) || (bare && (inText(ev, bare) || inText(tl, bare))); };
+  const has = (n) => {
+    const raw = String(n || '').toLowerCase().trim(); const bare = stripForms(n);
+    const forms = [raw, bare].filter(Boolean);
+    if (forms.some((f) => inText(ev, f))) return true;
+    if (forms.some((f) => ev.includes(f))) return false; // only inside a longer name ("Eni" in "Enilive"): the title cannot rescue it
+    return forms.some((f) => inText(tl, f));
+  };
   return has(src) && has(dst);
 }
 
