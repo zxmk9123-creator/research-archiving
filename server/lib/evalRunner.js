@@ -33,6 +33,15 @@ const SUITES = {
     const got = canonicalizeProperNouns(c.text, c.materials || [], c.roster || []);
     return got === c.expect ? null : `got "${got}"`;
   },
+  evidence_names: (c) => {
+    const got = rel.evidenceNamesBoth(c.evidence, c.src, c.dst);
+    return got === c.expect ? null : `names both = ${got} (expected ${c.expect})`;
+  },
+  roster_aliases: (c) => {
+    const { map, baseMap } = rel.rosterAliasMap([{ name: c.company, aliases: c.aliases }]);
+    const got = map.get(c.input.toLowerCase().trim()) || baseMap.get(rel.baseKey(c.input)) || c.input;
+    return got === c.expect ? null : `canonical = ${got} (expected ${c.expect})`;
+  },
   colons: (c) => {
     const got = fixColons(c.text);
     return got === c.expect ? null : `got "${got}"`;

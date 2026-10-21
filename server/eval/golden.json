@@ -2,80 +2,969 @@
   "version": 1,
   "note": "Golden set: cases a human already judged. Every rule change is measured against it (npm test fails when a deterministic suite drops below 100%, the ops panel shows the live-data audit). Add a case whenever an error is found.",
   "relation_rules": [
-    { "id": "r1", "input": { "src": "bp", "dst": "Castrol", "relation": "owns", "evidence": "카스트롤에 대한 전략적 검토를 진행" }, "expect": { "keep": false }, "note": "a review is not ownership" },
-    { "id": "r2", "input": { "src": "Euglena", "dst": "Pengerang Biorefinery", "relation": "owns", "evidence": "합작법인 Pengerang Biorefinery를 설립한" }, "expect": { "keep": true, "relation": "stake" }, "note": "a JV partner is not the JV's parent" },
-    { "id": "r3", "input": { "src": "KLK", "dst": "PT Putra Bongan Jaya", "relation": "owns", "share_pct": 95, "evidence": "KLK가 95% 지분을 인수" }, "expect": { "keep": true, "relation": "owns" } },
-    { "id": "r4", "input": { "src": "LanzaTech", "dst": "Mibelle Group", "relation": "jv_partner", "evidence": "Mibelle Group과 협력해 폐탄소 에탄올을 전환하는 기술을 개발 중" }, "expect": { "keep": false }, "note": "collaboration is not a joint venture" },
-    { "id": "r5", "input": { "src": "DevvStream", "dst": "Southern Energy Renewables", "relation": "jv_partner", "evidence": "기업 결합 제안을 승인받았다" }, "expect": { "keep": false }, "note": "business combination is not a joint venture" },
-    { "id": "r6", "input": { "src": "Airbus", "dst": "Tereos", "relation": "jv_partner", "evidence": "Technip Energies, Airbus, Safran, Tereos가 합작 법인 Rebound를 설립" }, "expect": { "keep": true, "relation": "jv_partner" } },
-    { "id": "r7", "input": { "src": "GS칼텍스", "dst": "포스코인터내셔널", "relation": "jv_partner", "evidence": "GS칼텍스와 공동 설립한 정제법인 PT.ARC" }, "expect": { "keep": true, "relation": "jv_partner" } },
-    { "id": "r8", "input": { "src": "Sime Darby Berhad", "dst": "Sime Darby Plantation Berhad", "relation": "owns", "evidence": "Sime Darby Berhad 소유의 브랜드 사용" }, "expect": { "keep": false }, "note": "brand ownership is not company ownership" },
-    { "id": "r9", "input": { "src": "Eni", "dst": "사푸칼라 탐사 블록", "relation": "owns", "share_pct": 100, "evidence": "ENI는 사푸칼라 탐사 블록 지분 100%를 획득" }, "expect": { "keep": false }, "note": "an exploration block is an asset" },
-    { "id": "r10", "input": { "src": "TotalEnergies", "dst": "Air France-KLM", "relation": "offtake_from", "evidence": "Air France-KLM과 10년간 최대 150만 톤 오프테이크 계약" }, "expect": { "keep": true, "src": "Air France-KLM", "dst": "TotalEnergies" }, "note": "the buyer is src" },
-    { "id": "r11", "input": { "src": "bp", "dst": "사라고사 공항", "relation": "supplies", "evidence": "사라고사 공항에 SAF를 처음으로 공급" }, "expect": { "keep": false }, "note": "an airport is not a company" },
-    { "id": "r12", "input": { "src": "IATA", "dst": "Neste", "relation": "supplies", "evidence": "IATA는 Neste의 SAF를 언급" }, "expect": { "keep": false }, "note": "an institution is not a company" },
-    { "id": "r13", "input": { "src": "Eni", "dst": "Foo Energy", "relation": "owns", "share_pct": 30, "evidence": "30% 지분 보유" }, "expect": { "keep": true, "relation": "stake" } },
-    { "id": "r14", "input": { "src": "Neste", "dst": "American Airlines", "relation": "supplies", "evidence": "아메리칸 항공 등이 Neste의 SAF를 사용하고 있다" }, "expect": { "keep": true, "relation": "supplies" } },
-    { "id": "r15", "input": { "src": "Volotea", "dst": "TotalEnergies", "relation": "offtake_from", "evidence": "Volotea와 공급 계약을 맺고 있습니다" }, "expect": { "keep": true, "src": "Volotea", "dst": "TotalEnergies" } },
-    { "id": "r16", "input": { "src": "Golden Agri-Resources", "dst": "여러 항공사들", "relation": "supplies", "evidence": "여러 항공사들에 공급" }, "expect": { "keep": false }, "note": "a collective label is not a company" },
-    { "id": "r17", "input": { "src": "Restaurant Technologies", "dst": "Chevron", "relation": "supplies", "evidence": "폐식용유를 수집해 Chevron 등의 처리 시설로 전달" }, "expect": { "keep": true, "relation": "supplies" } },
-    { "id": "r18", "input": { "src": "Valero, Darling Ingredients", "dst": "Diamond Green Diesel", "relation": "owns", "evidence": "Valero와 Darling이 합작 지분을 보유" }, "expect": { "keep": false }, "note": "several companies in one label" },
-    { "id": "r19", "input": { "src": "Calumet, Inc", "dst": "Montana Renewables", "relation": "owns", "evidence": "Calumet가 Montana Renewables를 소유" }, "expect": { "keep": true, "relation": "owns" }, "note": "\"Foo, Inc\" is one company" }
+    {
+      "id": "r1",
+      "input": {
+        "src": "bp",
+        "dst": "Castrol",
+        "relation": "owns",
+        "evidence": "카스트롤에 대한 전략적 검토를 진행"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "a review is not ownership"
+    },
+    {
+      "id": "r2",
+      "input": {
+        "src": "Euglena",
+        "dst": "Pengerang Biorefinery",
+        "relation": "owns",
+        "evidence": "합작법인 Pengerang Biorefinery를 설립한"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "stake"
+      },
+      "note": "a JV partner is not the JV's parent"
+    },
+    {
+      "id": "r3",
+      "input": {
+        "src": "KLK",
+        "dst": "PT Putra Bongan Jaya",
+        "relation": "owns",
+        "share_pct": 95,
+        "evidence": "KLK가 95% 지분을 인수"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "owns"
+      }
+    },
+    {
+      "id": "r4",
+      "input": {
+        "src": "LanzaTech",
+        "dst": "Mibelle Group",
+        "relation": "jv_partner",
+        "evidence": "Mibelle Group과 협력해 폐탄소 에탄올을 전환하는 기술을 개발 중"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "collaboration is not a joint venture"
+    },
+    {
+      "id": "r5",
+      "input": {
+        "src": "DevvStream",
+        "dst": "Southern Energy Renewables",
+        "relation": "jv_partner",
+        "evidence": "기업 결합 제안을 승인받았다"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "business combination is not a joint venture"
+    },
+    {
+      "id": "r6",
+      "input": {
+        "src": "Airbus",
+        "dst": "Tereos",
+        "relation": "jv_partner",
+        "evidence": "Technip Energies, Airbus, Safran, Tereos가 합작 법인 Rebound를 설립"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "jv_partner"
+      }
+    },
+    {
+      "id": "r7",
+      "input": {
+        "src": "GS칼텍스",
+        "dst": "포스코인터내셔널",
+        "relation": "jv_partner",
+        "evidence": "GS칼텍스와 공동 설립한 정제법인 PT.ARC"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "jv_partner"
+      }
+    },
+    {
+      "id": "r8",
+      "input": {
+        "src": "Sime Darby Berhad",
+        "dst": "Sime Darby Plantation Berhad",
+        "relation": "owns",
+        "evidence": "Sime Darby Berhad 소유의 브랜드 사용"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "brand ownership is not company ownership"
+    },
+    {
+      "id": "r9",
+      "input": {
+        "src": "Eni",
+        "dst": "사푸칼라 탐사 블록",
+        "relation": "owns",
+        "share_pct": 100,
+        "evidence": "ENI는 사푸칼라 탐사 블록 지분 100%를 획득"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "an exploration block is an asset"
+    },
+    {
+      "id": "r10",
+      "input": {
+        "src": "TotalEnergies",
+        "dst": "Air France-KLM",
+        "relation": "offtake_from",
+        "evidence": "Air France-KLM과 10년간 최대 150만 톤 오프테이크 계약"
+      },
+      "expect": {
+        "keep": true,
+        "src": "Air France-KLM",
+        "dst": "TotalEnergies"
+      },
+      "note": "the buyer is src"
+    },
+    {
+      "id": "r11",
+      "input": {
+        "src": "bp",
+        "dst": "사라고사 공항",
+        "relation": "supplies",
+        "evidence": "사라고사 공항에 SAF를 처음으로 공급"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "an airport is not a company"
+    },
+    {
+      "id": "r12",
+      "input": {
+        "src": "IATA",
+        "dst": "Neste",
+        "relation": "supplies",
+        "evidence": "IATA는 Neste의 SAF를 언급"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "an institution is not a company"
+    },
+    {
+      "id": "r13",
+      "input": {
+        "src": "Eni",
+        "dst": "Foo Energy",
+        "relation": "owns",
+        "share_pct": 30,
+        "evidence": "30% 지분 보유"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "stake"
+      }
+    },
+    {
+      "id": "r14",
+      "input": {
+        "src": "Neste",
+        "dst": "American Airlines",
+        "relation": "supplies",
+        "evidence": "아메리칸 항공 등이 Neste의 SAF를 사용하고 있다"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "supplies"
+      }
+    },
+    {
+      "id": "r15",
+      "input": {
+        "src": "Volotea",
+        "dst": "TotalEnergies",
+        "relation": "offtake_from",
+        "evidence": "Volotea와 공급 계약을 맺고 있습니다"
+      },
+      "expect": {
+        "keep": true,
+        "src": "Volotea",
+        "dst": "TotalEnergies"
+      }
+    },
+    {
+      "id": "r16",
+      "input": {
+        "src": "Golden Agri-Resources",
+        "dst": "여러 항공사들",
+        "relation": "supplies",
+        "evidence": "여러 항공사들에 공급"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "a collective label is not a company"
+    },
+    {
+      "id": "r17",
+      "input": {
+        "src": "Restaurant Technologies",
+        "dst": "Chevron",
+        "relation": "supplies",
+        "evidence": "폐식용유를 수집해 Chevron 등의 처리 시설로 전달"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "supplies"
+      }
+    },
+    {
+      "id": "r18",
+      "input": {
+        "src": "Valero, Darling Ingredients",
+        "dst": "Diamond Green Diesel",
+        "relation": "owns",
+        "evidence": "Valero와 Darling이 합작 지분을 보유"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "several companies in one label"
+    },
+    {
+      "id": "r19",
+      "input": {
+        "src": "Calumet, Inc",
+        "dst": "Montana Renewables",
+        "relation": "owns",
+        "evidence": "Calumet가 Montana Renewables를 소유"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "owns"
+      },
+      "note": "\"Foo, Inc\" is one company"
+    },
+    {
+      "id": "r20",
+      "input": {
+        "src": "Topsoe",
+        "dst": "Bharat Petroleum Corp. Ltd",
+        "relation": "contractor_for",
+        "evidence": "Topsoe는 Bharat Petroleum Corp. Ltd.와 라이선스 계약을 체결하여 케로신 수소처리 공정 기술을 제공한다"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "licensor_for"
+      },
+      "note": "판정 #1/#29: 라이선스는 하청·시공이 아님"
+    },
+    {
+      "id": "r21",
+      "input": {
+        "src": "Trafigura",
+        "dst": "U.S. Strategic Petroleum Reserve",
+        "relation": "offtake_from",
+        "evidence": "1억 3,300만 배럴은 Shell, Vitol, Trafigura와의 스왑 계약 형태로"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "판정 #4/#14: 정부 비축유는 회사가 아님"
+    },
+    {
+      "id": "r22",
+      "input": {
+        "src": "First Resources",
+        "dst": "Taiwan Palm Oil Market",
+        "relation": "supplies",
+        "evidence": "제과·제빵용 프리미엄 분획유 공급을 넓히고 있다"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "판정 #22: 시장은 회사가 아님"
+    },
+    {
+      "id": "r23",
+      "input": {
+        "src": "BPCL",
+        "dst": "SEAP-I",
+        "relation": "stake",
+        "evidence": "BPCL이 브라질 SEAP-I 오일 및 가스 필드 개발에 필요한 지분 투자금"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "판정 #15: 유전(자산)은 회사가 아님"
+    },
+    {
+      "id": "r24",
+      "input": {
+        "src": "Neste",
+        "dst": "ATPI",
+        "relation": "supplies",
+        "evidence": "SAF 공급사인 Neste와 기업 여행 관리사인 ATPI의 협력"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "partner_with"
+      },
+      "note": "판정 #28: 협력은 공급이 아님"
+    },
+    {
+      "id": "r25",
+      "input": {
+        "src": "American Airlines",
+        "dst": "Valero",
+        "relation": "offtake_from",
+        "evidence": "American Airlines는 Google, Valero와 협력하여 3년간 3,500만 갤런의 SAF를 구매하는 계약을 체결했습니다"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "partner_with"
+      },
+      "note": "판정 #30: 판매자가 명시되지 않은 협력"
+    },
+    {
+      "id": "r26",
+      "input": {
+        "src": "DHL Express",
+        "dst": "Phillips 66",
+        "relation": "offtake_from",
+        "evidence": "DHL Express는 Phillips 66와 3년간 240,000톤 이상의 지속가능항공유를 인도받는 다년 계약을 체결"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "offtake_from"
+      },
+      "note": "판정 #16 O"
+    }
   ],
   "merge_pairs": [
-    { "id": "m1", "a": "Chevron", "b": "셰브론", "same": true },
-    { "id": "m2", "a": "Chevron", "b": "Chevron Corp.", "same": true },
-    { "id": "m3", "a": "Chevron", "b": "Chevron Renewable Energy Group", "same": false, "note": "a subsidiary is a different company" },
-    { "id": "m4", "a": "BP plc", "b": "Bharat Petroleum Corp. Ltd", "same": false, "opts": { "acronym": false } },
-    { "id": "m5", "a": "BP plc", "b": "Archaea Energy", "same": false },
-    { "id": "m6", "a": "BP plc", "b": "bp Castellón", "same": false, "note": "a site" },
-    { "id": "m7", "a": "Mitsui", "b": "Mitsui Chemicals", "same": false },
-    { "id": "m8", "a": "Diamond Green Diesel", "b": "Darling Ingredients", "same": false, "note": "a partner" },
-    { "id": "m9", "a": "Golden Agri-Resources", "b": "Golden Agri Resources", "same": true },
-    { "id": "m10", "a": "Golden Agri-Resources", "b": "Golden Agri", "same": true },
-    { "id": "m11", "a": "LanzaJet", "b": "LanzaJet Inc.", "same": true },
-    { "id": "m12", "a": "Eni", "b": "Eni S.p.A.", "same": true },
-    { "id": "m13", "a": "Eni", "b": "Enilive", "same": false },
-    { "id": "m14", "a": "Neste", "b": "Neste Oyj", "same": true },
-    { "id": "m15", "a": "Diamond Green Diesel", "b": "DGD", "same": true },
-    { "id": "m16", "a": "Carbon Neutral Fuels", "b": "CNF", "same": true },
-    { "id": "m17", "a": "Burger King", "b": "버거킹", "same": true },
-    { "id": "m18", "a": "Phelan Green Group", "b": "P&G", "same": false, "opts": { "acronym": false } },
-    { "id": "m19", "a": "Air bp", "b": "bp", "same": false },
-    { "id": "m20", "a": "JetBlue", "b": "Jet Blue", "same": true, "note": "spacing variant" }
+    {
+      "id": "m1",
+      "a": "Chevron",
+      "b": "셰브론",
+      "same": true
+    },
+    {
+      "id": "m2",
+      "a": "Chevron",
+      "b": "Chevron Corp.",
+      "same": true
+    },
+    {
+      "id": "m3",
+      "a": "Chevron",
+      "b": "Chevron Renewable Energy Group",
+      "same": false,
+      "note": "a subsidiary is a different company"
+    },
+    {
+      "id": "m4",
+      "a": "BP plc",
+      "b": "Bharat Petroleum Corp. Ltd",
+      "same": false,
+      "opts": {
+        "acronym": false
+      }
+    },
+    {
+      "id": "m5",
+      "a": "BP plc",
+      "b": "Archaea Energy",
+      "same": false
+    },
+    {
+      "id": "m6",
+      "a": "BP plc",
+      "b": "bp Castellón",
+      "same": false,
+      "note": "a site"
+    },
+    {
+      "id": "m7",
+      "a": "Mitsui",
+      "b": "Mitsui Chemicals",
+      "same": false
+    },
+    {
+      "id": "m8",
+      "a": "Diamond Green Diesel",
+      "b": "Darling Ingredients",
+      "same": false,
+      "note": "a partner"
+    },
+    {
+      "id": "m9",
+      "a": "Golden Agri-Resources",
+      "b": "Golden Agri Resources",
+      "same": true
+    },
+    {
+      "id": "m10",
+      "a": "Golden Agri-Resources",
+      "b": "Golden Agri",
+      "same": true
+    },
+    {
+      "id": "m11",
+      "a": "LanzaJet",
+      "b": "LanzaJet Inc.",
+      "same": true
+    },
+    {
+      "id": "m12",
+      "a": "Eni",
+      "b": "Eni S.p.A.",
+      "same": true
+    },
+    {
+      "id": "m13",
+      "a": "Eni",
+      "b": "Enilive",
+      "same": false
+    },
+    {
+      "id": "m14",
+      "a": "Neste",
+      "b": "Neste Oyj",
+      "same": true
+    },
+    {
+      "id": "m15",
+      "a": "Diamond Green Diesel",
+      "b": "DGD",
+      "same": true
+    },
+    {
+      "id": "m16",
+      "a": "Carbon Neutral Fuels",
+      "b": "CNF",
+      "same": true
+    },
+    {
+      "id": "m17",
+      "a": "Burger King",
+      "b": "버거킹",
+      "same": true
+    },
+    {
+      "id": "m18",
+      "a": "Phelan Green Group",
+      "b": "P&G",
+      "same": false,
+      "opts": {
+        "acronym": false
+      }
+    },
+    {
+      "id": "m19",
+      "a": "Air bp",
+      "b": "bp",
+      "same": false
+    },
+    {
+      "id": "m20",
+      "a": "JetBlue",
+      "b": "Jet Blue",
+      "same": true,
+      "note": "spacing variant"
+    }
   ],
   "roles": [
-    { "id": "ro1", "ai": "finance", "ctx": { "name": "포스코인터내셔널" }, "expect": "trader" },
-    { "id": "ro2", "ai": "finance", "ctx": { "name": "Mitsubishi" }, "expect": "trader" },
-    { "id": "ro3", "ai": "finance", "ctx": { "name": "Idemitsu Kosan", "factRoles": { "producer": 4 } }, "expect": "producer" },
-    { "id": "ro4", "ai": "finance", "ctx": { "name": "Bain Capital" }, "expect": "finance" },
-    { "id": "ro5", "ai": "emitter", "ctx": { "name": "Unilever", "evidence": ["Unilever buys palm oil"] }, "expect": "consumer" },
-    { "id": "ro6", "ai": "emitter", "ctx": { "name": "Sheetz", "evidence": ["Sheetz는 튀김기 등에서 발생하는 폐식용유를 RT에 판매"] }, "expect": "emitter" },
-    { "id": "ro7", "ai": "supplier", "ctx": { "name": "Air bp", "evidence": ["jet fuel to airports"] }, "expect": "trader" },
-    { "id": "ro8", "ai": "supplier", "ctx": { "name": "FatHopes Energy", "evidence": ["UCO 수거 전문 기업"] }, "expect": "supplier" },
-    { "id": "ro9", "ai": "supplier", "ctx": { "name": "Musim Mas", "evidence": ["palm oil refinery"] }, "expect": "producer" },
-    { "id": "ro10", "ai": "other", "ctx": { "name": "Metro Atlanta Chamber", "factRoles": { "producer": 3 } }, "expect": "other" }
+    {
+      "id": "ro1",
+      "ai": "finance",
+      "ctx": {
+        "name": "포스코인터내셔널"
+      },
+      "expect": "trader"
+    },
+    {
+      "id": "ro2",
+      "ai": "finance",
+      "ctx": {
+        "name": "Mitsubishi"
+      },
+      "expect": "trader"
+    },
+    {
+      "id": "ro3",
+      "ai": "finance",
+      "ctx": {
+        "name": "Idemitsu Kosan",
+        "factRoles": {
+          "producer": 4
+        }
+      },
+      "expect": "producer"
+    },
+    {
+      "id": "ro4",
+      "ai": "finance",
+      "ctx": {
+        "name": "Bain Capital"
+      },
+      "expect": "finance"
+    },
+    {
+      "id": "ro5",
+      "ai": "emitter",
+      "ctx": {
+        "name": "Unilever",
+        "evidence": [
+          "Unilever buys palm oil"
+        ]
+      },
+      "expect": "consumer"
+    },
+    {
+      "id": "ro6",
+      "ai": "emitter",
+      "ctx": {
+        "name": "Sheetz",
+        "evidence": [
+          "Sheetz는 튀김기 등에서 발생하는 폐식용유를 RT에 판매"
+        ]
+      },
+      "expect": "emitter"
+    },
+    {
+      "id": "ro7",
+      "ai": "supplier",
+      "ctx": {
+        "name": "Air bp",
+        "evidence": [
+          "jet fuel to airports"
+        ]
+      },
+      "expect": "trader"
+    },
+    {
+      "id": "ro8",
+      "ai": "supplier",
+      "ctx": {
+        "name": "FatHopes Energy",
+        "evidence": [
+          "UCO 수거 전문 기업"
+        ]
+      },
+      "expect": "supplier"
+    },
+    {
+      "id": "ro9",
+      "ai": "supplier",
+      "ctx": {
+        "name": "Musim Mas",
+        "evidence": [
+          "palm oil refinery"
+        ]
+      },
+      "expect": "producer"
+    },
+    {
+      "id": "ro10",
+      "ai": "other",
+      "ctx": {
+        "name": "Metro Atlanta Chamber",
+        "factRoles": {
+          "producer": 3
+        }
+      },
+      "expect": "other"
+    }
   ],
   "typos": [
-    { "id": "t1", "text": "Capex는 20억 달러이고 CAPEX 규모는 크다.", "expect": "Capex는 20억 달러이고 CAPEX 규모는 크다.", "materials": ["GS Caltex announced a new unit"], "roster": [{ "name": "GS칼텍스", "rawNames": ["GS칼텍스", "GS Caltex", "Caltex"] }] },
-    { "id": "t2", "text": "Ecoseas는 Neste와 협력한다", "expect": "EcoCeres는 Neste와 협력한다", "materials": ["EcoCeres builds a plant with Neste"], "roster": [] },
-    { "id": "t3", "text": "XCF Global Incorporated signed.", "expect": "XCF Global Incorporated signed.", "materials": ["Incorporate Inventory Limiter"], "roster": [] }
+    {
+      "id": "t1",
+      "text": "Capex는 20억 달러이고 CAPEX 규모는 크다.",
+      "expect": "Capex는 20억 달러이고 CAPEX 규모는 크다.",
+      "materials": [
+        "GS Caltex announced a new unit"
+      ],
+      "roster": [
+        {
+          "name": "GS칼텍스",
+          "rawNames": [
+            "GS칼텍스",
+            "GS Caltex",
+            "Caltex"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t2",
+      "text": "Ecoseas는 Neste와 협력한다",
+      "expect": "EcoCeres는 Neste와 협력한다",
+      "materials": [
+        "EcoCeres builds a plant with Neste"
+      ],
+      "roster": []
+    },
+    {
+      "id": "t3",
+      "text": "XCF Global Incorporated signed.",
+      "expect": "XCF Global Incorporated signed.",
+      "materials": [
+        "Incorporate Inventory Limiter"
+      ],
+      "roster": []
+    }
   ],
   "colons": [
-    { "id": "c1", "text": "- **합작 법인 및 규모**; LG화학은 합작했다.", "expect": "- **합작 법인 및 규모**: LG화학은 합작했다." },
-    { "id": "c2", "text": "문장 안의 세미콜론; 그대로 둔다", "expect": "문장 안의 세미콜론; 그대로 둔다" }
+    {
+      "id": "c1",
+      "text": "- **합작 법인 및 규모**; LG화학은 합작했다.",
+      "expect": "- **합작 법인 및 규모**: LG화학은 합작했다."
+    },
+    {
+      "id": "c2",
+      "text": "문장 안의 세미콜론; 그대로 둔다",
+      "expect": "문장 안의 세미콜론; 그대로 둔다"
+    }
   ],
   "live_relations": [
-    { "id": "l1", "src": "포스코인터내셔널", "dst": "ARC", "relation": "owns", "verdict": "correct" },
-    { "id": "l2", "src": "Neste", "dst": "CAFHI", "relation": "stake", "verdict": "correct" },
-    { "id": "l3", "src": "Airbus", "dst": "Tereos", "relation": "jv_partner", "verdict": "correct" },
-    { "id": "l4", "src": "Diamond Green Diesel", "dst": "JetBlue", "relation": "supplies", "verdict": "correct" },
-    { "id": "l5", "src": "LanzaTech", "dst": "Mibelle Group", "relation": "jv_partner", "verdict": "wrong" },
-    { "id": "l6", "src": "DevvStream", "dst": "Southern Energy Renewables", "relation": "jv_partner", "verdict": "wrong" },
-    { "id": "l7", "src": "Sime Darby Berhad", "dst": "Sime Darby Plantation", "relation": "owns", "verdict": "wrong" },
-    { "id": "l8", "src": "Eni", "dst": "사푸칼라 탐사 블록", "relation": "owns", "verdict": "wrong" },
-    { "id": "l9", "src": "bp", "dst": "Castrol", "relation": "owns", "verdict": "wrong" },
-    { "id": "l10", "src": "PZ Cussons", "dst": "Wilmar", "relation": "jv_partner", "verdict": "ended" },
-    { "id": "l11", "src": "Wilmar", "dst": "코린도", "relation": "offtake_from", "verdict": "ended" }
+    {
+      "id": "l1",
+      "src": "포스코인터내셔널",
+      "dst": "ARC",
+      "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l2",
+      "src": "Neste",
+      "dst": "CAFHI",
+      "relation": "stake",
+      "verdict": "correct"
+    },
+    {
+      "id": "l3",
+      "src": "Airbus",
+      "dst": "Tereos",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l4",
+      "src": "Diamond Green Diesel",
+      "dst": "JetBlue",
+      "relation": "supplies",
+      "verdict": "correct"
+    },
+    {
+      "id": "l5",
+      "src": "LanzaTech",
+      "dst": "Mibelle Group",
+      "relation": "jv_partner",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l6",
+      "src": "DevvStream",
+      "dst": "Southern Energy Renewables",
+      "relation": "jv_partner",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l7",
+      "src": "Sime Darby Berhad",
+      "dst": "Sime Darby Plantation",
+      "relation": "owns",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l8",
+      "src": "Eni",
+      "dst": "사푸칼라 탐사 블록",
+      "relation": "owns",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l9",
+      "src": "bp",
+      "dst": "Castrol",
+      "relation": "owns",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l10",
+      "src": "PZ Cussons",
+      "dst": "Wilmar",
+      "relation": "jv_partner",
+      "verdict": "ended"
+    },
+    {
+      "id": "l11",
+      "src": "Wilmar",
+      "dst": "코린도",
+      "relation": "offtake_from",
+      "verdict": "ended"
+    },
+    {
+      "id": "l12",
+      "src": "Mitsubishi",
+      "dst": "Par Pacific",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l13",
+      "src": "Adani Group",
+      "dst": "Wilmar",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l14",
+      "src": "Galp",
+      "dst": "Mitsui",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l15",
+      "src": "Infinium",
+      "dst": "SABA",
+      "relation": "supplies",
+      "verdict": "correct"
+    },
+    {
+      "id": "l16",
+      "src": "TotalEnergies",
+      "dst": "SARIA",
+      "relation": "stake",
+      "verdict": "correct"
+    },
+    {
+      "id": "l17",
+      "src": "Neste",
+      "dst": "UPS",
+      "relation": "supplies",
+      "verdict": "correct"
+    },
+    {
+      "id": "l18",
+      "src": "DHL Express",
+      "dst": "Phillips 66",
+      "relation": "offtake_from",
+      "verdict": "correct"
+    },
+    {
+      "id": "l19",
+      "src": "Bain & Company",
+      "dst": "Infinium Energy",
+      "relation": "offtake_from",
+      "verdict": "correct"
+    },
+    {
+      "id": "l20",
+      "src": "SD Guthrie",
+      "dst": "New Britain Palm Oil",
+      "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l21",
+      "src": "Airbus",
+      "dst": "SAF 금융 펀드",
+      "relation": "stake",
+      "verdict": "correct"
+    },
+    {
+      "id": "l22",
+      "src": "ADM",
+      "dst": "Planters Cotton Oil Mill",
+      "relation": "jv_partner",
+      "verdict": "correct"
+    },
+    {
+      "id": "l23",
+      "src": "삼성엔지니어링",
+      "dst": "사라왁 쉘",
+      "relation": "contractor_for",
+      "verdict": "correct"
+    },
+    {
+      "id": "l24",
+      "src": "Fluor",
+      "dst": "SGP BioEnergy",
+      "relation": "contractor_for",
+      "verdict": "correct"
+    },
+    {
+      "id": "l25",
+      "src": "Phillips 66",
+      "dst": "United Airlines",
+      "relation": "supplies",
+      "verdict": "correct"
+    },
+    {
+      "id": "l26",
+      "src": "Topsoe",
+      "dst": "Bharat Petroleum Corp. Ltd",
+      "relation": "contractor_for",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l27",
+      "src": "Trafigura",
+      "dst": "U.S. Strategic Petroleum Reserve",
+      "relation": "offtake_from",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l28",
+      "src": "Trafigura",
+      "dst": "U.S. Strategic Petroleum Reserve",
+      "relation": "contractor_for",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l29",
+      "src": "Eni",
+      "dst": "Euglena",
+      "relation": "jv_partner",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l30",
+      "src": "Bain Capital",
+      "dst": "에코세레스",
+      "relation": "owns",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l31",
+      "src": "BPCL",
+      "dst": "SEAP-I",
+      "relation": "stake",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l32",
+      "src": "Ngo Chew Hong Edible Oil",
+      "dst": "Rafinole",
+      "relation": "supplies",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l33",
+      "src": "First Resources",
+      "dst": "Taiwan Palm Oil Market",
+      "relation": "supplies",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l34",
+      "src": "Neste",
+      "dst": "ATPI",
+      "relation": "supplies",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l35",
+      "src": "톱소이",
+      "dst": "Bharat Petroleum Corp. Ltd",
+      "relation": "contractor_for",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l36",
+      "src": "American Airlines",
+      "dst": "Valero",
+      "relation": "offtake_from",
+      "verdict": "wrong"
+    }
+  ],
+  "evidence_names": [
+    {
+      "id": "e1",
+      "src": "Ngo Chew Hong Edible Oil",
+      "dst": "Rafinole",
+      "evidence": "싱가포르의 Ngo Chew Hong Edible Oil은 팜유 기반 조리유와 제과제빵용 지방을 공급하며",
+      "expect": false,
+      "note": "판정 #20: 같은 문단의 다른 회사"
+    },
+    {
+      "id": "e2",
+      "src": "Bain Capital",
+      "dst": "에코세레스",
+      "evidence": "",
+      "expect": false,
+      "note": "판정 #9: 근거 없음"
+    },
+    {
+      "id": "e3",
+      "src": "BPCL",
+      "dst": "SEAP-I",
+      "evidence": "BPCL이 브라질 SEAP-I 오일 및 가스 필드 개발",
+      "expect": true
+    },
+    {
+      "id": "e4",
+      "src": "Mitsubishi",
+      "dst": "Par Pacific",
+      "evidence": "Mitsubishi와 ENEOS가 하와이에서 Par Pacific이 추진하는 재생 연료 합작 투자에 참여",
+      "expect": true
+    },
+    {
+      "id": "e5",
+      "src": "LanzaJet Inc.",
+      "dst": "Freedom Pines Fuels",
+      "evidence": "LanzaJet는 Freedom Pines Fuels를 운영",
+      "expect": true,
+      "note": "법인 약명이 달라도 같은 이름"
+    }
+  ],
+  "roster_aliases": [
+    {
+      "id": "a1",
+      "company": "Eni S.p.A.",
+      "aliases": [
+        "Enilive",
+        "Eni S.p.A",
+        "에니"
+      ],
+      "input": "Enilive S.p.A",
+      "expect": "Enilive S.p.A",
+      "note": "판정 #6: Enilive는 Eni의 별칭이 아님(자회사)"
+    },
+    {
+      "id": "a2",
+      "company": "Eni S.p.A.",
+      "aliases": [
+        "Enilive",
+        "Eni S.p.A",
+        "에니"
+      ],
+      "input": "에니",
+      "expect": "Eni S.p.A."
+    },
+    {
+      "id": "a3",
+      "company": "Mewah",
+      "aliases": [
+        "Mewah International",
+        "Mewah Group"
+      ],
+      "input": "Mewah International Inc.",
+      "expect": "Mewah"
+    }
   ]
 }

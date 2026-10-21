@@ -1323,3 +1323,7 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   result JSONB NOT NULL
 );
+
+-- Two more relation types: a technology licence (licensor_for) and a plain collaboration that is not a joint venture (partner_with).
+ALTER TABLE company_relations DROP CONSTRAINT IF EXISTS company_relations_relation_check;
+ALTER TABLE company_relations ADD CONSTRAINT company_relations_relation_check CHECK (relation IN ('owns','stake','jv_partner','supplies','contractor_for','offtake_from','licensor_for','partner_with'));

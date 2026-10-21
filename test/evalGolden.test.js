@@ -6,7 +6,7 @@ const ev = require('../server/lib/evalRunner');
 test('golden set: every deterministic suite passes', () => {
   const suites = ev.runDeterministic();
   const names = Object.keys(suites);
-  assert.deepEqual(names.sort(), ['colons', 'merge_pairs', 'relation_rules', 'roles', 'typos']);
+  assert.deepEqual(names.sort(), ['colons', 'evidence_names', 'merge_pairs', 'relation_rules', 'roles', 'roster_aliases', 'typos']);
   const problems = Object.entries(suites).flatMap(([name, s]) => s.failures.map((f) => `${name}/${f.id}: ${f.problem}`));
   assert.deepEqual(problems, [], `golden-set regressions:\n${problems.join('\n')}`);
   for (const s of Object.values(suites)) assert.ok(s.total > 0);
@@ -17,11 +17,11 @@ test('golden set: structure is sound (unique ids, every live case has a verdict)
   const ids = Object.entries(g).filter(([, v]) => Array.isArray(v)).flatMap(([, v]) => v.map((c) => c.id));
   assert.equal(new Set(ids).size, ids.length);
   for (const c of g.live_relations) assert.ok(['correct', 'wrong', 'ended'].includes(c.verdict));
-  assert.ok(ids.length >= 60);
+  assert.ok(ids.length >= 100);
 });
 
 test('a broken rule is detected: a deliberately wrong expectation is reported as a failure', () => {
-  const suites = ev.runDeterministic({ relation_rules: [{ id: 'x', input: { src: 'bp', dst: 'Castrol', relation: 'owns', evidence: '카스트롤에 대한 전략적 검토' }, expect: { keep: true } }], merge_pairs: [], roles: [], typos: [], colons: [] });
+  const suites = ev.runDeterministic({ relation_rules: [{ id: 'x', input: { src: 'bp', dst: 'Castrol', relation: 'owns', evidence: '카스트롤에 대한 전략적 검토' }, expect: { keep: true } }], merge_pairs: [], roles: [], typos: [], colons: [], evidence_names: [], roster_aliases: [] });
   assert.equal(suites.relation_rules.passed, 0);
   assert.equal(suites.relation_rules.failures[0].id, 'x');
 });

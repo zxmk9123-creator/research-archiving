@@ -11,10 +11,10 @@ test('verifyRelations keeps only rows whose both names occur in the text, maps t
   const text = 'LG Chem and Eni formed LG Eni BioRefining. Eni owns 51% of Enilive. Hyundai E&C builds the plant for LG Eni BioRefining.';
   const canon = (n) => ({ 'lg chem': 'LG화학' }[n.toLowerCase()] || n);
   const out = rel.verifyRelations([
-    { src: 'LG Chem', dst: 'Eni', relation: 'jv_partner', evidence: '합작 법인 formed' },
-    { src: 'Eni', dst: 'LG Chem', relation: 'jv_partner', evidence: '합작 법인 formed' },
-    { src: 'Eni', dst: 'Enilive', relation: 'owns', share_pct: 51, evidence: 'owns 51%' },
-    { src: 'Hyundai E&C', dst: 'LG Eni BioRefining', relation: 'contractor_for', evidence: 'builds' },
+    { src: 'LG Chem', dst: 'Eni', relation: 'jv_partner', evidence: 'LG Chem and Eni 합작 법인 formed' },
+    { src: 'Eni', dst: 'LG Chem', relation: 'jv_partner', evidence: 'Eni and LG Chem 합작 법인 formed' },
+    { src: 'Eni', dst: 'Enilive', relation: 'owns', share_pct: 51, evidence: 'Eni owns 51% of Enilive' },
+    { src: 'Hyundai E&C', dst: 'LG Eni BioRefining', relation: 'contractor_for', evidence: 'Hyundai E&C builds the plant for LG Eni BioRefining' },
     { src: 'Shell', dst: 'Eni', relation: 'owns' },             // Shell not in the text
     { src: 'Eni', dst: 'Enilive', relation: 'friend_of' },       // unknown relation
     { src: 'Eni', dst: 'eni', relation: 'owns' },                // self
@@ -76,10 +76,10 @@ test('fixRelation: jv_partner needs a stated joint venture, brand ownership is n
 
 test('relation lifecycle: "ended" is accepted only when the article has ending wording; ended relations are history in the prompt, never current', () => {
   const text = 'Wilmar이 PZ Cussons와의 팜유 합작법인 지분을 7,000만 달러에 전량 인수했습니다.';
-  const out = rel.verifyRelations([{ src: 'Wilmar', dst: 'PZ Cussons', relation: 'jv_partner', evidence: 'PZ Cussons와의 팜유 합작법인', status: 'ended', ended_evidence: '지분을 전량 인수' }], text);
+  const out = rel.verifyRelations([{ src: 'Wilmar', dst: 'PZ Cussons', relation: 'jv_partner', evidence: 'Wilmar와 PZ Cussons의 팜유 합작법인', status: 'ended', ended_evidence: '지분을 전량 인수' }], text);
   assert.equal(out[0].status, 'ended');
   assert.match(out[0].ended_note, /전량 인수/);
-  const noCue = rel.verifyRelations([{ src: 'Airbus', dst: 'Tereos', relation: 'jv_partner', evidence: '합작 법인 Rebound를 설립', status: 'ended' }], 'Airbus와 Tereos가 합작 법인 Rebound를 설립했다. Airbus Tereos');
+  const noCue = rel.verifyRelations([{ src: 'Airbus', dst: 'Tereos', relation: 'jv_partner', evidence: 'Airbus와 Tereos가 합작 법인 Rebound를 설립', status: 'ended' }], 'Airbus와 Tereos가 합작 법인 Rebound를 설립했다. Airbus Tereos');
   assert.equal(noCue[0].status, 'active');
   const block = rel.promptBlock([{ src: 'Eni', dst: 'Enilive', relation: 'owns', share_pct: 51, status: 'active' }, { src: 'Wilmar', dst: 'PZ Cussons', relation: 'jv_partner', status: 'ended', ended_note: '지분 전량 인수' }]);
   assert.match(block, /Eni는 Enilive의 모회사/);
