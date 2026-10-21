@@ -43,6 +43,12 @@ router.post('/reextract-all', requireAuth, async (req, res) => {
   res.json({ queued: r.rowCount, next: 'POST /api/relations/backfill' });
 });
 
+// Items marked 'done' whose rows were all removed (a cleanup that dropped too much): read them again.
+router.post('/requeue-orphans', requireAuth, async (req, res) => {
+  const r = await pool.query("UPDATE items SET relations_status = NULL WHERE relations_status = 'done' AND id NOT IN (SELECT item_id FROM company_relations WHERE item_id IS NOT NULL)");
+  res.json({ queued: r.rowCount, next: 'POST /api/relations/backfill' });
+});
+
 router.post('/backfill', requireAuth, async (req, res) => res.json(await rel.runBackfill({ limit: req.body && req.body.limit })));
 
 // Manual curation: add / remove a row. Manual rows are never overwritten by the AI pass.
