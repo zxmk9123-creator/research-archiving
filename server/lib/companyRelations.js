@@ -93,7 +93,16 @@ function fixRelation(r) {
   if (['owns', 'stake', 'jv_partner'].includes(relation) && (ASSET_NAME.test(dst) || ASSET_NAME.test(src) || ASSET_EVIDENCE.test(ev))) return null; // assets (blocks, oil & gas fields) are not companies
   // a plant or refinery named after its site ("Martinez 공장") is an asset, not a company
   if (['owns', 'stake', 'jv_partner'].includes(relation) && ev && [src, dst].some((n) => { const e = String(n || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return e && new RegExp(`(^|[^\\p{L}\\d])${e}\\s*${FACILITY_SUFFIX}`, 'iu').test(ev); })) return null;
+  // "Martinez 공장" as a stake / JV target is a plant, not a company (owning a refinery stays an ownership)
+  if (['stake', 'jv_partner'].includes(relation) && (new RegExp(`\\s${FACILITY_SUFFIX}$`, 'i').test(dst) || new RegExp(`\\s${FACILITY_SUFFIX}$`, 'i').test(src))) return null;
+  const nameRe = (n) => String(n || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // sold "through" a trading house is not a sale to it
+  if ((relation === 'supplies' || relation === 'offtake_from') && ev && new RegExp(`(${nameRe(dst)}\\s*(을|를)\\s*통해|(through|via)\\s+${nameRe(dst)})`, 'i').test(ev)) relation = 'partner_with';
+  // working "together" on a project is not a contract to build it
+  if (relation === 'contractor_for' && PARTNER_CUE.test(ev) && !BUILD_CUE.test(ev) && !/(수주|발주|contract|award)/i.test(ev)) relation = 'partner_with';
   if (relation === 'stake' && ev && !STAKE_CUE.test(ev)) relation = 'partner_with'; // naming a developer in a portfolio is not an equity stake
+  // the company named as the joint venture itself is an investee, not a partner
+  if ((relation === 'partner_with' || relation === 'jv_partner') && ev && new RegExp(`(합작\\s*(법인|회사|투자사)|joint venture|JV)[^.]{0,12}['"‘“「]?${nameRe(dst)}`, 'i').test(ev)) relation = 'stake';
   if (relation === 'contractor_for' && LICENSE_CUE.test(ev) && !BUILD_CUE.test(ev)) relation = 'licensor_for';      // a licence is not construction work
   if ((relation === 'supplies' || relation === 'offtake_from') && PARTNER_CUE.test(ev) && !SUPPLY_ACT.test(ev)) relation = 'partner_with'; // a collaboration states no sale
   if (relation === 'jv_partner' && !JV_STRICT.test(ev)) return null;                    // "협력", "기업 결합" are not a joint venture
@@ -194,7 +203,8 @@ async function cleanupRelations() {
   const stats = { checked: rows.length, dropped: 0, changed: 0, merged: 0 };
   for (const r of rows) {
     // a parent taken from the facts that is an investor (Bain Capital -> EcoCeres) is a stake, not ownership
-    const input = r.origin === 'facts' && r.relation === 'owns' && roleOf(r.src) === 'finance' ? { ...r, relation: 'stake' } : r;
+    let input = r.origin === 'facts' && r.relation === 'owns' && roleOf(r.src) === 'finance' ? { ...r, relation: 'stake' } : r;
+    if (input.relation === 'licensor_for' && roleOf(input.src) !== 'engineering' && roleOf(input.dst) === 'engineering') input = { ...input, src: input.dst, dst: input.src }; // the licensor is the engineering house
     const fixed = fixRelation(input);
     if (!fixed) { await pool.query('DELETE FROM company_relations WHERE id = $1', [r.id]); stats.dropped++; continue; }
     let [a, b] = [canon(fixed.src), canon(fixed.dst)];

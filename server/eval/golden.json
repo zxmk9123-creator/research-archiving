@@ -408,6 +408,75 @@
         "relation": "stake"
       },
       "note": "2차 판정 #1 O: 투자 문구는 지분으로 유지"
+    },
+    {
+      "id": "r31",
+      "input": {
+        "src": "Marathon Petroleum",
+        "dst": "Martinez 공장",
+        "relation": "stake",
+        "evidence": "Marathon Petroleum과 Neste의 캘리포니아 재생 연료 합작 투자 시설인 Martinez 공장"
+      },
+      "expect": {
+        "keep": false
+      },
+      "note": "3차 판정 #29: 공장은 회사가 아님"
+    },
+    {
+      "id": "r32",
+      "input": {
+        "src": "GS칼텍스",
+        "dst": "이토추 상사",
+        "relation": "supplies",
+        "evidence": "2024년 9월 일본 이토추 상사를 통해 나리타 공항에 SAF를 수출했으며"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "partner_with"
+      },
+      "note": "3차 판정 #6: 상사를 통한 수출은 상사에 대한 공급이 아님"
+    },
+    {
+      "id": "r33",
+      "input": {
+        "src": "Technip Energies",
+        "dst": "Neste",
+        "relation": "contractor_for",
+        "evidence": "Technip Energies는 ... Neste ... 등과 협력하여 상업적 규모의 SAF 생산을 추진"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "partner_with"
+      },
+      "note": "3차 판정 #19: 협력 추진은 시공이 아님"
+    },
+    {
+      "id": "r34",
+      "input": {
+        "src": "Tereos",
+        "dst": "Rebound",
+        "relation": "partner_with",
+        "evidence": "Technip Energies, Airbus, Safran, Tereos가 합작 법인 'Rebound'를 설립"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "stake"
+      },
+      "note": "3차 판정 #20: 합작법인 자체는 투자 대상"
+    },
+    {
+      "id": "r35",
+      "input": {
+        "src": "Rosneft",
+        "dst": "리아잔 정유소",
+        "relation": "owns",
+        "evidence": "로스네프티 소유의 리아잔 정유소"
+      },
+      "expect": {
+        "keep": true,
+        "relation": "owns"
+      },
+      "note": "3차 판정 #7 O: 정유소 소유는 유지"
     }
   ],
   "merge_pairs": [
@@ -1023,6 +1092,90 @@
       "src": "SD Guthrie",
       "dst": "Minamas Plantation",
       "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l48",
+      "src": "GS칼텍스",
+      "dst": "이토추 상사",
+      "relation": "supplies",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l49",
+      "src": "Marathon Petroleum",
+      "dst": "Martinez 공장",
+      "relation": "stake",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l50",
+      "src": "Technip Energies",
+      "dst": "Neste",
+      "relation": "contractor_for",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l51",
+      "src": "Tereos",
+      "dst": "Rebound",
+      "relation": "partner_with",
+      "verdict": "wrong"
+    },
+    {
+      "id": "l52",
+      "src": "SK에너지",
+      "dst": "대한항공",
+      "relation": "supplies",
+      "verdict": "correct"
+    },
+    {
+      "id": "l53",
+      "src": "Qantas",
+      "dst": "JetZero",
+      "relation": "stake",
+      "verdict": "correct"
+    },
+    {
+      "id": "l54",
+      "src": "Calumet, Inc",
+      "dst": "Montana Renewables",
+      "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l55",
+      "src": "Microsoft",
+      "dst": "LanzaJet",
+      "relation": "stake",
+      "verdict": "correct"
+    },
+    {
+      "id": "l56",
+      "src": "Q8Aviation",
+      "dst": "ETFuels",
+      "relation": "offtake_from",
+      "verdict": "correct"
+    },
+    {
+      "id": "l57",
+      "src": "TotalEnergies",
+      "dst": "SARIA",
+      "relation": "partner_with",
+      "verdict": "correct"
+    },
+    {
+      "id": "l58",
+      "src": "Eni",
+      "dst": "Enilive",
+      "relation": "owns",
+      "verdict": "correct"
+    },
+    {
+      "id": "l59",
+      "src": "Mitsui Chemicals",
+      "dst": "Apeiron Bioenergy",
+      "relation": "stake",
       "verdict": "correct"
     }
   ],
