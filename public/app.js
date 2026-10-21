@@ -2913,6 +2913,29 @@ function renderAiUsageHtml(u) {
   </section>`;
 }
 
+// Admin-only panel: accuracy on the golden set (cases a human already judged), trend over the last runs and the failing cases.
+function renderEvalHtml(data) {
+  const runs = data && Array.isArray(data.runs) ? data.runs : [];
+  if (!runs.length) return '<section class="section ai-usage"><div class="section-header"><h2>정확도 (정답 세트)</h2></div><p class="meta">아직 실행 기록이 없습니다. 유지보수가 실행되면(3일마다 오전 9시) 기록됩니다.</p></section>';
+  const pct = (v) => (v === null || v === undefined ? '-' : `${Math.round(v * 1000) / 10}%`);
+  const last = runs[0];
+  const prev = runs[1];
+  const delta = prev && last.accuracy !== null && prev.accuracy !== null ? last.accuracy - prev.accuracy : null;
+  const label = { relation_rules: '관계 규칙', merge_pairs: '회사명 병합', roles: '역할 분류 규칙', typos: '오탈자 교정', colons: '라벨 콜론', live_relations: '저장된 관계 감사' };
+  const rows = Object.entries(last.suites).map(([k, v]) => `<div class="ai-usage-row"><span class="ai-usage-day" style="width:auto">${escapeHtml(label[k] || k)}</span><span class="ai-usage-bar" title="${v.passed}/${v.total}"><i class="ok" style="width:${(v.accuracy || 0) * 100}%"></i></span><span class="ai-usage-n">${pct(v.accuracy)}</span></div>`).join('');
+  const fails = (last.failures || []).slice(0, 8).map((f) => `<li><code>${escapeHtml(f.suite)}/${escapeHtml(f.id)}</code> ${escapeHtml(f.problem)}${f.note ? ` — ${escapeHtml(f.note)}` : ''}</li>`).join('');
+  const trend = runs.slice().reverse().map((r) => pct(r.accuracy)).join(' → ');
+  return `<section class="section ai-usage">
+    <div class="section-header"><h2>정확도 (정답 세트)</h2><span class="count">${escapeHtml(String(last.at).slice(0, 10))} · 관리자 전용</span></div>
+    <div class="ai-usage-kpis">
+      <div><strong>${pct(last.accuracy)}</strong><span>전체 정확도 (${last.passed}/${last.total}건)${delta !== null ? ` · 직전 대비 ${delta >= 0 ? '+' : ''}${Math.round(delta * 1000) / 10}%p` : ''}</span></div>
+    </div>
+    <div class="ai-usage-chart">${rows}</div>
+    ${fails ? `<p class="meta">틀린 사례</p><ul class="meta">${fails}</ul>` : '<p class="meta">틀린 사례가 없습니다.</p>'}
+    <p class="meta">추이: ${escapeHtml(trend)} · 사람이 이미 판정한 사례로 현재 규칙·저장 데이터를 채점합니다. 오류를 발견하면 정답 세트에 사례를 추가해 같은 오류가 다시 생기지 않게 합니다.</p>
+  </section>`;
+}
+
 function renderOpsHtml(stats, triage, scope, isAdmin) {
   const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
@@ -3022,7 +3045,7 @@ async function renderOps() {
   const body = stats ? renderOpsHtml(stats, triage, scope, isAdmin) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
   // AI search usage: admin sessions only (the endpoint itself also requires the admin session)
   let usageHtml = '';
-  if (isAdmin) usageHtml = renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null));
+  if (isAdmin) usageHtml = renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null)) + renderEvalHtml(await api('/eval/latest?n=8').catch(() => null));
   app.innerHTML = banner + body + usageHtml;
 }
 

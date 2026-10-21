@@ -1316,3 +1316,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS entity_registry_entity ON entity_registry (LOW
 -- as history with status 'ended' and the phrase that says so; it is never drawn as the current structure.
 ALTER TABLE company_relations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE company_relations ADD COLUMN IF NOT EXISTS ended_note TEXT;
+
+-- Golden-set accuracy runs (lib/evalRunner.js): one row per run, the whole result as JSON.
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  result JSONB NOT NULL
+);

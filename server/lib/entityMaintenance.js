@@ -34,6 +34,7 @@ async function runMaintenance() {
     await step('classify_new_roles', () => reg.reclassifyRoles({ onlyNull: true, limit: 300 }), out);
     await step('relations_cleanup', () => rel.cleanupRelations(), out);
     await step('rebuild_after_cleanup', () => reg.rebuild(), out);
+    await step('golden_eval', async () => { const r = await require('./evalRunner').runAll(pool); return { accuracy: r.accuracy, total: r.total, passed: r.passed }; }, out);
     out.finishedAt = new Date().toISOString();
     return { ran: true, ...out };
   } finally {
