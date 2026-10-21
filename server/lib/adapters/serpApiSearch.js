@@ -25,20 +25,22 @@ function getConfiguredKeys() {
 // Network errors and 5xx are not quota signals: the next key is tried but nothing is parked.
 const EXHAUSTED_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 const INVALID_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const RATE_COOLDOWN_MS = 2 * 60 * 1000; // 429 is the per-hour / per-second throughput limit: a short pause, not a spent plan
 const parked = new Map(); // api key -> { until, reason }
 const EXHAUSTED_TEXT = /(run out of searches|out of searches|searches? (limit|quota)|plan.*(limit|exceeded)|exceeded|monthly.*limit|rate limit|too many requests)/i;
 const INVALID_TEXT = /(invalid api key|api key.*(invalid|missing|revoked)|unauthorized)/i;
 const tag = (k) => `…${String(k).slice(-4)}`; // log a key only by its last 4 characters
 
 function parkReason(status, text) {
-  if (status === 429 || status === 402) return 'exhausted';
+  if (status === 402) return 'exhausted';
+  if (status === 429) return /(run out of searches|out of searches|plan.*(limit|exceeded)|monthly)/i.test(text) ? 'exhausted' : 'rate';
   if (status === 401 || status === 403) return INVALID_TEXT.test(text) || status === 401 ? 'invalid' : (EXHAUSTED_TEXT.test(text) ? 'exhausted' : 'invalid');
   if (EXHAUSTED_TEXT.test(text)) return 'exhausted';
   if (INVALID_TEXT.test(text)) return 'invalid';
   return null;
 }
 function park(apiKey, reason, now = Date.now()) {
-  parked.set(apiKey, { until: now + (reason === 'invalid' ? INVALID_COOLDOWN_MS : EXHAUSTED_COOLDOWN_MS), reason });
+  parked.set(apiKey, { until: now + (reason === 'invalid' ? INVALID_COOLDOWN_MS : reason === 'rate' ? RATE_COOLDOWN_MS : EXHAUSTED_COOLDOWN_MS), reason });
   console.error(`serpapi key ${tag(apiKey)} parked (${reason}); next key takes over`);
 }
 const isParked = (apiKey, now = Date.now()) => {

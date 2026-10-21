@@ -41,12 +41,19 @@ async function searchWeb(query, options = {}) {
   let lastError;
   for (const apiKey of keys) {
     try {
-      const res = await fetch(FIRECRAWL_SEARCH_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
+      let res;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        res = await fetch(FIRECRAWL_SEARCH_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.status !== 429 || attempt) break;
+        // per-minute limit, not a spent quota: wait out the window the API names (at most a minute) and ask once more
+        const wait = await res.json().then((j) => Number(j && j.retry_after_seconds)).catch(() => NaN);
+        await new Promise((r) => setTimeout(r, Math.min(Number.isFinite(wait) && wait > 0 ? wait : 30, 60) * 1000 + 500));
+      }
       if (!res.ok) {
         const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
         console.error(`firecrawl search failed: status ${res.status} body=${bodyText.slice(0, 300)}`);

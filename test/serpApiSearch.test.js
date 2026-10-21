@@ -179,3 +179,14 @@ test('searchWeb: a 200 answer carrying an out-of-searches error moves on; when e
     if (prevSingle !== undefined) process.env.SERPAPI_API_KEY = prevSingle;
   }
 });
+
+test('searchWeb: a 429 rate limit parks the key only briefly; 402 parks it for hours', () => withApiKey('serp-rate', async () => {
+  const mod = require('../server/lib/adapters/serpApiSearch');
+  mod._resetKeyState();
+  const restore = mockFetch(async () => ({ ok: false, status: 429, text: async () => 'Too many requests' , headers: new Headers() }));
+  try { await assert.rejects(() => searchWeb('q'), /429/); } finally { restore(); }
+  const rate = mod.getKeyStatus();
+  assert.equal(rate.reasons[0].reason, 'rate');
+  assert.ok(!mod.getKeyStatus(Date.now() + mod.EXHAUSTED_COOLDOWN_MS - 1000).parked, 'rate pause is gone long before the quota cooldown');
+  mod._resetKeyState();
+}));

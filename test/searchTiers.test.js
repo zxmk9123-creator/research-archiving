@@ -84,3 +84,17 @@ test('searchWeb: passes options (e.g. freshness) through to whichever tier answe
     restoreSerpApi();
   }
 });
+
+test('searchWeb: when every tier fails the thrown error is the first one and names why the later tiers failed', async () => {
+  const tiers = require('../server/lib/adapters/searchTiers');
+  const brave = require('../server/lib/adapters/webSearch');
+  const fc = require('../server/lib/adapters/firecrawlSearch');
+  const serp = require('../server/lib/adapters/serpApiSearch');
+  const saved = [brave.searchWeb, fc.searchWeb, serp.searchWeb];
+  brave.searchWeb = async () => { throw new Error('search failed: 402 (brave)'); };
+  fc.searchWeb = async () => { throw new Error('search failed: 429'); };
+  serp.searchWeb = async () => { throw new Error('search failed: all SerpApi keys cooling down'); };
+  try {
+    await assert.rejects(() => tiers.searchWeb('q'), (err) => /402 \(brave\)/.test(err.message) && /firecrawl: search failed: 429/.test(err.message) && /serpapi: .*cooling down/.test(err.message));
+  } finally { [brave.searchWeb, fc.searchWeb, serp.searchWeb] = saved; }
+});
