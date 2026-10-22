@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/index.js": { "maxDuration": 300, "includeFiles": "server/**" }
+  },
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
+  "crons": [{ "path": "/api/cron/daily", "schedule": "10 23 * * *" }]
+}
