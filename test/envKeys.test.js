@@ -8,3 +8,7 @@ test('collectKeys: plain, plural list, _N and N suffixes are merged in order wit
   assert.deepEqual(collectKeys('SERPAPI_API_KEY', { SERPAPI_API_KEY1: ' x ', SERPAPI_API_KEY2: '' }), ['x']);
   assert.deepEqual(collectKeys('TAVILY_API_KEY', {}), []);
 });
+
+test('collectKeys: variable names are matched case-insensitively', () => {
+  assert.deepEqual(collectKeys('TAVILY_API_KEY', { Tavily_API_KEY: 'tv1', tavily_api_key_2: 'tv2' }), ['tv1', 'tv2']);
+});
