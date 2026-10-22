@@ -63,6 +63,7 @@ async function runDiagnostics() {
     serpapi: await searchTier('serpapi', require('./adapters/serpApiSearch'), 'SERPAPI_API_KEY'),
   };
   out.rssEgress = await timed(async () => { const r = await fetch('https://www.fao.org/feeds/fao-newsroom-rss', { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' }, signal: AbortSignal.timeout(15000) }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return { status: r.status }; });
+  out.guardedFetch = await timed(async () => { const r = await require('./safeUrl').safeFetch('https://www.fao.org/feeds/fao-newsroom-rss', { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' }, signal: AbortSignal.timeout(15000) }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return { status: r.status, note: 'SSRF-guarded fetch used by the collector' }; });
   out.pdfParser = await timed(async () => { require('pdf-parse'); return {}; });
   out.marketData = { enabled: Boolean(process.env.BARCHART_ONDEMAND_API_KEY) && process.env.BARCHART_DATA_DISPLAY_ENABLED === 'true' };
   return out;
