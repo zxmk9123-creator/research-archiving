@@ -309,7 +309,16 @@ async function requestDailyBriefRegeneration(now = new Date()) {
   return queueDailyBriefGeneration(now, { force: true });
 }
 
-async function getLatestDailyBrief() {
+// At the KST date change the headline starts over: yesterday's brief is not shown as today's. Until today's generation begins (it
+// starts when the morning collection completes) the page gets this empty "pending" state instead of the previous day's content.
+function pendingBriefFor(todayKst, previousDate) {
+  return {
+    brief_date: todayKst, status: 'pending', window_start: null, window_end: null, item_count: 0,
+    source_item_ids: [], brief: null, error: null, attempt_count: 0, sources: [], previous_brief_date: previousDate || null,
+  };
+}
+
+async function getLatestDailyBrief(now = new Date()) {
   const { rows } = await pool.query(
     `SELECT brief_date, status, window_start, window_end, item_count,
             source_item_ids, brief, error, attempt_count, created_at, updated_at, completed_at
@@ -317,6 +326,9 @@ async function getLatestDailyBrief() {
   );
   const brief = rows[0];
   if (!brief) return null;
+  const todayKst = kstDate(now);
+  const latestDate = brief.brief_date instanceof Date ? brief.brief_date.toISOString().slice(0, 10) : String(brief.brief_date).slice(0, 10);
+  if (latestDate < todayKst) return pendingBriefFor(todayKst, latestDate);
   if (brief.brief && typeof brief.brief === 'object') {
     brief.brief.lead = String(brief.brief.lead || '').trim().replace(/[.。]+$/u, '');
     if (Array.isArray(brief.brief.developments)) {
@@ -345,4 +357,4 @@ async function getLatestDailyBrief() {
   return brief;
 }
 
-module.exports = { kstDate, parseJsonObject, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

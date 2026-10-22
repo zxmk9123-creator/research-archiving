@@ -245,7 +245,7 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   const parts = kstPartsOf(now);
   const today = parts.date;
   if ((await getDailyDiscoveryStatus(now)).completedToday) return { ran: false, reason: 'already_ran_today' };
-  if (Number(parts.hour) < 8) return { ran: false, reason: 'not_due_hour' };
+  if (Number(parts.hour) < 7) return { ran: false, reason: 'not_due_hour' }; // starts in the 07:00-08:00 KST window
   const { rows } = await pool.query(`SELECT last_run_date, last_totals FROM scheduler_jobs WHERE job_name = $1`, [CURSOR_JOB]);
   const saved = rows[0] && rows[0].last_run_date && new Date(rows[0].last_run_date).toISOString().slice(0, 10) === today ? rows[0].last_totals || {} : {};
   if (saved.leaseUntil && saved.leaseUntil > Date.now()) return { ran: false, reason: 'in_progress', offset: saved.offset || 0 };
