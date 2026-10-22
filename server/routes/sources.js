@@ -146,7 +146,7 @@ router.get('/collect-company-profiles/status', requireAuth, (req, res) => {
 // Uncertainty-triggered verification (lib/verificationRoutine.js): the scheduler runs it by itself; these are for operators.
 router.post('/run-verification', requireAuth, (req, res) => {
   const routine = require('../lib/verificationRoutine');
-  routine.runQueue({ max: Math.min(Number(req.body && req.body.max) || 3, 10) }).catch((err) => console.error(`manual verification run failed: ${err.message}`));
+  require('../lib/background').track(routine.runQueue({ max: Math.min(Number(req.body && req.body.max) || 3, 10) }).catch((err) => console.error(`manual verification run failed: ${err.message}`)));
   res.status(202).json({ started: true });
 });
 router.get('/verification-status', requireAuth, async (req, res) => {

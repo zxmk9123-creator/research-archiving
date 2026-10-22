@@ -1640,7 +1640,7 @@ async function handleSearch(req, res, signal) {
   const queueUncertain = (dataset) => {
     if (!dataset || !Array.isArray(dataset.uncertain) || !dataset.uncertain.length) return;
     const topic = (choices && choices.subject) || (Object.keys(SECTOR_KEYWORD_PATTERNS).find((k) => SECTOR_KEYWORD_PATTERNS[k].test(question)) || '');
-    verificationRoutine.enqueue(dataset.uncertain, { topic }).catch((err) => console.error('verification enqueue failed:', err.message));
+    require('../lib/background').track(verificationRoutine.enqueue(dataset.uncertain, { topic }).catch((err) => console.error('verification enqueue failed:', err.message)));
   };
   const nextContextFor = (dataset) => classificationScope.nextContext(prevContext, { question, choices, datasetEntities: dataset && dataset.entities, focusEntities: intent.focus.map((c) => c.name) });
   const datasetPromise = quick ? Promise.resolve(null) : tryBuildDataset(question, candidates, required, signal, datasetTrace, choices, intent.focus.length ? [] : referencedEntities);

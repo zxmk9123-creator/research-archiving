@@ -33,10 +33,10 @@ router.get('/', async (req, res) => {
 router.post('/run', requireAuth, (req, res) => {
   if (analysisRunning) return res.status(202).json({ started: false, reason: 'already_running' });
   analysisRunning = true;
-  scopeAnalysis.runScopeAnalysis()
+  require('../lib/background').track(scopeAnalysis.runScopeAnalysis()
     .then((r) => console.log(`scope_analysis manual run: ${JSON.stringify(r)}`))
     .catch((err) => console.error(`scope_analysis manual run failed: ${err.message}`))
-    .finally(() => { analysisRunning = false; });
+    .finally(() => { analysisRunning = false; }));
   res.status(202).json({ started: true });
 });
 

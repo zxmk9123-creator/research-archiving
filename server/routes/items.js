@@ -178,7 +178,7 @@ router.post('/reextract-drafts', requireAuth, async (req, res) => {
     `SELECT id, source_url FROM items WHERE status = 'Draft' AND source_url IS NOT NULL`
   );
   res.json({ started: true, total: rows.length });
-  reextractDraftsInBackground(rows).catch((err) => console.error('reextract-drafts failed', err));
+  require('../lib/background').track(reextractDraftsInBackground(rows).catch((err) => console.error('reextract-drafts failed', err)));
 });
 
 const ITEM_SELECT = `

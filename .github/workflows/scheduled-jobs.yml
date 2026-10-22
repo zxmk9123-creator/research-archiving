@@ -30,4 +30,7 @@ jobs:
           code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/daily")
           echo "HTTP $code"
           cat out.json; echo
-          [ "$code" = "200" ]
+          [ "$code" = "200" ] || exit 1
+          # a step that errored is reported inside a 200 response: fail the run so GitHub sends its failure notification
+          if grep -q '"error:' out.json; then echo "::error::a cron step reported an error"; exit 1; fi
+          if grep -Eq '"background_unfinished":[1-9]' out.json; then echo "::warning::background work was still running when the response was sent"; fi
