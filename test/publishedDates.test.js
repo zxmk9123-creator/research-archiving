@@ -24,3 +24,13 @@ test('verify-dated set: two dated-news queries per large SAF producer', () => {
     assert.ok(q.every((x) => /20(25|26)/.test(x)), c.name);
   }
 });
+
+test('dateFromHtml: reads the date the page itself declares and ignores anything else', () => {
+  const { dateFromHtml } = require('../server/lib/publishedDates');
+  const now = new Date('2026-10-22T00:00:00Z');
+  assert.equal(dateFromHtml('<meta property="article:published_time" content="2026-03-04T09:00:00+09:00">', now), '2026-03-04');
+  assert.equal(dateFromHtml('<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2025-11-30T01:02:03Z"}</script>', now), '2025-11-30');
+  assert.equal(dateFromHtml('<time datetime="2024-01-15">Jan 15</time>', now), '2024-01-15');
+  assert.equal(dateFromHtml('<meta property="article:published_time" content="2031-01-01">', now), null, 'a future date is not accepted');
+  assert.equal(dateFromHtml('<p>no date here</p>', now), null);
+});

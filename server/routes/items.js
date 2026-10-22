@@ -95,6 +95,10 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
 router.post('/backfill-published-dates', requireAuth, async (req, res) => {
   res.json(await require('../lib/publishedDates').backfillPublishedDates());
 });
+// Fills undated published items from the date their own page declares; call again with afterId = nextAfterId until remainingAfter is 0.
+router.post('/backfill-published-dates-pages', requireAuth, async (req, res) => {
+  res.json(await require('../lib/publishedDates').backfillFromPages({ limit: Math.min(80, Number(req.query.limit) || 40), afterId: Number(req.query.afterId) || 0 }));
+});
 router.post('/annual-report-rebuild', requireAuth, async (req, res) => {
   try { res.json(await require('../lib/annualReportIngest').rebuildReportItems()); } catch (err) { res.status(500).json({ error: err.message }); }
 });

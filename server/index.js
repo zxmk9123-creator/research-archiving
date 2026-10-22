@@ -70,6 +70,19 @@ app.get('/api/cron/daily', async (req, res) => {
   res.json({ ok: true, elapsedMs: Date.now() - started, results });
 });
 
+// A fresh function instance starts with an empty in-memory scope-term cache (loaded at boot on a long-lived server). The relevance
+// filter reads it synchronously, so make sure it is loaded, and at most ten minutes old, before any API work runs.
+if (process.env.VERCEL) {
+  let scopeTermsAt = 0;
+  app.use('/api', async (req, res, next) => {
+    if (Date.now() - scopeTermsAt > 10 * 60 * 1000) {
+      scopeTermsAt = Date.now();
+      await refreshScopeTerms().catch((err) => { scopeTermsAt = 0; console.error('scope terms load failed', err.message); });
+    }
+    next();
+  });
+}
+
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sources', require('./routes/sources'));
 app.use('/api/companies', require('./routes/companies'));
