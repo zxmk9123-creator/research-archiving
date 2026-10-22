@@ -5,9 +5,7 @@ const TAVILY_SEARCH_ENDPOINT = 'https://api.tavily.com/search';
 const MAX_RESULTS = 10;
 
 function getConfiguredKeys() {
-  const multi = (process.env.TAVILY_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
-  const single = (process.env.TAVILY_API_KEY || '').trim();
-  return [...new Set(single ? [single, ...multi] : multi)];
+  return require('./envKeys').collectKeys('TAVILY_API_KEY');
 }
 
 // Same key handling as the SerpApi tier: 429 is a per-minute limit (short pause); 432 / 433 are Tavily's plan / pay-as-you-go

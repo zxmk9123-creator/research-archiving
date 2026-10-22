@@ -12,10 +12,7 @@ const MAX_RESULTS = 10;
 // overriding the other — read fresh on every call, not cached at module
 // load, and deduped so a key listed in both isn't tried twice.
 function getConfiguredKeys() {
-  const multi = (process.env.SERPAPI_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
-  const single = (process.env.SERPAPI_API_KEY || '').trim();
-  const all = single ? [single, ...multi] : multi;
-  return [...new Set(all)];
+  return require('./envKeys').collectKeys('SERPAPI_API_KEY');
 }
 
 // EXHAUSTED-KEY HANDLING. Keys are used in order (the first is the primary); a key that SerpApi reports as out of searches

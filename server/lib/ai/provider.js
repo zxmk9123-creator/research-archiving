@@ -124,7 +124,7 @@ async function fetchProvider(providerLabel, url, init, timeoutMs = 20000, extern
 // analysis — keeps FREELLMAPI_API_KEY (the batch profile). With no chat key set, chat
 // falls back to the shared key, i.e. the previous behaviour.
 function apiKeyFor(lane) {
-  return (lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim()) || process.env.FREELLMAPI_API_KEY;
+  return (lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim()) || process.env.FREELLMAPI_API_KEY || process.env.FreeLLMAPIKEY;
 }
 function laneLabel(lane) {
   return lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim() ? 'chat' : 'shared';

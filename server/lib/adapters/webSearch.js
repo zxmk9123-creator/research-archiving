@@ -22,10 +22,7 @@ const MAX_RESULTS = 10;
 // var update takes effect without a restart. Deduped so the same key listed
 // in both vars isn't tried twice.
 function getConfiguredKeys() {
-  const multi = (process.env.BRAVE_SEARCH_API_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean);
-  const single = (process.env.BRAVE_SEARCH_API_KEY || '').trim();
-  const all = single ? [single, ...multi] : multi;
-  return [...new Set(all)];
+  return require('./envKeys').collectKeys('BRAVE_SEARCH_API_KEY');
 }
 
 // Keys confirmed exhausted (HTTP 402) this process's lifetime. Brave's 402

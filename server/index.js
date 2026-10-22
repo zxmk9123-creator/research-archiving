@@ -16,6 +16,15 @@ app.use(express.json());
 // there; this one authenticated endpoint runs each periodic job once, in order of value, within the function's time budget.
 // Vercel sends "Authorization: Bearer $CRON_SECRET". Every job keeps its own once-per-day / once-per-week claim, so calling this
 // more than once (e.g. an external scheduler) never double-runs anything, and an interrupted discovery run is resumed on the next call.
+// One-time (idempotent) schema setup for a fresh database, same SQL as `npm run db:init`; no shell exists on Vercel to run it.
+app.get('/api/cron/init-db', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  const sql = require('fs').readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
+  await require('./db/pool').query(sql);
+  res.json({ ok: true, applied: 'schema.sql' });
+});
+
 app.get('/api/cron/daily', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
