@@ -88,10 +88,12 @@ async function claimDailyDiscoveryRunForToday(now = new Date()) {
 // Runs every Daily Discovery Query Registry source now, regardless of its
 // own frequency_days/last_collected_at — same aggregation shape as
 // collectAllSourcesNow() in collector.js.
-async function collectDailyDiscoveryNow() {
-  const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL AND is_active = true`
+// offset / limit let a hosted function (with a hard time limit) run the sources in slices: the same ordered list, so slices never overlap.
+async function collectDailyDiscoveryNow({ offset = 0, limit = null } = {}) {
+  const { rows: all } = await pool.query(
+    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL AND is_active = true ORDER BY id`
   );
+  const sources = limit ? all.slice(offset, offset + limit) : all.slice(offset);
   const results = [];
   for (const source of sources) {
     results.push(await collectWebDiscoverySource(source, dailyDiscoverySearchOptions(source)));
@@ -106,7 +108,7 @@ async function collectDailyDiscoveryNow() {
     }),
     { discovered: 0, archived: 0, filtered: 0, failed: 0, failedSources: 0 }
   );
-  return { totals, results };
+  return { totals, results, total: all.length, nextOffset: limit && offset + limit < all.length ? offset + limit : null };
 }
 
 // The scheduler entry point: checked on the existing hourly interval (and

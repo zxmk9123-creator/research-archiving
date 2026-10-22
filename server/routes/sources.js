@@ -51,6 +51,19 @@ router.post('/extract-metadata', requireAuth, async (req, res) => {
 // one-time routes further down, this goes through
 // dailyDiscoverySearchOptions() per source, so is_archive_discovery
 // sources correctly get itemType='보고서' and no freshness bias.
+// Sliced manual run for hosts with a function time limit: POST ?offset=0&limit=8, follow nextOffset, then POST /record-daily-discovery
+// with the merged results so the Home status bar reflects the whole run. Nothing is recorded by the slices themselves.
+router.post('/trigger-daily-discovery-batch', requireAuth, async (req, res) => {
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 8));
+  res.json(await dailyDiscoveryModule.collectDailyDiscoveryNow({ offset, limit }));
+});
+router.post('/record-daily-discovery', requireAuth, async (req, res) => {
+  const results = Array.isArray(req.body && req.body.results) ? req.body.results : [];
+  if (!results.length) return res.status(400).json({ error: 'results are required' });
+  res.json({ failedSources: await dailyDiscoveryModule.recordDailyDiscoveryCompletion({ results }) });
+});
+
 router.post('/trigger-daily-discovery-now', requireAuth, async (req, res) => {
   console.log('daily_discovery manual_run_started');
   const result = await dailyDiscoveryModule.collectDailyDiscoveryNow();
