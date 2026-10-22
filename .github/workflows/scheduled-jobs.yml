@@ -1,0 +1,33 @@
+name: Scheduled jobs
+
+# Vercel's free plan runs a cron once a day, but the app used to check for work hourly. This workflow calls the same authenticated
+# endpoint every hour. Every job behind it keeps its own once-per-day / once-per-week claim, so extra calls are harmless: the
+# daily discovery only runs inside its 08:00 KST window, collection only picks sources that are due, and nothing runs twice.
+#
+# Needs one repository secret: CRON_SECRET (Settings > Secrets and variables > Actions) with the same value as the CRON_SECRET
+# environment variable in Vercel. Optional repository variable APP_URL overrides the address below.
+# GitHub runs scheduled workflows from the default branch only.
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+jobs:
+  call-cron:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Call /api/cron/daily
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://research-archiving.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/daily")
+          echo "HTTP $code"
+          cat out.json; echo
+          [ "$code" = "200" ]
