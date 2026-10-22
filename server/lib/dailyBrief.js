@@ -290,7 +290,8 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
     return { started: false, reason: 'already_running_or_not_retryable', current };
   }
 
-  buildDailyBrief(briefDate)
+  // tracked: on a serverless host the generation would otherwise be frozen the moment the response is sent
+  require('./background').track(buildDailyBrief(briefDate)
     .catch(async (err) => {
       console.error(`daily_brief generation failed date=${briefDate}: ${err.message}`);
       await pool.query(
@@ -298,7 +299,7 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
           WHERE brief_date = $1 AND status = 'generating'`,
         [briefDate, String(err.message || 'generation_failed').slice(0, 500)]
       ).catch((updateErr) => console.error(`daily_brief failure state update failed: ${updateErr.message}`));
-    });
+    }));
   return { started: true, briefDate };
 }
 
