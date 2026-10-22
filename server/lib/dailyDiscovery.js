@@ -220,7 +220,57 @@ async function getDailyDiscoveryStatus(now = new Date()) {
   };
 }
 
+// ---- Sliced scheduled run (hosts whose functions have a hard time limit) ----------------------------------------------------
+// The whole list of ~66 sources takes over an hour, far beyond one function call. Each call advances a persisted cursor by as many
+// sources as fit in its time budget (a few at a time, in parallel); the call that reaches the end records the completion exactly like
+// the single-process run does. Resuming never starts over: the cursor lives in scheduler_jobs (job 'daily_discovery_cursor').
+const CURSOR_JOB = 'daily_discovery_cursor';
+const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
+
+// Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
+async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, concurrency = 3, now = () => Date.now() } = {}) {
+  const started = now();
+  const next = { offset: cursor.offset || 0, results: [...(cursor.results || [])] };
+  while (next.offset < total && now() - started < budgetMs) {
+    const group = [];
+    for (let i = 0; i < concurrency && next.offset + i < total; i++) group.push(next.offset + i);
+    const done = await Promise.all(group.map((idx) => runOne(idx).then((r) => slimResult(r), (err) => ({ sourceId: null, ok: false, error: String(err && err.message).slice(0, 160) }))));
+    next.results.push(...done);
+    next.offset += group.length;
+  }
+  return { ...next, done: next.offset >= total };
+}
+
+async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } = {}) {
+  const parts = kstPartsOf(now);
+  const today = parts.date;
+  if ((await getDailyDiscoveryStatus(now)).completedToday) return { ran: false, reason: 'already_ran_today' };
+  if (Number(parts.hour) < 8) return { ran: false, reason: 'not_due_hour' };
+  const { rows } = await pool.query(`SELECT last_run_date, last_totals FROM scheduler_jobs WHERE job_name = $1`, [CURSOR_JOB]);
+  const saved = rows[0] && rows[0].last_run_date && new Date(rows[0].last_run_date).toISOString().slice(0, 10) === today ? rows[0].last_totals || {} : {};
+  if (saved.leaseUntil && saved.leaseUntil > Date.now()) return { ran: false, reason: 'in_progress', offset: saved.offset || 0 };
+  const { rows: srcRows } = await pool.query(
+    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL AND is_active = true ORDER BY id`
+  );
+  const save = (state) => pool.query(
+    `INSERT INTO scheduler_jobs (job_name, last_run_date, last_totals) VALUES ($1, $2::date, $3)
+     ON CONFLICT (job_name) DO UPDATE SET last_run_date = $2::date, last_totals = $3`,
+    [CURSOR_JOB, today, JSON.stringify(state)]
+  );
+  await save({ ...saved, leaseUntil: Date.now() + budgetMs + 60000 });
+  console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
+  const runOne = (idx) => collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx]));
+  const step = await advanceDiscovery(saved, srcRows.length, runOne, { budgetMs });
+  await save({ offset: step.offset, results: step.results, leaseUntil: 0 });
+  if (!step.done) return { ran: true, done: false, progress: `${step.offset}/${srcRows.length}` };
+  const failedSources = await recordDailyDiscoveryCompletion({ results: step.results });
+  console.log(`daily_discovery sliced completed sources=${step.results.length} failed=${failedSources.length}`);
+  return { ran: true, done: true, progress: `${step.offset}/${srcRows.length}`, failedSources: failedSources.length };
+}
+
 module.exports = {
+  advanceDiscovery,
+  runDailyDiscoverySliced,
   kstPartsOf,
   isDailyDiscoveryHourKst,
   claimDailyDiscoveryRunForToday,

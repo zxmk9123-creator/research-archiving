@@ -48,7 +48,8 @@ app.get('/api/cron/daily', async (req, res) => {
   const BUDGET_MS = Number(process.env.CRON_BUDGET_MS) || 240000;
   const steps = [
     ['collections', () => runDueCollections()],
-    ['daily_discovery', () => maybeRunDailyDiscovery()],
+    // sliced: one call cannot run all sources (the function time limit), so each call advances a persisted cursor
+    ['daily_discovery', () => require('./lib/dailyDiscovery').runDailyDiscoverySliced({ budgetMs: 170000 })],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
     // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
     ['review_autopilot', async () => {
@@ -76,7 +77,7 @@ app.get('/api/cron/daily', async (req, res) => {
       const out = await run();
       results[name] = Array.isArray(out)
         ? { sources: out.length, ok: out.filter((r) => r && r.ok).length, failed: out.filter((r) => r && !r.ok).length, newItems: out.reduce((n, r) => n + ((r && r.count) || 0), 0) }
-        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed, rounds: out.rounds, archived: out.archived, published: out.published, retry: out.retry, human: out.human } : 'done';
+        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed, done: out.done, progress: out.progress, rounds: out.rounds, archived: out.archived, published: out.published, retry: out.retry, human: out.human } : 'done';
     } catch (err) { results[name] = `error: ${String(err && err.message).slice(0, 120)}`; }
   }
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
