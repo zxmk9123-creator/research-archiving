@@ -25,6 +25,15 @@ app.get('/api/cron/init-db', async (req, res) => {
   res.json({ ok: true, applied: 'schema.sql' });
 });
 
+// One-off data move from the previous host (needs SOURCE_DATABASE_URL); resumable, call again until "complete": true.
+// The first call on a fresh database uses ?truncate=1 (clears the schema's seed rows); later calls must NOT, or they restart the copy.
+app.get('/api/cron/migrate-data', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.SOURCE_DATABASE_URL) return res.status(400).json({ error: 'SOURCE_DATABASE_URL is not set' });
+  res.json(await require('./lib/dataMigration').migrate({ sourceUrl: process.env.SOURCE_DATABASE_URL, truncateFirst: req.query.truncate === '1' }));
+});
+
 app.get('/api/cron/daily', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
