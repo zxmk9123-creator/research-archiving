@@ -166,11 +166,11 @@ async function collectSource(source) {
       // acquisition.extractedText (real page content) takes priority when
       // available; otherwise generateAiDraftForItem falls back to the
       // item's own `summary` column (the feed description), unchanged.
-      generateAiDraftForItem(rows[0].id, undefined, acquisition.extractedText).then((result) => {
+      require('./background').track(generateAiDraftForItem(rows[0].id, undefined, acquisition.extractedText).then((result) => {
         if (result.ok) return applyAiDraftIfEligible(rows[0].id);
       }).catch((err) => {
         console.error(`AI draft generation errored for item ${rows[0].id}: ${err.message}`);
-      });
+      }));
 
       existingUrls.add(fi.link);
       recentTitles.push(fi.title);

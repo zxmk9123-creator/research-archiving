@@ -467,12 +467,13 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 // against racing. Fire-and-forget per item, same convention collector.js
 // already uses for generateAiDraftForItem — this only ever needs to
 // unstick a small, occasional backlog, not block startup on it.
-async function requeueStalledPendingDrafts() {
-  const { rows } = await pool.query(`SELECT id FROM items WHERE ai_status = 'pending'`);
+async function requeueStalledPendingDrafts({ olderThanMinutes = 0 } = {}) {
+  // olderThanMinutes: a cron run may overlap another instance's in-flight call, so it only takes rows that have been waiting a while
+  const { rows } = await pool.query(`SELECT id FROM items WHERE ai_status = 'pending' AND collected_at < now() - make_interval(mins => $1)`, [olderThanMinutes]);
   if (!rows.length) return { requeued: 0 };
   console.log(`ai_draft requeuing ${rows.length} item(s) stuck at ai_status='pending'`);
   for (const { id } of rows) {
-    generateAiDraftForItem(id).catch((err) => console.error(`ai_draft requeue failed for item ${id}: ${err.message}`));
+    require('./background').track(generateAiDraftForItem(id).catch((err) => console.error(`ai_draft requeue failed for item ${id}: ${err.message}`)));
   }
   return { requeued: rows.length };
 }

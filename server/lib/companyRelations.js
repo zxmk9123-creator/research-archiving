@@ -256,7 +256,7 @@ async function extractRelationsForItem(item, { canon = null } = {}) {
 
 function extractRelationsInBackground(item) {
   if (process.env.COMPANY_RELATIONS === 'off') return;
-  extractRelationsForItem(item).catch(() => {});
+  require('./background').track(extractRelationsForItem(item).catch(() => {}));
 }
 
 // item_facts.parent -> 'owns' rows (no AI call).

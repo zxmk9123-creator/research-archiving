@@ -72,7 +72,8 @@ async function extractFactsForItem(item, { replace = false } = {}) {
 // Called by the publish path; fire-and-forget by design.
 function extractFactsInBackground(item) {
   if (process.env.ITEM_FACTS === 'off') return;
-  extractFactsForItem(item).catch(() => {});
+  const { track } = require('./background');
+  track(extractFactsForItem(item).catch(() => {}));
   require('./companyRelations').extractRelationsInBackground(item);
 }
 

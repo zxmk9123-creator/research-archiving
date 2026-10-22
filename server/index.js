@@ -42,11 +42,14 @@ app.get('/api/cron/daily', async (req, res) => {
   const steps = [
     ['collections', () => runDueCollections()],
     ['daily_discovery', () => maybeRunDailyDiscovery()],
+    ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
     ['review_autopilot', () => require('./lib/reviewAutopilot').runAutopilot()],
     ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
     ['entity_maintenance', () => require('./lib/entityMaintenance').maybeRunEntityMaintenance()],
     ['verification', () => require('./lib/verificationRoutine').runQueue()],
   ];
+  // the scope-term cache that feeds the relevance filter is loaded at boot on a long-lived server; a fresh function instance starts empty
+  await refreshScopeTerms().catch((err) => console.error('scope terms load failed', err));
   const results = {};
   for (const [name, run] of steps) {
     if (Date.now() - started > BUDGET_MS) { results[name] = 'skipped_budget'; continue; }
@@ -55,6 +58,8 @@ app.get('/api/cron/daily', async (req, res) => {
       results[name] = out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals } : 'done';
     } catch (err) { results[name] = `error: ${String(err && err.message).slice(0, 120)}`; }
   }
+  // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
+  results.background_unfinished = await require('./lib/background').drain(Math.max(5000, 280000 - (Date.now() - started)));
   res.json({ ok: true, elapsedMs: Date.now() - started, results });
 });
 
