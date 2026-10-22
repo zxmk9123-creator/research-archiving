@@ -125,7 +125,7 @@ async function attemptAcquisitionFallback(candidate) {
 // caller, so Daily Discovery's own recency behavior is unchanged.
 async function collectWebDiscoverySource(source, searchOptions = {}) {
   try {
-    const candidates = (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
+    const candidates = searchOptions.candidates || (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
 
     let filtered = 0;
     let archived = 0;

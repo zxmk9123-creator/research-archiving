@@ -50,6 +50,7 @@ app.get('/api/cron/daily', async (req, res) => {
     ['collections', () => runDueCollections()],
     // sliced: one call cannot run all sources (the function time limit), so each call advances a persisted cursor
     ['daily_discovery', () => require('./lib/dailyDiscovery').runDailyDiscoverySliced({ budgetMs: 170000 })],
+    ['reference_collections', () => require('./lib/referenceCollect').runReferenceCollections()],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
     // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
     ['review_autopilot', async () => {
