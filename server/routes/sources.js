@@ -58,6 +58,10 @@ router.post('/trigger-daily-discovery-batch', requireAuth, async (req, res) => {
   const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 8));
   res.json(await dailyDiscoveryModule.collectDailyDiscoveryNow({ offset, limit }));
 });
+router.post('/collect-references', requireAuth, async (req, res) => {
+  const limit = Math.min(8, Math.max(1, Number(req.query.limit) || 4));
+  res.json(await require('../lib/referenceCollect').runReferenceCollections({ limit, force: req.query.force === '1' }));
+});
 router.post('/record-daily-discovery', requireAuth, async (req, res) => {
   const results = Array.isArray(req.body && req.body.results) ? req.body.results : [];
   if (!results.length) return res.status(400).json({ error: 'results are required' });

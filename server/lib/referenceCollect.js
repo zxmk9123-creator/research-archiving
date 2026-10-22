@@ -59,17 +59,17 @@ async function collectReferenceSource(source) {
 }
 
 // Least-recently-collected first; ~weekly cycle at PER_RUN/day over 36 sources.
-async function runReferenceCollections({ limit = PER_RUN } = {}) {
+async function runReferenceCollections({ limit = PER_RUN, force = false } = {}) {
   const { rows } = await pool.query(
     `SELECT * FROM sources WHERE is_reference = true AND method = 'manual' AND url IS NOT NULL AND is_active = true
-       AND (last_collected_at IS NULL OR last_collected_at < now() - interval '3 days')
+       ${force ? '' : "AND (last_collected_at IS NULL OR last_collected_at < now() - interval '3 days')"}
      ORDER BY last_collected_at NULLS FIRST, id LIMIT $1`, [limit]);
   const results = [];
   for (const s of rows) {
     try { results.push(await collectReferenceSource(s)); }
     catch (err) { results.push({ sourceId: s.id, ok: false, error: err.message }); }
   }
-  return results.map((r) => ({ sourceId: r.sourceId, ok: r.ok, discovered: r.discovered, archived: r.archived, error: r.error }));
+  return results.map((r) => ({ sourceId: r.sourceId, ok: r.ok, discovered: r.discovered, archived: r.archived, rejected: r.rejected, filtered: r.filtered, failed: r.failed, error: r.error }));
 }
 
 module.exports = { extractArticleLinks, collectReferenceSource, runReferenceCollections };
