@@ -38,8 +38,22 @@ async function backfillPublishedDates() {
 // Publication date from the page's own metadata (what the article itself declares): article:published_time, JSON-LD datePublished,
 // itemprop / name="date" meta tags, <time datetime>. Returns 'YYYY-MM-DD' or null. Never guesses from the fetch time.
 function dateFromHtml(html, now = new Date()) {
-  const cheerio = require('cheerio');
-  const $ = cheerio.load(String(html || '').slice(0, 600000));
+  return dateFromCheerio(require('cheerio').load(String(html || '').slice(0, 600000)), now);
+}
+
+// Any date string a page may hold -> 'YYYY-MM-DD' or null: ISO first, then "Oct 18th, 2025" / "18 October 2025" style text.
+function normalizeDateString(raw, now = new Date()) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const iso = s.match(/(20[12]\d)-(\d{2})-(\d{2})/);
+  if (iso) return valid(+iso[1], +iso[2], +iso[3], now);
+  const t = Date.parse(s.replace(/(\d)(st|nd|rd|th)\b/gi, '$1'));
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return valid(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), now);
+}
+
+function dateFromCheerio($, now = new Date()) {
   const cands = [];
   const meta = ['article:published_time', 'og:article:published_time', 'og:published_time', 'datePublished', 'pubdate', 'publishdate', 'date', 'dc.date', 'dc.date.issued', 'parsely-pub-date', 'sailthru.date'];
   $('meta').each((_, el) => {
@@ -53,8 +67,8 @@ function dateFromHtml(html, now = new Date()) {
   $('[itemprop="datePublished"]').each((_, el) => { cands.push($(el).attr('content') || $(el).attr('datetime') || $(el).text()); });
   $('time[datetime]').slice(0, 3).each((_, el) => cands.push($(el).attr('datetime')));
   for (const c of cands) {
-    const m = String(c || '').match(/(20[12]\d)-(\d{2})-(\d{2})/);
-    if (m) { const v = valid(+m[1], +m[2], +m[3], now); if (v) return v; }
+    const v = normalizeDateString(c, now);
+    if (v) return v;
   }
   return null;
 }
@@ -94,4 +108,4 @@ async function backfillFromPages({ limit = 40, afterId = 0, budgetMs = 200000 } 
   return { checked: rows.length - queue.length, updated, skipped, failed, nextAfterId: queue.length ? Math.min(...queue.map((q) => q.id)) - 1 : lastId, remainingAfter: Number(left[0].n) };
 }
 
-module.exports = { dateFromUrl, dateFromHtml, backfillPublishedDates, backfillFromPages };
+module.exports = { dateFromUrl, dateFromHtml, dateFromCheerio, normalizeDateString, backfillPublishedDates, backfillFromPages };

@@ -34,3 +34,13 @@ test('dateFromHtml: reads the date the page itself declares and ignores anything
   assert.equal(dateFromHtml('<meta property="article:published_time" content="2031-01-01">', now), null, 'a future date is not accepted');
   assert.equal(dateFromHtml('<p>no date here</p>', now), null);
 });
+
+test('normalizeDateString: ISO, ordinal English dates and junk', () => {
+  const { normalizeDateString } = require('../server/lib/publishedDates');
+  const now = new Date('2026-10-22T00:00:00Z');
+  assert.equal(normalizeDateString('2025-10-18T09:00:00Z', now), '2025-10-18');
+  assert.equal(normalizeDateString('Oct 18th, 2025', now), '2025-10-18');
+  assert.equal(normalizeDateString('18 October 2025', now), '2025-10-18');
+  assert.equal(normalizeDateString('yesterday', now), null);
+  assert.equal(normalizeDateString('Oct 18th 2', now), null, 'the half-cut text that used to reach the database');
+});

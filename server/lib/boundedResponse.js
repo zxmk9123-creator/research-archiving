@@ -53,4 +53,27 @@ async function readResponseText(response, maxBytes, label) {
   return (await readResponseBuffer(response, maxBytes, label)).toString('utf8');
 }
 
-module.exports = { readResponseBuffer, readResponseText };
+// First maxBytes of a body, without failing when the page is larger: for HTML only the head / first paragraphs matter, so a huge page
+// is read up to the cap and the rest is dropped instead of the whole article being rejected.
+async function readResponsePrefixText(response, maxBytes) {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return (await readResponseBuffer(response, Number.MAX_SAFE_INTEGER, 'prefix')).subarray(0, maxBytes).toString('utf8');
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+      total += value.byteLength;
+    }
+    if (total >= maxBytes) await reader.cancel().catch(() => {});
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks, total).subarray(0, maxBytes).toString('utf8');
+}
+
+module.exports = { readResponseBuffer, readResponseText, readResponsePrefixText };
