@@ -1,4 +1,6 @@
-const { PDFParse } = require('pdf-parse');
+// loaded on first use: pdf-parse needs canvas globals (DOMMatrix) the moment it is imported, which would stop the whole app from
+// booting wherever the optional canvas binary is missing (e.g. a serverless function) even though only PDF routes need it
+const loadPdfParse = () => require('pdf-parse').PDFParse;
 const { safeFetch } = require('./safeUrl');
 const { readResponseBuffer } = require('./boundedResponse');
 
@@ -20,7 +22,7 @@ async function fetchPdfBuffer(url, maxBytes = 25 * 1024 * 1024, timeoutMs = 3000
 // of silently producing an empty/garbage summary, so the caller can record
 // a clean failure state rather than corrupting or partially publishing it.
 async function extractPdfText(buffer) {
-  const parser = new PDFParse({ data: buffer });
+  const parser = new (loadPdfParse())({ data: buffer });
   try {
     const result = await parser.getText();
     const text = (result.text || '').trim();
@@ -35,7 +37,7 @@ async function extractPdfText(buffer) {
 
 // Per-page text (page numbers as printed in the PDF's own page index, 1-based) for page selection.
 async function extractPdfPages(buffer) {
-  const parser = new PDFParse({ data: buffer });
+  const parser = new (loadPdfParse())({ data: buffer });
   try {
     const result = await parser.getText();
     return (result.pages || []).map((p, i) => ({ n: p.num || i + 1, text: p.text || '' }));
