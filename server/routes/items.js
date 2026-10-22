@@ -381,6 +381,7 @@ router.post('/:id/ai-draft', requireAuth, async (req, res) => {
         extractedText = meta.body_text || undefined;
       } catch (err) {
         // Not fatal — generateAiDraftForItem falls back to item.summary.
+        console.warn(`ai-draft body extraction failed for item ${item.id}: ${err.message}`);
       }
     }
     await generateAiDraftForItem(item.id, undefined, extractedText);
