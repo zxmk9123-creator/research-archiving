@@ -50,7 +50,19 @@ app.get('/api/cron/daily', async (req, res) => {
     ['collections', () => runDueCollections()],
     ['daily_discovery', () => maybeRunDailyDiscovery()],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
-    ['review_autopilot', () => require('./lib/reviewAutopilot').runAutopilot()],
+    // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
+    ['review_autopilot', async () => {
+      const autopilot = require('./lib/reviewAutopilot');
+      const total = { rounds: 0, archived: 0, published: 0, retry: 0, human: 0 };
+      for (let i = 0; i < 6 && Date.now() - started < Math.min(BUDGET_MS, 170000); i++) {
+        const r = await autopilot.runAutopilot({ aiBudget: 8 });
+        if (!r || r.skipped) break;
+        total.rounds++;
+        for (const k of ['archived', 'published', 'retry', 'human']) total[k] += r[k] || 0;
+        if (!(r.archived || r.published || r.retry || r.human)) break;
+      }
+      return total;
+    }],
     ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
     ['entity_maintenance', () => require('./lib/entityMaintenance').maybeRunEntityMaintenance()],
     ['verification', () => require('./lib/verificationRoutine').runQueue()],
@@ -64,7 +76,7 @@ app.get('/api/cron/daily', async (req, res) => {
       const out = await run();
       results[name] = Array.isArray(out)
         ? { sources: out.length, ok: out.filter((r) => r && r.ok).length, failed: out.filter((r) => r && !r.ok).length, newItems: out.reduce((n, r) => n + ((r && r.count) || 0), 0) }
-        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed } : 'done';
+        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed, rounds: out.rounds, archived: out.archived, published: out.published, retry: out.retry, human: out.human } : 'done';
     } catch (err) { results[name] = `error: ${String(err && err.message).slice(0, 120)}`; }
   }
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering

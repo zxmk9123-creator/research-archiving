@@ -133,19 +133,24 @@ async function collectDailyDiscoveryNow({ offset = 0, limit = null } = {}) {
 // still records completion instead of silently no-oping.
 async function recordDailyDiscoveryCompletion(result) {
   const failedSources = result.results.filter((r) => !r.ok).map((r) => ({ sourceId: r.sourceId, error: r.error }));
+  // a result assembled from slices carries no totals: derive them from the per-source results
+  const totals = result.totals || result.results.reduce(
+    (acc, r) => ({ discovered: acc.discovered + (r.discovered || 0), archived: acc.archived + (r.archived || 0), filtered: acc.filtered + (r.filtered || 0), failed: acc.failed + (r.failed || 0), failedSources: acc.failedSources + (r.ok ? 0 : 1) }),
+    { discovered: 0, archived: 0, filtered: 0, failed: 0, failedSources: 0 }
+  );
   await pool.query(
     `INSERT INTO scheduler_jobs (job_name, last_completed_at, last_totals, last_failed_sources)
      VALUES ($1, now(), $2, $3)
      ON CONFLICT (job_name) DO UPDATE SET last_completed_at = now(), last_totals = $2, last_failed_sources = $3`,
-    [JOB_NAME, JSON.stringify(result.totals), JSON.stringify(failedSources)]
+    [JOB_NAME, JSON.stringify(totals), JSON.stringify(failedSources)]
   );
   // The daily headline is a separate, durable read model. Start it only
   // after the collection completion record has been written; never let an
   // LLM outage turn a successful collection into a failed scheduler run.
   const dailyBriefModule = require('./dailyBrief');
-  dailyBriefModule.queueDailyBriefGeneration().catch((err) => {
+  require('./background').track(dailyBriefModule.queueDailyBriefGeneration().catch((err) => {
     console.error(`daily_brief enqueue failed: ${err.message}`);
-  });
+  }));
   return failedSources;
 }
 
