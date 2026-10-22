@@ -33,7 +33,13 @@ async function checkFreeLLM() {
     : /html/i.test(type) || /^\s*</.test(text) ? 'the address answers with an HTML page, not the API: check FREELLMAPI_BASE_URL (is the /v1 path included? does the host require a login, or is it asleep/offline?)'
     : res.status === 401 || res.status === 403 ? 'the key was refused'
     : res.ok ? 'HTTP 200 but the model returned no text' : `HTTP ${res.status}`;
-  if (!ok) throw new Error(JSON.stringify({ host, path, status: res.status, contentType: type.slice(0, 40), snippet: scrub(text), hint }));
+  // what kind of value was stored (never the value itself): length, stray characters, and which provider's key format it looks like
+  const raw = process.env.FREELLMAPI_CHAT_API_KEY || process.env.FREELLMAPI_API_KEY || process.env.FreeLLMAPIKEY || '';
+  const keyShape = {
+    length: raw.length, hasOuterWhitespace: raw !== raw.trim(), hasQuotes: /^["']|["']$/.test(raw.trim()),
+    looksLike: /^gsk_/.test(raw) ? 'Groq key' : /^sk-or-/.test(raw) ? 'OpenRouter key' : /^AIza/.test(raw) ? 'Google AI key' : /^sk-ant-/.test(raw) ? 'Anthropic key' : /^sk-/.test(raw) ? 'OpenAI-style key' : /^freellmapi/i.test(raw) ? 'FreeLLMAPI key' : 'unknown format',
+  };
+  if (!ok) throw new Error(JSON.stringify({ host, path, keyShape, status: res.status, contentType: type.slice(0, 40), snippet: scrub(text), hint }));
   return { host, path, status: res.status, reply: scrub(content) };
 }
 
