@@ -34,6 +34,13 @@ app.get('/api/cron/migrate-data', async (req, res) => {
   res.json(await require('./lib/dataMigration').migrate({ sourceUrl: process.env.SOURCE_DATABASE_URL, truncateFirst: req.query.truncate === '1' }));
 });
 
+// Dependency check (database, AI gateway, every search tier, feed egress, PDF parser); needs the same bearer token.
+app.get('/api/cron/diagnose', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  res.json(await require('./lib/diagnose').runDiagnostics());
+});
+
 app.get('/api/cron/daily', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });

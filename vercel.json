@@ -1,7 +1,23 @@
 {
   "functions": {
-    "api/index.js": { "maxDuration": 300, "includeFiles": "{server/**,node_modules/@napi-rs/**}" }
+    "api/index.js": {
+      "maxDuration": 300,
+      "includeFiles": "{server/**,node_modules/@napi-rs/**}"
+    }
   },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
-  "crons": [{ "path": "/api/cron/daily", "schedule": "10 23 * * *" }]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "10 23 * * *"
+    }
+  ],
+  "regions": [
+    "iad1"
+  ]
 }
