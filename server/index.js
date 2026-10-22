@@ -62,7 +62,9 @@ app.get('/api/cron/daily', async (req, res) => {
     if (Date.now() - started > BUDGET_MS) { results[name] = 'skipped_budget'; continue; }
     try {
       const out = await run();
-      results[name] = out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals } : 'done';
+      results[name] = Array.isArray(out)
+        ? { sources: out.length, ok: out.filter((r) => r && r.ok).length, failed: out.filter((r) => r && !r.ok).length, newItems: out.reduce((n, r) => n + ((r && r.count) || 0), 0) }
+        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed } : 'done';
     } catch (err) { results[name] = `error: ${String(err && err.message).slice(0, 120)}`; }
   }
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering

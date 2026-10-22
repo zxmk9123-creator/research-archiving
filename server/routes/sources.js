@@ -358,6 +358,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
     params.push(JSON.stringify(req.body.sector_links));
     sets.push(`sector_links = $${params.length}`);
   }
+  // a corrected address deserves an immediate retry: drop the old failure so the collection back-off does not hold the source
+  if (req.body.url !== undefined) sets.push('last_error = NULL', 'last_error_at = NULL');
   if (!sets.length) return res.status(400).json({ error: 'no fields to update' });
 
   params.push(req.params.id);
