@@ -32,6 +32,7 @@ async function migrate({ sourceUrl, budgetMs = 240000, truncateFirst = false } =
   const source = new Pool({ connectionString: sourceUrl, ssl: process.env.PGSSL === 'false' ? false : { rejectUnauthorized: false }, max: 2 });
   const report = [];
   try {
+    await source.query('SELECT 1'); // fail before touching the target if the source cannot be reached
     const order = await tableOrder(target);
     // the schema file seeds a few rows (e.g. sources); a first run on a fresh database clears them so ids match the source exactly
     if (truncateFirst) await target.query(`TRUNCATE ${order.map(q).join(', ')} RESTART IDENTITY CASCADE`);
