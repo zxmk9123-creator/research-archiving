@@ -15,3 +15,18 @@ test('extractArticleLinks keeps same-site articles and pdfs, drops nav and offsi
     'https://example.org/files/report.pdf',
   ]);
 });
+
+test('extractMetadata reads a PDF response through the text layer', async () => {
+  const safeUrl = require('../server/lib/safeUrl');
+  const pdfExtract = require('../server/lib/pdfExtract');
+  const origFetch = safeUrl.safeFetch;
+  const origExtract = pdfExtract.extractPdfText;
+  safeUrl.safeFetch = async () => new Response(Buffer.from('%PDF-1.4 x'), { headers: { 'content-type': 'application/pdf' } });
+  pdfExtract.extractPdfText = async () => ({ text: 'Palm Oil Outlook 2026\nProduction rises in Indonesia this year.' });
+  delete require.cache[require.resolve('../server/lib/extractMetadata')];
+  try {
+    const meta = await require('../server/lib/extractMetadata').extractMetadata('https://example.org/a.pdf');
+    assert.strictEqual(meta.title, 'Palm Oil Outlook 2026');
+    assert.match(meta.body_text, /Indonesia/);
+  } finally { safeUrl.safeFetch = origFetch; pdfExtract.extractPdfText = origExtract; delete require.cache[require.resolve('../server/lib/extractMetadata')]; }
+});

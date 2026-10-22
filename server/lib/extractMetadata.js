@@ -133,6 +133,14 @@ async function extractMetadata(url) {
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  // a PDF answered as bytes: read its text layer instead of parsing binary as HTML (which produced "unreadable text" drafts)
+  const contentType = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+  if (/pdf/i.test(contentType) || (/octet-stream/i.test(contentType) && /\.pdf(?:$|\?)/i.test(url))) {
+    const { extractPdfText } = require('./pdfExtract');
+    const text = (await extractPdfText(await require('./boundedResponse').readResponseBuffer(res, 25 * 1024 * 1024, 'PDF'))).text.replace(/\s+\n/g, '\n');
+    const firstLine = text.split('\n').map((l) => l.trim()).find((l) => l.length >= 8) || null;
+    return { title: firstLine && firstLine.slice(0, 200), summary: text.replace(/\s+/g, ' ').slice(0, 400), thumbnail_url: null, published_at: null, body_text: text.slice(0, MAX_BODY_TEXT_CHARS) };
+  }
   const rawHtml = await readResponsePrefixText(res, 1200000); // a page bigger than this is read up to the cap, not rejected
   // Production incident: an unbounded-size page fed into the previous
   // regex parser froze the whole Node process for minutes — GET / (a
