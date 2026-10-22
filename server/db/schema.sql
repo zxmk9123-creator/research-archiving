@@ -636,15 +636,6 @@ CREATE TABLE IF NOT EXISTS term_aliases (
   PRIMARY KEY (term, alt)
 );
 
--- Uncertainty-triggered verification routine (lib/verificationRoutine.js): an answer that had to set an entity's
--- figure aside (undated / old / unconfirmed) queues it here; a scheduled routine collects fresh sources for it.
--- Review autopilot (lib/reviewAutopilot.js): the second, automatic judgement over Draft items the first filter already
--- rated; only 'human' items stay for a person. 'archived' items are status = 'Archived' (restorable), never deleted.
-ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review TEXT CHECK (auto_review IN ('archived','published','retry','human'));
-ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_reason TEXT;
-ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_at TIMESTAMPTZ;
-ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_attempts INTEGER NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS items_auto_review_pending ON items (status, auto_review);
 
 CREATE TABLE IF NOT EXISTS verification_queue (
   id SERIAL PRIMARY KEY,
@@ -1327,3 +1318,15 @@ CREATE TABLE IF NOT EXISTS eval_runs (
 -- Two more relation types: a technology licence (licensor_for) and a plain collaboration that is not a joint venture (partner_with).
 ALTER TABLE company_relations DROP CONSTRAINT IF EXISTS company_relations_relation_check;
 ALTER TABLE company_relations ADD CONSTRAINT company_relations_relation_check CHECK (relation IN ('owns','stake','jv_partner','supplies','contractor_for','offtake_from','licensor_for','partner_with'));
+
+
+-- (moved here: needs the items table, which is created further down; a fresh database must apply this file top to bottom)
+-- Uncertainty-triggered verification routine (lib/verificationRoutine.js): an answer that had to set an entity's
+-- figure aside (undated / old / unconfirmed) queues it here; a scheduled routine collects fresh sources for it.
+-- Review autopilot (lib/reviewAutopilot.js): the second, automatic judgement over Draft items the first filter already
+-- rated; only 'human' items stay for a person. 'archived' items are status = 'Archived' (restorable), never deleted.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review TEXT CHECK (auto_review IN ('archived','published','retry','human'));
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_reason TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_at TIMESTAMPTZ;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS items_auto_review_pending ON items (status, auto_review);
