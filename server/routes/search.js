@@ -219,6 +219,7 @@ function spellingVariants(token) {
   return Array.from(variants);
 }
 
+const termGroups = require('../lib/termGroups');
 const MAX_CONCEPTS = 16;
 
 // Returns concepts: each is an array of surface forms treated as ONE concept
@@ -252,7 +253,7 @@ function extractConcepts(q) {
   };
 
   const topical = build(tokens.filter((t) => !isQuestionFraming(t) && !isQuestionFraming(stemKorean(t))));
-  return topical.length ? topical : build(tokens); // P6
+  return termGroups.expandConcepts(topical.length ? topical : build(tokens), q); // P6
 }
 
 // A context-dependent follow-up ("그 요인을 더 자세히 설명해줘", "그럼 수출량은?")
@@ -1015,7 +1016,7 @@ const PRODUCT_TOPIC_TERMS = {
   SAF: ['saf', '지속가능항공유', 'sustainable aviation fuel', '바이오항공유'],
   '팜유': ['팜유', 'palm oil'],
   '대두유': ['대두유', 'soybean oil', 'soy oil'],
-  '유채씨유': ['유채씨유', 'rapeseed oil', 'canola oil'],
+  '유채씨유': ['유채씨유', '카놀라유', '채종유', 'rapeseed oil', 'canola oil'],
   '해바라기유': ['해바라기유', 'sunflower oil'],
   UCO: ['uco', 'used cooking oil', '폐식용유'],
   Tallow: ['tallow', '우지'],

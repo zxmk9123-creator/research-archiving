@@ -20,7 +20,7 @@ const pool = require('../db/pool');
 const SECTOR_KEYWORD_PATTERNS = {
   '팜유': /\bpalm oil\b|팜유/i,
   '대두유': /\bsoy(?:bean)? oil\b|대두유/i,
-  '유채씨유': /\brapeseed oil\b|\bcanola oil\b|유채씨유/i,
+  '유채씨유': /\brapeseed oil\b|\bcanola oil\b|유채씨유|카놀라유|채종유/i,
   '해바라기유': /\bsunflower oil\b|해바라기유/i,
   'UCO': /\bUCO\b|\bused cooking oil\b/i,
   'UCOME': /\bUCOME\b/,

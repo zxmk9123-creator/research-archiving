@@ -127,7 +127,7 @@ const OIL_FAT_PRODUCT_PATTERNS = [
   /\bindustrial oils?\b/i,
   // Korean sector names, in case a bilingual/Korean-language description
   // is ever collected.
-  /식용유지/, /비식용유지/, /팜유/, /대두유/, /유채씨유/, /해바라기유/,
+  /식용유지/, /비식용유지/, /팜유/, /대두유/, /유채씨유/, /카놀라유/, /채종유/, /해바라기유/,
 ];
 
 const POLICY_MECHANISM_PATTERNS = [

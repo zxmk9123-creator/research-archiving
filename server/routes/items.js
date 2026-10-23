@@ -221,7 +221,14 @@ function buildItemFilterClauses(query) {
   if (source_id) { params.push(source_id); clauses.push(`i.source_id = $${params.length}`); }
   if (from) { params.push(from); clauses.push(`i.published_at >= $${params.length}`); }
   if (to) { params.push(to); clauses.push(`i.published_at <= $${params.length}`); }
-  if (q) { params.push(`%${q}%`); clauses.push(`(i.title ILIKE $${params.length} OR i.summary ILIKE $${params.length})`); }
+  if (q) {
+    // a synonym-group member (카놀라유, rapeseed oil ...) matches every spelling of the group
+    const likes = require('../lib/termGroups').filterForms(q).map((form) => {
+      params.push(`%${form}%`);
+      return `i.title ILIKE $${params.length} OR i.summary ILIKE $${params.length}`;
+    });
+    clauses.push(`(${likes.join(' OR ')})`);
+  }
   if (sector) {
     // Comma-separated list of sector ids (multi-select tree filter); a single id still works.
     const sectorIds = String(sector).split(',').map(Number).filter((n) => !Number.isNaN(n));
