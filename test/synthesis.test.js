@@ -43,7 +43,8 @@ test('rankForSynthesis: a recent, relevant, quantified material outranks an old 
 test('promptBlock: 3+ materials -> issue structure; fewer -> an explicit limit instead of padding', () => {
   assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단[\s\S]*# 추가 모니터링/);
   assert.match(synthesis.promptBlock('팜유 동향', 5), /채우지 않는다/);
-  assert.match(synthesis.promptBlock('팜유 동향', 5), /하위 불릿 줄을 만들지 않는다/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /\n  - 사실:[\s\S]*\n  - 시사점:/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /줄글 문단을 쓰지 않는다/);
   assert.match(synthesis.promptBlock('국내 팜유 동향', 5), /해외→국내 영향/);
   const thin = synthesis.promptBlock('팜유 동향', 1);
   assert.match(thin, /1건뿐/);
