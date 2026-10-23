@@ -368,6 +368,18 @@ CREATE TABLE IF NOT EXISTS daily_briefs (
 );
 CREATE INDEX IF NOT EXISTS daily_briefs_updated_at_idx ON daily_briefs(updated_at DESC);
 
+-- One row per failed headline generation attempt. daily_briefs.error is cleared
+-- once a later attempt succeeds, so without this the cause of retries is lost.
+CREATE TABLE IF NOT EXISTS daily_brief_attempts (
+  id BIGSERIAL PRIMARY KEY,
+  brief_date DATE NOT NULL,
+  failure_count INTEGER NOT NULL,
+  exhausted BOOLEAN NOT NULL DEFAULT false,
+  error TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS daily_brief_attempts_date_idx ON daily_brief_attempts(brief_date, created_at DESC);
+
 -- Seed the Discovery Query Registry's initial 12 queries (4 pre-existing +
 -- 8 new) covering commodity/market news, logistics/shipping, regulation/
 -- policy, major-company/IR, and reports/research papers. Idempotent by

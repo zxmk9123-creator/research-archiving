@@ -233,6 +233,10 @@ async function buildDailyBrief(briefDate) {
       const message = String(err.message || 'generation_failed').slice(0, 500);
       console.error(`daily_brief attempt failed date=${briefDate} retry=${failureCount - 1} exhausted=${exhausted} delay_ms=${delayMs} error=${message}`);
       await pool.query(
+        'INSERT INTO daily_brief_attempts (brief_date, failure_count, exhausted, error) VALUES ($1, $2, $3, $4)',
+        [briefDate, failureCount, exhausted, message]
+      ).catch((logErr) => console.error(`daily_brief attempt log failed: ${logErr.message}`));
+      await pool.query(
         `UPDATE daily_briefs
             SET attempt_count = attempt_count + 1,
                 status = CASE WHEN $3::boolean THEN 'failed' ELSE 'generating' END,
