@@ -3,6 +3,7 @@
 // — concepts only, never figures, dates or company facts — used (1) as the whole answer when nothing in the archive matches,
 // and (2) as a labelled "기초 지식" layer in front of the archive-grounded answer. Add or fix cards here; nothing else needs to change.
 const CARDS = [
+  { id: 'edible', name: '식용유(식용 유지)의 종류', terms: [/(^|[^폐비])식용유(?!지)/, '식용유지', '식물성유', 'cooking oil', 'edible oil', 'vegetable oil'], def: '식용유는 원료에 따라 크게 식물성과 동물성으로 나뉩니다. 식물성에는 대두유(콩기름), 팜유, 유채씨유(카놀라유), 해바라기유, 옥수수유, 올리브유, 참기름·들기름, 코코넛유, 땅콩유 등이 있고, 동물성에는 우지, 라드(돼지 지방), 버터 등이 있습니다. 같은 유지라도 정제 정도와 지방산 조성(포화·불포화)에 따라 용도와 가격이 달라집니다. 폐식용유(UCO)는 사용 후 회수한 식용유를 가리키며 일반 식용유의 종류와는 구분됩니다.' },
   { id: 'palm', name: '팜유', terms: ['팜유', 'palm oil', '팜오일'], def: '기름야자 열매의 과육에서 짜낸 식물성 유지입니다. 상온에서 반고체 상태이며 식용유·가공식품·유지화학 제품·바이오디젤 원료로 쓰입니다. 원유 형태는 CPO(Crude Palm Oil), 정제를 거친 것은 RBD 팜유라고 부릅니다.' },
   { id: 'palm-kernel', name: '팜핵유', terms: ['팜핵유', 'palm kernel oil', 'pko'], def: '기름야자 열매의 씨앗(핵)에서 얻는 유지로, 과육에서 얻는 팜유와는 별개의 제품입니다. 라우르산 함량이 높아 제과·마가린 등 식품 용도와 비누·세제·유지화학 용도에 쓰입니다.' },
   { id: 'olein', name: '팜 올레인·스테아린', terms: ['올레인', 'olein', '스테아린', 'stearin', 'rbd'], def: '팜유를 온도에 따라 분리(분별)하면 액체 분획인 올레인과 고체 분획인 스테아린이 얻어집니다. RBD는 정제(Refined)·탈색(Bleached)·탈취(Deodorized)를 모두 거친 유지를 뜻합니다.' },
@@ -29,10 +30,11 @@ const CARDS = [
   { id: 'rspo', name: 'RSPO', terms: ['rspo', '지속가능 팜유 인증'], def: 'Roundtable on Sustainable Palm Oil의 약자로, 환경·사회 기준을 충족한 팜유 생산·유통에 인증을 부여하는 국제 협의체이자 인증 제도입니다.' },
 ];
 
-const DEFINITION_CUE = /(뭐(야|예요|에요|지|임|니|가)|무엇|뜻|의미|정의|이란|란\?|란\s*$|차이|구분|비교|설명|알려|개념|what\s+is|define|difference|\bvs\.?\b)/i;
+const DEFINITION_CUE = /(뭐(야|예요|에요|지|임|니|가)|무엇|뜻|의미|정의|이란|란\?|란\s*$|차이|구분|비교|설명|알려|개념|종류|what\s+is|define|difference|\bvs\.?\b|types?\s+of)/i;
 const pad = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function termHit(q, term) {
+  if (term instanceof RegExp) return term.test(q);
   const t = term.toLowerCase();
   return /^[a-z0-9 ]+$/.test(t) ? new RegExp(`(^|[^a-z0-9])${pad(t)}([^a-z0-9]|$)`).test(q) : q.includes(t);
 }

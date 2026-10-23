@@ -29,3 +29,9 @@ test('new cards match their own terms; "red" alone does not trigger the RED card
   assert.deepEqual(glossary.matchCards('what is red meat'), []);
   assert.deepEqual(glossary.matchCards('EU RED가 뭐야').map((c) => c.id), ['red']);
 });
+
+test('"식용유 종류" gets the edible-oil card; 폐식용유 questions do not', () => {
+  assert.deepEqual(glossary.matchCards('식용유 종류에 대해 알려줘').map((c) => c.id), ['edible']);
+  assert.ok(!glossary.matchCards('폐식용유 종류').some((c) => c.id === 'edible'));
+  assert.deepEqual(glossary.matchCards('UCO가 뭐야').map((c) => c.id), ['uco']);
+});

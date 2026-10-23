@@ -467,15 +467,20 @@ async function retrieveCandidates(question, history, { light = false, trace = nu
   const params = [];
   // One clause per CONCEPT (P2/P3): a concept's forms are OR'd inside a single
   // clause, so its weight is added at most once however many spellings match.
+  // "식용유" is also a substring of "폐식용유" (UCO) and "비식용유지" (a sector name): a plain %식용유% match pulled the whole
+  // UCO/SAF corpus into an edible-oil question. Unless the question itself is about those, match 식용유 only when it
+  // is not preceded by 폐 / 비.
+  const wantsWasteOrNonEdible = concepts.flat().some((f) => /폐|비식용|uco|used cooking/i.test(f));
   const keywordClauses = concepts.map((forms) => {
     const idxs = forms.map((form) => {
-      params.push(`%${form}%`);
-      return params.length;
+      const strict = form === '식용유' && !wantsWasteOrNonEdible;
+      params.push(strict ? '(^|[^폐비])식용유' : `%${form}%`);
+      return { idx: params.length, op: strict ? '~*' : 'ILIKE' };
     });
-    const perForm = (idx) => `(i.title ILIKE $${idx} OR i.summary ILIKE $${idx} OR i.insight ILIKE $${idx}
-      OR i.ai_summary ILIKE $${idx} OR i.ai_insight ILIKE $${idx} OR s.name ILIKE $${idx}
-      OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ILIKE $${idx})
-      OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ILIKE $${idx}))`;
+    const perForm = ({ idx, op }) => `(i.title ${op} $${idx} OR i.summary ${op} $${idx} OR i.insight ${op} $${idx}
+      OR i.ai_summary ${op} $${idx} OR i.ai_insight ${op} $${idx} OR s.name ${op} $${idx}
+      OR EXISTS (SELECT 1 FROM item_sectors isec JOIN sectors sec ON sec.id = isec.sector_id WHERE isec.item_id = i.id AND sec.name ${op} $${idx})
+      OR EXISTS (SELECT 1 FROM item_usages iu JOIN usages u ON u.id = iu.usage_id WHERE iu.item_id = i.id AND u.name ${op} $${idx}))`;
     return `(${idxs.map(perForm).join(' OR ')})`;
   });
   // relevance_score is now a weighted sum (keyword specificity), not a

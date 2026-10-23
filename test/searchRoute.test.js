@@ -1525,3 +1525,18 @@ test('SYSTEM_PROMPT allows labelled inference from combined materials without al
   assert.match(search.SYSTEM_PROMPT, /never compute or introduce a figure/);
   assert.match(search.VERIFICATION_SYSTEM_PROMPT, /추론/);
 });
+
+test('POST /: a plain 식용유 question matches 식용유 only when not preceded by 폐/비 (UCO and 비식용유지 stay out); a 폐식용유 question keeps the plain match', async () => {
+  const run = async (question) => {
+    const { calls, restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
+    const restoreProvider = mockProvider(async () => ({ text: 'x', provider: 'freellmapi' }));
+    try {
+      await withServer((base) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) }).then((r) => r.json()));
+      return calls.filter((c) => /i\.status = 'Published'/.test(c.text) && /relevance_score/.test(c.text));
+    } finally { restore(); restoreProvider(); }
+  };
+  const plain = await run('식용유 종류 알려줘');
+  assert.ok(plain.length && plain.some((c) => c.params.includes('(^|[^폐비])식용유') && / ~\* \$/.test(c.text)));
+  const waste = await run('폐식용유 공급업체');
+  assert.ok(!waste.some((c) => c.params.includes('(^|[^폐비])식용유')));
+});
