@@ -799,10 +799,54 @@ let aiSearchTurnsHtml = [];
 // 대화 초기화 버튼: 대화 내역(aiSearchHistory)이 있을 때만 눌러서
 // 강제 초기화할 수 있다 — 입력창 가로 길이를 살짝 줄여 그 공간에 둔다
 // (입력창은 flex:1이라 같은 행에 버튼을 하나 더 두면 자동으로 줄어든다).
+// 렉스(LX인터내셔널 마스코트): 검색창 왼쪽에서 달리기·공부·낮잠·인사를 번갈아 하는 SVG 캐릭터. CSS 애니메이션만 사용하고 prefers-reduced-motion 에서는 정지.
+const REX_STATES = ['run', 'study', 'lie', 'wave'];
+const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 64 64" width="52" height="52">
+  <g class="rex-z"><text x="44" y="14" font-size="9" fill="#8b95a1">z</text><text x="50" y="8" font-size="7" fill="#8b95a1">z</text></g>
+  <g class="rex-body">
+    <path class="rex-tail" d="M44 50c10 2 12-8 5-9" fill="none" stroke="#4fbf63" stroke-width="5" stroke-linecap="round"/>
+    <ellipse class="rex-leg rex-leg-l" cx="25" cy="57" rx="5" ry="3.5" fill="#4fbf63"/>
+    <ellipse class="rex-leg rex-leg-r" cx="39" cy="57" rx="5" ry="3.5" fill="#4fbf63"/>
+    <ellipse cx="32" cy="41" rx="15" ry="16" fill="#5ccf6e"/>
+    <ellipse cx="32" cy="45" rx="9" ry="10" fill="#c4f1bd"/>
+    <ellipse class="rex-arm rex-arm-l" cx="17.5" cy="42" rx="3.2" ry="5" fill="#4fbf63"/>
+    <g class="rex-head">
+      <circle cx="32" cy="25" r="16" fill="#5ccf6e"/>
+      <g class="rex-eyes"><circle cx="26" cy="24" r="2.3" fill="#2b3a2e"/><circle cx="38" cy="24" r="2.3" fill="#2b3a2e"/></g>
+      <g class="rex-eyes-shut" fill="none" stroke="#2b3a2e" stroke-width="1.6" stroke-linecap="round"><path d="M23.5 24q2.5 2 5 0"/><path d="M35.5 24q2.5 2 5 0"/></g>
+      <circle cx="21.5" cy="30" r="3.2" fill="#ff9aa5" opacity=".85"/><circle cx="42.5" cy="30" r="3.2" fill="#ff9aa5" opacity=".85"/>
+      <path d="M28 30q4 3.2 8 0" fill="none" stroke="#2b3a2e" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g class="rex-book"><rect x="22" y="44" width="20" height="12" rx="1.5" fill="#fff" stroke="#8b95a1" stroke-width="1.2"/><path d="M32 44v12M25 48h4M35 48h4M25 51h4M35 51h4" stroke="#b0b8c1" stroke-width="1"/></g>
+    <ellipse class="rex-arm rex-arm-r" cx="46.5" cy="42" rx="3.2" ry="5" fill="#4fbf63"/>
+  </g>
+</svg></div>`;
+
+function bindRex(root) {
+  const rex = root && root.querySelector('.rex');
+  if (!rex || rex.dataset.bound) return;
+  rex.dataset.bound = '1';
+  let i = 0;
+  const tick = () => {
+    if (rex.dataset.locked || document.hidden || !rex.isConnected) return;
+    i = (i + 1) % REX_STATES.length;
+    rex.dataset.state = REX_STATES[i];
+  };
+  rex.dataset.state = REX_STATES[0];
+  const timer = setInterval(() => { if (!rex.isConnected) clearInterval(timer); else tick(); }, 4200);
+}
+
+function setRexSearching(moduleEl, on) {
+  const rex = moduleEl && moduleEl.querySelector('.rex');
+  if (!rex) return;
+  if (on) { rex.dataset.locked = '1'; rex.dataset.state = 'run'; } else { delete rex.dataset.locked; rex.dataset.state = 'wave'; }
+}
+
 function aiSearchHtml() {
   const hasHistory = aiSearchHistory.length > 0;
   return `<section class="ai-search" id="ai-search">
     <form id="ai-search-form">
+      ${REX_HTML}
       <input id="ai-search-input" type="text" placeholder="What are you researching?" autocomplete="off" required>
       <button type="button" class="ai-search-reset-btn" id="ai-search-reset-btn" title="대화 내역 초기화" aria-label="대화 내역 초기화" ${hasHistory ? '' : 'disabled'}>
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1436,6 +1480,7 @@ function startAiSearchStatus(moduleEl, statusEl) {
   let i = 0;
   statusEl.textContent = AI_SEARCH_STATUS_STEPS[0];
   moduleEl.classList.add('is-searching');
+  setRexSearching(moduleEl, true);
   aiSearchStatusTimer = setInterval(() => {
     i = (i + 1) % AI_SEARCH_STATUS_STEPS.length;
     statusEl.textContent = AI_SEARCH_STATUS_STEPS[i];
@@ -1446,6 +1491,7 @@ function stopAiSearchStatus(moduleEl) {
   clearInterval(aiSearchStatusTimer);
   aiSearchStatusTimer = null;
   moduleEl.classList.remove('is-searching');
+  setRexSearching(moduleEl, false);
 }
 
 // Runs (or re-runs, via the error state's "재검색" button) one turn's
@@ -1688,6 +1734,7 @@ function aiSearchErrorHtml(message) {
 function bindAiSearchForm() {
   const form = document.getElementById('ai-search-form');
   if (!form) return;
+  bindRex(form);
   const resultEl = document.getElementById('ai-search-result');
   const submitBtn = form.querySelector('button[type="submit"]');
   const resetBtn = document.getElementById('ai-search-reset-btn');

@@ -1296,3 +1296,37 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .ai-usage-bar .warn { background: #e8a33a; }
 .ai-usage-bar .bad { background: #d94f70; }
 .ai-usage-n { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* 렉스 마스코트 — 상태(data-state)별 CSS 애니메이션 */
+.rex { flex: 0 0 auto; width: 52px; height: 52px; align-self: center; margin-right: 2px; overflow: visible; }
+.rex svg { display: block; overflow: visible; }
+.rex g, .rex ellipse, .rex path { transform-box: fill-box; transform-origin: center; }
+.rex-eyes-shut, .rex-book, .rex-z { opacity: 0; }
+.rex-eyes { animation: rex-blink 4s infinite; }
+.rex-body { transform-origin: 50% 100%; transform-box: fill-box; }
+.rex[data-state="run"] .rex-body { animation: rex-bob .3s ease-in-out infinite; }
+.rex[data-state="run"] .rex-leg-l { animation: rex-step .3s linear infinite; }
+.rex[data-state="run"] .rex-leg-r { animation: rex-step .3s linear infinite reverse; }
+.rex[data-state="run"] .rex-arm-l { animation: rex-swing .3s ease-in-out infinite; }
+.rex[data-state="run"] .rex-arm-r { animation: rex-swing .3s ease-in-out infinite reverse; }
+.rex[data-state="run"] .rex-tail { animation: rex-wag .3s ease-in-out infinite; }
+.rex[data-state="study"] .rex-book { opacity: 1; }
+.rex[data-state="study"] .rex-head { animation: rex-nod 1.6s ease-in-out infinite; }
+.rex[data-state="study"] .rex-arm { transform: translateY(6px) rotate(-12deg); }
+.rex[data-state="lie"] .rex-body { transform: rotate(-82deg) translateX(6px); transition: transform .5s var(--ease); animation: rex-breathe 2.2s ease-in-out infinite; }
+.rex[data-state="lie"] .rex-eyes { opacity: 0; animation: none; }
+.rex[data-state="lie"] .rex-eyes-shut, .rex[data-state="lie"] .rex-z { opacity: 1; }
+.rex[data-state="lie"] .rex-z { animation: rex-float 2s ease-in-out infinite; }
+.rex[data-state="wave"] .rex-arm-r { animation: rex-wave .6s ease-in-out infinite; transform-origin: 50% 90%; }
+.rex[data-state="wave"] .rex-body { animation: rex-hop 1.2s ease-in-out infinite; }
+@keyframes rex-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.1); } }
+@keyframes rex-bob { 50% { transform: translateY(-3px); } }
+@keyframes rex-step { 0%, 100% { transform: translateY(0) rotate(-18deg); } 50% { transform: translateY(-3px) rotate(18deg); } }
+@keyframes rex-swing { 0%, 100% { transform: rotate(-30deg); } 50% { transform: rotate(30deg); } }
+@keyframes rex-wag { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(10deg); } }
+@keyframes rex-nod { 50% { transform: translateY(2px) rotate(3deg); } }
+@keyframes rex-breathe { 50% { transform: rotate(-82deg) translateX(6px) scale(1.04); } }
+@keyframes rex-float { 0% { transform: translateY(0); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-6px); opacity: 0; } }
+@keyframes rex-wave { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-55deg); } }
+@keyframes rex-hop { 50% { transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .rex *, .rex { animation: none !important; transition: none !important; } .rex-z { opacity: 0 !important; } }
