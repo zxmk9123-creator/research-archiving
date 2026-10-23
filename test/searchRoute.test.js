@@ -1519,11 +1519,11 @@ test('remapCitationMarkers: a 3-digit item-id style marker is dropped, a year in
   assert.equal(searchRouter.remapCitationMarkers('근거 없음 [212].', []), '근거 없음 .');
 });
 
-test('SYSTEM_PROMPT allows labelled inference from combined materials without allowing new figures, and the verifier knows the 추론 label', () => {
+test('SYSTEM_PROMPT allows labelled inference from combined materials without allowing new figures, and the verifier knows the 인사이트 label', () => {
   const search = require('../server/routes/search');
   assert.match(search.SYSTEM_PROMPT, /INFERENCE \(allowed, labelled\)/);
   assert.match(search.SYSTEM_PROMPT, /never compute or introduce a figure/);
-  assert.match(search.VERIFICATION_SYSTEM_PROMPT, /추론/);
+  assert.match(search.VERIFICATION_SYSTEM_PROMPT, /인사이트/);
 });
 
 test('POST /: a plain 식용유 question matches 식용유 only when not preceded by 폐/비 (UCO and 비식용유지 stay out); a 폐식용유 question keeps the plain match', async () => {
