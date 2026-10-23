@@ -799,36 +799,67 @@ let aiSearchTurnsHtml = [];
 // 대화 초기화 버튼: 대화 내역(aiSearchHistory)이 있을 때만 눌러서
 // 강제 초기화할 수 있다 — 입력창 가로 길이를 살짝 줄여 그 공간에 둔다
 // (입력창은 flex:1이라 같은 행에 버튼을 하나 더 두면 자동으로 줄어든다).
-// 렉스(LX인터내셔널 마스코트): 검색창 왼쪽에서 달리기·공부·낮잠·인사를 번갈아 하는 SVG 캐릭터. CSS 애니메이션만 사용하고 prefers-reduced-motion 에서는 정지.
-const REX_STATES = ['run', 'study', 'lie', 'wave'];
-const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 80 80" width="64" height="64">
-  <defs>
-    <radialGradient id="rexG" cx="36%" cy="24%" r="85%"><stop offset="0" stop-color="#d4f6cf"/><stop offset=".4" stop-color="#8fe0a6"/><stop offset="1" stop-color="#4fb877"/></radialGradient>
-    <radialGradient id="rexD" cx="36%" cy="28%" r="85%"><stop offset="0" stop-color="#7fd89a"/><stop offset="1" stop-color="#379a60"/></radialGradient>
-    <radialGradient id="rexB" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#f6fbe6"/><stop offset=".65" stop-color="#e0f1c6"/><stop offset="1" stop-color="#bddfa6"/></radialGradient>
-    <radialGradient id="rexC" cx="45%" cy="40%" r="65%"><stop offset="0" stop-color="#ffa3a3"/><stop offset=".7" stop-color="#f98f94"/><stop offset="1" stop-color="#f98f94" stop-opacity=".55"/></radialGradient>
-    <radialGradient id="rexS" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1b3a22" stop-opacity=".32"/><stop offset="1" stop-color="#1b3a22" stop-opacity="0"/></radialGradient>
-  </defs>
-  <ellipse class="rex-shadow" cx="40" cy="76" rx="24" ry="3.6" fill="url(#rexS)"/>
-  <g class="rex-z"><text x="58" y="14" font-size="10" fill="#8b95a1">z</text><text x="65" y="7" font-size="7" fill="#8b95a1">z</text></g>
-  <g class="rex-body">
-    <g class="rex-tail"><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#3a9d62" stroke-width="7.4" stroke-linecap="round"/><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#e8776c" stroke-width="7.4" stroke-dasharray="3.2 5.2" stroke-dashoffset="1"/></g>
-    <ellipse class="rex-leg rex-leg-l" cx="30" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/>
-    <ellipse class="rex-leg rex-leg-r" cx="50" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/>
-    <ellipse cx="37" cy="5.5" rx="3.8" ry="3.2" fill="url(#rexG)"/>
+// 렉스(LX인터내셔널 마스코트): 검색창 왼쪽에서 4개 장면(인사·스탠드 공부·러닝머신·취침)을 5초마다 순환하는 SVG 캐릭터.
+// CSS 애니메이션만 사용하고 prefers-reduced-motion 에서는 정지. 검색 중에는 러닝머신 장면에 고정된다.
+const REX_STATES = ['wave', 'study', 'run', 'sleep'];
+const REX_SCENE_MS = 5000;
+function rexChar({ mouth = 'smile', eyes = 'open', legs = true } = {}) {
+  const hand = '<circle cx="60.4" cy="60.6" r="1.7" fill="#58bf80"/><circle cx="62.7" cy="61.2" r="1.7" fill="#58bf80"/><circle cx="64.8" cy="60.3" r="1.6" fill="#58bf80"/>';
+  const stripes = (x) => `<path d="M${x - 4} 51.4q4.4 1.6 8.8 0M${x - 4.2} 55.6q4.4 1.6 8.8 0" fill="none" stroke="#e8776c" stroke-width="2" stroke-linecap="round"/>`;
+  return `<g class="rc-tail"><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#3a9d62" stroke-width="7.4" stroke-linecap="round"/><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#e8776c" stroke-width="7.4" stroke-dasharray="3.2 5.2" stroke-dashoffset="1"/><path d="M60 52.5C64 50 68 51 70 53" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="1.4" stroke-linecap="round"/></g>
+    ${legs ? '<ellipse class="rc-leg rc-leg-l" cx="30" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/><ellipse class="rc-leg rc-leg-r" cx="50" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/>' : ''}
+    <ellipse cx="37" cy="5.5" rx="3.8" ry="3.2" fill="url(#rexG)"/><ellipse cx="35.8" cy="4.6" rx="1.5" ry=".9" fill="#fff" opacity=".8"/>
     <path d="M40 5C55 5 66 17 66 31C66 40 61 45 61 52C64 58 63 68 52 71L28 71C17 68 16 58 19 52C19 45 14 40 14 31C14 17 25 5 40 5Z" fill="url(#rexG)"/>
-    <ellipse cx="40" cy="59" rx="15" ry="12" fill="url(#rexB)"/>
-    <ellipse cx="29" cy="15" rx="9" ry="5" fill="#fff" opacity=".34" transform="rotate(-32 29 15)"/>
-    <g class="rex-arm rex-arm-l"><ellipse cx="17.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/><path d="M13.5 51.4q4.4 1.6 8.8 0M13.3 55.4q4.4 1.6 8.8 0" fill="none" stroke="#e8776c" stroke-width="2" stroke-linecap="round"/></g>
-    <g class="rex-head">
-      <circle cx="21.5" cy="40" r="7.2" fill="url(#rexC)"/><circle cx="58.5" cy="40" r="7.2" fill="url(#rexC)"/>
-      <g class="rex-eyes"><ellipse cx="29" cy="33.5" rx="1.9" ry="2.3" fill="#1f2a24"/><ellipse cx="51" cy="33.5" rx="1.9" ry="2.3" fill="#1f2a24"/><circle cx="29.6" cy="32.7" r=".6" fill="#fff"/><circle cx="51.6" cy="32.7" r=".6" fill="#fff"/></g>
-      <g class="rex-eyes-shut" fill="none" stroke="#1f2a24" stroke-width="1.6" stroke-linecap="round"><path d="M26.6 33.6q2.4 2 4.8 0"/><path d="M48.6 33.6q2.4 2 4.8 0"/></g>
-      <path class="rex-smile" d="M36.5 36.8q3.5 3.4 7 0" fill="none" stroke="#1f2a24" stroke-width="1.5" stroke-linecap="round"/>
-      <g class="rex-mouth-open"><path d="M34.5 35.6q5.5 8.6 11 0z" fill="#8a2f3f"/><path d="M37.4 39.2q2.6 2 5.2 0q-2.6-1.4-5.2 0z" fill="#ff8d9e"/></g>
+    <path d="M62.5 24C65 30 64.5 37 61.5 44" fill="none" stroke="#e9fff0" stroke-opacity=".38" stroke-width="2.2" stroke-linecap="round"/>
+    <ellipse cx="40" cy="59" rx="15" ry="12" fill="url(#rexB)"/><ellipse cx="34" cy="53.5" rx="6" ry="2.6" fill="#fff" opacity=".55" transform="rotate(-18 34 53.5)"/>
+    <ellipse cx="29" cy="15" rx="10" ry="5.6" fill="#fff" opacity=".42" transform="rotate(-32 29 15)"/><ellipse cx="25.5" cy="12.6" rx="3.6" ry="1.7" fill="#fff" opacity=".9" transform="rotate(-32 25.5 12.6)"/>
+    <g class="rc-arm rc-arm-l"><ellipse cx="17.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/>${stripes(17.5)}<ellipse cx="16" cy="50" rx="1.3" ry="2" fill="#fff" opacity=".45"/></g>
+    <g class="rc-head">
+      <circle cx="21.5" cy="40" r="7.2" fill="url(#rexC)"/><circle cx="58.5" cy="40" r="7.2" fill="url(#rexC)"/><circle cx="19.6" cy="37.6" r="1.3" fill="#fff" opacity=".55"/><circle cx="56.6" cy="37.6" r="1.3" fill="#fff" opacity=".55"/>
+      ${eyes === 'shut'
+        ? '<g fill="none" stroke="#1f2a24" stroke-width="1.5" stroke-linecap="round"><path d="M27.4 33.6q1.6 1.7 3.2 0"/><path d="M49.4 33.6q1.6 1.7 3.2 0"/></g>'
+        : '<g class="rc-eyes"><ellipse cx="29" cy="33.5" rx="1.25" ry="1.55" fill="#1f2a24"/><ellipse cx="51" cy="33.5" rx="1.25" ry="1.55" fill="#1f2a24"/><circle cx="29.4" cy="33" r=".42" fill="#fff"/><circle cx="51.4" cy="33" r=".42" fill="#fff"/></g>'}
+      ${mouth === 'open'
+        ? '<path d="M34.5 35.6q5.5 8.6 11 0z" fill="#8a2f3f"/><path d="M37.4 39.2q2.6 2 5.2 0q-2.6-1.4-5.2 0z" fill="#ff8d9e"/>'
+        : '<path d="M36.5 36.8q3.5 3.4 7 0" fill="none" stroke="#1f2a24" stroke-width="1.5" stroke-linecap="round"/>'}
     </g>
-    <g class="rex-book"><rect x="29" y="58" width="22" height="14" rx="2" fill="#fff" stroke="#8b95a1" stroke-width="1.3"/><path d="M40 58v14M32 62h5M43 62h5M32 65.5h5M43 65.5h5" stroke="#b0b8c1" stroke-width="1"/></g>
-    <g class="rex-arm rex-arm-r"><ellipse cx="62.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/><path d="M58.5 51.4q4.4 1.6 8.8 0M58.7 55.4q4.4 1.6 8.8 0" fill="none" stroke="#e8776c" stroke-width="2" stroke-linecap="round"/><circle cx="60.4" cy="47.6" r="1.8" fill="#4fb877"/><circle cx="62.8" cy="47" r="1.8" fill="#4fb877"/><circle cx="65" cy="48" r="1.7" fill="#4fb877"/></g>
+    <g class="rc-arm rc-arm-r"><ellipse cx="62.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/>${stripes(62.5)}${hand}<ellipse cx="64" cy="50" rx="1.3" ry="2" fill="#fff" opacity=".45"/></g>`;
+}
+const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 120 80" width="100%" height="100%">
+  <defs>
+    <radialGradient id="rexG" cx="34%" cy="22%" r="85%"><stop offset="0" stop-color="#e2fadc"/><stop offset=".35" stop-color="#94e3aa"/><stop offset=".8" stop-color="#4fb877"/><stop offset="1" stop-color="#3a9f66"/></radialGradient>
+    <radialGradient id="rexD" cx="36%" cy="28%" r="85%"><stop offset="0" stop-color="#8fe0a8"/><stop offset="1" stop-color="#379a60"/></radialGradient>
+    <radialGradient id="rexB" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#fbfdf0"/><stop offset=".65" stop-color="#e2f2c9"/><stop offset="1" stop-color="#bddfa6"/></radialGradient>
+    <radialGradient id="rexC" cx="45%" cy="40%" r="65%"><stop offset="0" stop-color="#ffa8a8"/><stop offset=".7" stop-color="#f98f94"/><stop offset="1" stop-color="#f98f94" stop-opacity=".55"/></radialGradient>
+    <radialGradient id="rexS" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1b3a22" stop-opacity=".3"/><stop offset="1" stop-color="#1b3a22" stop-opacity="0"/></radialGradient>
+    <linearGradient id="rexL" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe9a0" stop-opacity=".75"/><stop offset="1" stop-color="#ffe9a0" stop-opacity=".05"/></linearGradient>
+  </defs>
+  <g class="rc-scene sc-wave">
+    <ellipse cx="60" cy="76" rx="26" ry="3.4" fill="url(#rexS)"/>
+    <g transform="translate(24 2) scale(.9)"><g class="rc-body">${rexChar({ mouth: 'open' })}</g></g>
+    <g class="rc-spark" fill="none" stroke="#f5b84b" stroke-width="1.6" stroke-linecap="round"><path d="M98 14l4-4M102 22h5M98 30l4 4"/></g>
+  </g>
+  <g class="rc-scene sc-study">
+    <g transform="translate(19 -3) scale(.9)"><g class="rc-body">${rexChar({ legs: false })}</g></g>
+    <g transform="translate(9 0)"><path class="rc-light" d="M82 33L70 57H100L90 30Z" fill="url(#rexL)"/></g>
+    <rect x="8" y="56" width="104" height="4" rx="1.5" fill="#d9a56f"/><rect x="8" y="60" width="104" height="16" rx="1.5" fill="#b9814f"/>
+    <path d="M42 56l8-4 8 4 8-4 6 4v-1l-6-4-8 4-8-4-8 4z" fill="#fff" stroke="#8b95a1" stroke-width="1"/><path d="M42 56l8 3 8-3 8 3 6-3" fill="#fff" stroke="#8b95a1" stroke-width="1"/><path d="M50 52.5v6.5M58 56.5v2.8" stroke="#b0b8c1" stroke-width=".8"/>
+    <g transform="translate(9 0)"><ellipse cx="97" cy="56" rx="8" ry="2" fill="#6b7280"/><path d="M97 56V40L86 31" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M76 29L90 23L94 33L82 37Z" fill="#f2b94a"/><path d="M78 29.4L89 25" stroke="#fff" stroke-opacity=".6" stroke-width="1.2" stroke-linecap="round"/>
+  </g>
+  </g>
+  <g class="rc-scene sc-run">
+    <g transform="translate(22 -4) scale(.9)"><g class="rc-body">${rexChar({ mouth: 'open' })}</g></g>
+    <rect x="8" y="66" width="100" height="5" rx="2.5" fill="#4b5563"/><rect x="8" y="71" width="100" height="5" rx="2" fill="#374151"/><path class="rc-belt" d="M14 68.5H102" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 7"/>
+    <rect x="102" y="30" width="3" height="40" rx="1.5" fill="#6b7280"/><rect x="95" y="26" width="19" height="10" rx="2.5" fill="#1f2937"/><circle cx="100" cy="31" r="1.4" fill="#4ade80"/><circle cx="105" cy="31" r="1.4" fill="#facc15"/><circle cx="110" cy="31" r="1.4" fill="#f87171"/>
+    <path class="rc-sweat" d="M20 20q-2 4 0 5q2-1 0-5z" fill="#7cc4f2"/>
+  </g>
+  <g class="rc-scene sc-sleep">
+    <rect x="3" y="34" width="8" height="40" rx="2.5" fill="#a06b3c"/><rect x="8" y="58" width="98" height="12" rx="2.5" fill="#b9814f"/><rect x="10" y="68" width="5" height="8" fill="#8f5f33"/><rect x="98" y="68" width="5" height="8" fill="#8f5f33"/>
+    <rect x="9" y="48" width="96" height="13" rx="5" fill="#f4efe6"/>
+    <g transform="translate(52 37) rotate(-90) scale(.66) translate(-40 -38)"><g class="rc-body">${rexChar({ eyes: 'shut', legs: false })}</g></g>
+    <ellipse cx="33" cy="45" rx="14" ry="7" fill="#fff" stroke="#e5e0d6" stroke-width="1"/>
+    <path d="M56 41C70 36 92 37 102 46L104 60H56Z" fill="#8ecbf2"/><path d="M56 41C70 36 92 37 102 46" fill="none" stroke="#c4e6fb" stroke-width="2.2" stroke-linecap="round"/><path d="M72 40v20M88 40v20" stroke="#6fb4e0" stroke-width="1" stroke-opacity=".7"/>
+    <g class="rc-z"><text x="40" y="22" font-size="10" fill="#8b95a1">z</text><text x="48" y="13" font-size="8" fill="#8b95a1">z</text></g>
   </g>
 </svg></div>`;
 
@@ -837,19 +868,20 @@ function bindRex(root) {
   if (!rex || rex.dataset.bound) return;
   rex.dataset.bound = '1';
   let i = 0;
-  const tick = () => {
-    if (rex.dataset.locked || document.hidden || !rex.isConnected) return;
+  rex.dataset.state = REX_STATES[0];
+  const timer = setInterval(() => {
+    if (!rex.isConnected) { clearInterval(timer); return; }
+    if (rex.dataset.locked || document.hidden) return;
     i = (i + 1) % REX_STATES.length;
     rex.dataset.state = REX_STATES[i];
-  };
-  rex.dataset.state = REX_STATES[0];
-  const timer = setInterval(() => { if (!rex.isConnected) clearInterval(timer); else tick(); }, 4200);
+  }, REX_SCENE_MS);
+  rex._rexIndex = () => i;
 }
 
 function setRexSearching(moduleEl, on) {
   const rex = moduleEl && moduleEl.querySelector('.rex');
   if (!rex) return;
-  if (on) { rex.dataset.locked = '1'; rex.dataset.state = 'run'; } else { delete rex.dataset.locked; rex.dataset.state = 'wave'; }
+  if (on) { rex.dataset.locked = '1'; rex.dataset.state = 'run'; } else { delete rex.dataset.locked; rex.dataset.state = REX_STATES[rex._rexIndex ? rex._rexIndex() : 0]; }
 }
 
 function aiSearchHtml() {
