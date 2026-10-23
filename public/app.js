@@ -801,24 +801,36 @@ let aiSearchTurnsHtml = [];
 // (입력창은 flex:1이라 같은 행에 버튼을 하나 더 두면 자동으로 줄어든다).
 // 렉스(LX인터내셔널 마스코트): 검색창 왼쪽에서 달리기·공부·낮잠·인사를 번갈아 하는 SVG 캐릭터. CSS 애니메이션만 사용하고 prefers-reduced-motion 에서는 정지.
 const REX_STATES = ['run', 'study', 'lie', 'wave'];
-const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 64 64" width="52" height="52">
-  <g class="rex-z"><text x="44" y="14" font-size="9" fill="#8b95a1">z</text><text x="50" y="8" font-size="7" fill="#8b95a1">z</text></g>
+const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 80 80" width="64" height="64">
+  <defs>
+    <radialGradient id="rexG" cx="35%" cy="28%" r="80%"><stop offset="0" stop-color="#b6f7b0"/><stop offset=".42" stop-color="#58d56f"/><stop offset="1" stop-color="#27a447"/></radialGradient>
+    <radialGradient id="rexD" cx="35%" cy="28%" r="85%"><stop offset="0" stop-color="#6fe083"/><stop offset="1" stop-color="#1f9440"/></radialGradient>
+    <radialGradient id="rexB" cx="40%" cy="30%" r="80%"><stop offset="0" stop-color="#fffdf0"/><stop offset=".6" stop-color="#e6f8cc"/><stop offset="1" stop-color="#b5e29a"/></radialGradient>
+    <radialGradient id="rexC" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#ff9db0"/><stop offset="1" stop-color="#ff6b86"/></radialGradient>
+    <radialGradient id="rexS" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1b3a22" stop-opacity=".35"/><stop offset="1" stop-color="#1b3a22" stop-opacity="0"/></radialGradient>
+  </defs>
+  <ellipse class="rex-shadow" cx="40" cy="74" rx="22" ry="4" fill="url(#rexS)"/>
+  <g class="rex-z"><text x="56" y="16" font-size="10" fill="#8b95a1">z</text><text x="63" y="9" font-size="7" fill="#8b95a1">z</text></g>
   <g class="rex-body">
-    <path class="rex-tail" d="M44 50c10 2 12-8 5-9" fill="none" stroke="#4fbf63" stroke-width="5" stroke-linecap="round"/>
-    <ellipse class="rex-leg rex-leg-l" cx="25" cy="57" rx="5" ry="3.5" fill="#4fbf63"/>
-    <ellipse class="rex-leg rex-leg-r" cx="39" cy="57" rx="5" ry="3.5" fill="#4fbf63"/>
-    <ellipse cx="32" cy="41" rx="15" ry="16" fill="#5ccf6e"/>
-    <ellipse cx="32" cy="45" rx="9" ry="10" fill="#c4f1bd"/>
-    <ellipse class="rex-arm rex-arm-l" cx="17.5" cy="42" rx="3.2" ry="5" fill="#4fbf63"/>
+    <g class="rex-tail"><path d="M56 66c15 3 20-14 8-17-8-2-11 8-4 9" fill="none" stroke="#2fb04d" stroke-width="7" stroke-linecap="round"/><path d="M56 66c15 3 20-14 8-17-8-2-11 8-4 9" fill="none" stroke="#e0644f" stroke-width="2.6" stroke-linecap="round" stroke-dasharray=".1 6.5"/></g>
+    <ellipse class="rex-leg rex-leg-l" cx="30" cy="70" rx="7.5" ry="5" fill="url(#rexD)"/>
+    <ellipse class="rex-leg rex-leg-r" cx="50" cy="70" rx="7.5" ry="5" fill="url(#rexD)"/>
+    <ellipse cx="40" cy="55" rx="21" ry="18.5" fill="url(#rexG)"/>
+    <ellipse cx="40" cy="59" rx="13" ry="13" fill="url(#rexB)"/>
+    <ellipse cx="31" cy="46" rx="7" ry="3.5" fill="#fff" opacity=".28" transform="rotate(-25 31 46)"/>
+    <ellipse class="rex-arm rex-arm-l" cx="19.5" cy="56" rx="4.2" ry="6.4" fill="url(#rexD)"/>
     <g class="rex-head">
-      <circle cx="32" cy="25" r="16" fill="#5ccf6e"/>
-      <g class="rex-eyes"><circle cx="26" cy="24" r="2.3" fill="#2b3a2e"/><circle cx="38" cy="24" r="2.3" fill="#2b3a2e"/></g>
-      <g class="rex-eyes-shut" fill="none" stroke="#2b3a2e" stroke-width="1.6" stroke-linecap="round"><path d="M23.5 24q2.5 2 5 0"/><path d="M35.5 24q2.5 2 5 0"/></g>
-      <circle cx="21.5" cy="30" r="3.2" fill="#ff9aa5" opacity=".85"/><circle cx="42.5" cy="30" r="3.2" fill="#ff9aa5" opacity=".85"/>
-      <path d="M28 30q4 3.2 8 0" fill="none" stroke="#2b3a2e" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="23.5" cy="25" r="5" fill="url(#rexD)"/><circle cx="29" cy="16.5" r="5.6" fill="url(#rexD)"/><circle cx="38" cy="12" r="6" fill="url(#rexD)"/><circle cx="48" cy="14" r="5.6" fill="url(#rexD)"/><circle cx="55" cy="21" r="5" fill="url(#rexD)"/>
+      <circle cx="40" cy="31" r="21" fill="url(#rexG)"/>
+      <circle cx="30" cy="18" r="2.2" fill="#a8f5a2" opacity=".9"/><circle cx="44" cy="15" r="1.7" fill="#a8f5a2" opacity=".9"/><circle cx="52" cy="21" r="1.4" fill="#a8f5a2" opacity=".9"/><circle cx="36" cy="14" r="1.2" fill="#a8f5a2" opacity=".9"/>
+      <ellipse cx="31" cy="20" rx="8" ry="4" fill="#fff" opacity=".3" transform="rotate(-30 31 20)"/>
+      <g class="rex-eyes"><ellipse cx="32" cy="29" rx="2.5" ry="3" fill="#25302a"/><ellipse cx="48" cy="29" rx="2.5" ry="3" fill="#25302a"/><circle cx="32.8" cy="27.9" r=".9" fill="#fff"/><circle cx="48.8" cy="27.9" r=".9" fill="#fff"/></g>
+      <g class="rex-eyes-shut" fill="none" stroke="#25302a" stroke-width="1.8" stroke-linecap="round"><path d="M29 29q3 2.6 6 0"/><path d="M45 29q3 2.6 6 0"/></g>
+      <ellipse cx="24.5" cy="36" rx="5.4" ry="4.4" fill="url(#rexC)" opacity=".92"/><ellipse cx="55.5" cy="36" rx="5.4" ry="4.4" fill="url(#rexC)" opacity=".92"/>
+      <path d="M35 36.5q5 7 10 0z" fill="#7a2b3a"/><path d="M37.6 39.4q2.4 1.9 4.8 0q-2.4-1.3-4.8 0z" fill="#ff8da0"/>
     </g>
-    <g class="rex-book"><rect x="22" y="44" width="20" height="12" rx="1.5" fill="#fff" stroke="#8b95a1" stroke-width="1.2"/><path d="M32 44v12M25 48h4M35 48h4M25 51h4M35 51h4" stroke="#b0b8c1" stroke-width="1"/></g>
-    <ellipse class="rex-arm rex-arm-r" cx="46.5" cy="42" rx="3.2" ry="5" fill="#4fbf63"/>
+    <g class="rex-book"><rect x="29" y="56" width="22" height="14" rx="2" fill="#fff" stroke="#8b95a1" stroke-width="1.3"/><path d="M40 56v14M32 60h5M43 60h5M32 63.5h5M43 63.5h5" stroke="#b0b8c1" stroke-width="1"/></g>
+    <g class="rex-arm rex-arm-r"><ellipse cx="60.5" cy="56" rx="4.2" ry="6.4" fill="url(#rexD)"/><circle cx="58.6" cy="50.4" r="1.7" fill="#3dbb57"/><circle cx="60.9" cy="49.8" r="1.7" fill="#3dbb57"/><circle cx="63" cy="50.8" r="1.6" fill="#3dbb57"/></g>
   </g>
 </svg></div>`;
 
