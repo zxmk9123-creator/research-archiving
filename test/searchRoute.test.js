@@ -1540,3 +1540,12 @@ test('POST /: a plain 식용유 question matches 식용유 only when not precede
   const waste = await run('폐식용유 공급업체');
   assert.ok(!waste.some((c) => c.params.includes('(^|[^폐비])식용유')));
 });
+
+test('POST /: 식용유지 is matched only when not preceded by 비 (비식용유지 sector stays out of an edible-oil question)', async () => {
+  const { calls, restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
+  const restoreProvider = mockProvider(async () => ({ text: 'x', provider: 'freellmapi' }));
+  try {
+    await withServer((base) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '식용유지 시장 동향 알려줘' }) }).then((r) => r.json()));
+    assert.ok(calls.some((c) => c.params && c.params.includes('(^|[^비])식용유지')));
+  } finally { restore(); restoreProvider(); }
+});

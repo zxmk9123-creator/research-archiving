@@ -35,3 +35,8 @@ test('"식용유 종류" gets the edible-oil card; 폐식용유 questions do not
   assert.ok(!glossary.matchCards('폐식용유 종류').some((c) => c.id === 'edible'));
   assert.deepEqual(glossary.matchCards('UCO가 뭐야').map((c) => c.id), ['uco']);
 });
+
+test('비식용유지 questions do not get the edible-oil card', () => {
+  assert.ok(!glossary.matchCards('비식용유지 종류').some((c) => c.id === 'edible'));
+  assert.deepEqual(glossary.matchCards('식용유지 종류가 뭐야').map((c) => c.id), ['edible']);
+});

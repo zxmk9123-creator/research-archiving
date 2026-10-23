@@ -220,6 +220,8 @@ function spellingVariants(token) {
 }
 
 const termGroups = require('../lib/termGroups');
+// 식용유 ⊂ 폐식용유·비식용유지, 식용유지 ⊂ 비식용유지 (sector names): the plain substring match mixed non-edible/UCO material into edible-oil questions
+const EDIBLE_PREFIX_EXCLUDE = { '식용유': '폐비', '식용유지': '비' };
 const glossary = require('../lib/glossary');
 const MAX_CONCEPTS = 16;
 
@@ -467,14 +469,15 @@ async function retrieveCandidates(question, history, { light = false, trace = nu
   const params = [];
   // One clause per CONCEPT (P2/P3): a concept's forms are OR'd inside a single
   // clause, so its weight is added at most once however many spellings match.
-  // "식용유" is also a substring of "폐식용유" (UCO) and "비식용유지" (a sector name): a plain %식용유% match pulled the whole
-  // UCO/SAF corpus into an edible-oil question. Unless the question itself is about those, match 식용유 only when it
-  // is not preceded by 폐 / 비.
+  // "식용유" is also inside "폐식용유" (UCO) and "비식용유지" (a sector name), and "식용유지" inside "비식용유지": a plain
+  // substring match pulled the UCO/SAF corpus into edible-oil questions. Unless the question itself is about waste or
+  // non-edible oils, match those terms only when not preceded by 폐 / 비 (see EDIBLE_PREFIX_EXCLUDE).
   const wantsWasteOrNonEdible = concepts.flat().some((f) => /폐|비식용|uco|used cooking/i.test(f));
   const keywordClauses = concepts.map((forms) => {
     const idxs = forms.map((form) => {
-      const strict = form === '식용유' && !wantsWasteOrNonEdible;
-      params.push(strict ? '(^|[^폐비])식용유' : `%${form}%`);
+      const excluded = wantsWasteOrNonEdible ? null : EDIBLE_PREFIX_EXCLUDE[form];
+      const strict = Boolean(excluded);
+      params.push(strict ? `(^|[^${excluded}])${form}` : `%${form}%`);
       return { idx: params.length, op: strict ? '~*' : 'ILIKE' };
     });
     const perForm = ({ idx, op }) => `(i.title ${op} $${idx} OR i.summary ${op} $${idx} OR i.insight ${op} $${idx}
