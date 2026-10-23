@@ -41,7 +41,8 @@ test('rankForSynthesis: a recent, relevant, quantified material outranks an old 
 });
 
 test('promptBlock: 3+ materials -> issue structure; fewer -> an explicit limit instead of padding', () => {
-  assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단[\s\S]*# 추가 모니터링/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단\n- \*\*인사이트\*\*[\s\S]*# 추가 모니터링/);
+  assert.ok(!/\*\*전망\*\*/.test(synthesis.promptBlock('팜유 동향', 5)));
   assert.match(synthesis.promptBlock('팜유 동향', 5), /채우지 않는다/);
   assert.match(synthesis.promptBlock('팜유 동향', 5), /\n  - 사실:[\s\S]*\n  - 시사점:/);
   assert.match(synthesis.promptBlock('팜유 동향', 5), /줄글 문단을 쓰지 않는다/);
