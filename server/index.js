@@ -65,6 +65,7 @@ app.get('/api/cron/daily', async (req, res) => {
       }
       return total;
     }],
+    ['noon_brief_refresh', () => require('./lib/dailyBrief').maybeRefreshDailyBriefAtNoon()],
     ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
     ['entity_maintenance', () => require('./lib/entityMaintenance').maybeRunEntityMaintenance()],
     ['verification', () => require('./lib/verificationRoutine').runQueue()],

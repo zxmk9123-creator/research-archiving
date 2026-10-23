@@ -316,6 +316,23 @@ async function requestDailyBriefRegeneration(now = new Date()) {
   return queueDailyBriefGeneration(now, { force: true });
 }
 
+// Noon refresh: items the review autopilot publishes after the morning collection are not in the first brief. The hourly cron calls
+// this; from 12:00 KST it regenerates today's brief once (a brief completed before noon is stale, one completed after is not).
+async function maybeRefreshDailyBriefAtNoon(now = new Date()) {
+  const briefDate = kstDate(now);
+  const noon = new Date(`${briefDate}T12:00:00+09:00`);
+  if (now < noon) return { ran: false, reason: 'before_noon' };
+  const { rows } = await pool.query('SELECT status, completed_at FROM daily_briefs WHERE brief_date = $1', [briefDate]);
+  const current = rows[0];
+  if (!current) return { ran: false, reason: 'no_morning_brief' };
+  if (current.status === 'generating') return { ran: false, reason: 'already_running' };
+  if (current.status === 'ready' && current.completed_at && new Date(current.completed_at) >= noon) {
+    return { ran: false, reason: 'already_refreshed' };
+  }
+  const result = await queueDailyBriefGeneration(now, { force: current.status !== 'failed' });
+  return { ran: result.started, reason: result.started ? 'refreshed' : result.reason };
+}
+
 // At the KST date change the headline starts over: yesterday's brief is not shown as today's. Until today's generation begins (it
 // starts when the morning collection completes) the page gets this empty "pending" state instead of the previous day's content.
 function pendingBriefFor(todayKst, previousDate) {
@@ -364,4 +381,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { maybeRefreshDailyBriefAtNoon, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
