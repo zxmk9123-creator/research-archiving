@@ -881,7 +881,7 @@ test('SYSTEM_PROMPT: compact — a hard length rule that forces a complete endin
   assert.match(p, /"combine":"sum"/);
   // the bloated protocols were rolled back (the system enforces these in code instead)
   for (const gone of ['Thoroughness protocol', 'Layout discipline for data answers', 'COMPLETENESS REQUESTS', 'UNIT UNIFICATION REQUESTS', 'Visualization process']) assert.ok(!p.includes(gone), gone);
-  assert.ok(p.length < 9500, `prompt length ${p.length}`);
+  assert.ok(p.length < 9900, `prompt length ${p.length}`);
 });
 
 
@@ -1517,4 +1517,11 @@ test('remapCitationMarkers: a 3-digit item-id style marker is dropped, a year in
   const out = searchRouter.remapCitationMarkers('수출 증가 [3][212]. 전망 [2025] [999]', [3]);
   assert.equal(out, '수출 증가 [1]. 전망 [2025] ');
   assert.equal(searchRouter.remapCitationMarkers('근거 없음 [212].', []), '근거 없음 .');
+});
+
+test('SYSTEM_PROMPT allows labelled inference from combined materials without allowing new figures, and the verifier knows the 추론 label', () => {
+  const search = require('../server/routes/search');
+  assert.match(search.SYSTEM_PROMPT, /INFERENCE \(allowed, labelled\)/);
+  assert.match(search.SYSTEM_PROMPT, /never compute or introduce a figure/);
+  assert.match(search.VERIFICATION_SYSTEM_PROMPT, /추론/);
 });

@@ -22,3 +22,10 @@ test('cards carry no figures and the answer is labelled as editorial background'
   assert.equal(glossary.cardsPromptBlock([]), '');
   assert.match(glossary.cardsPromptBlock(glossary.matchCards('HVO가 뭐야')), /예외/);
 });
+
+test('new cards match their own terms; "red" alone does not trigger the RED card', () => {
+  assert.deepEqual(glossary.matchCards('B40이 뭐야').map((c) => c.id), ['blend-b']);
+  assert.deepEqual(glossary.matchCards('MPOB와 MPOC 차이').map((c) => c.id), ['agencies']);
+  assert.deepEqual(glossary.matchCards('what is red meat'), []);
+  assert.deepEqual(glossary.matchCards('EU RED가 뭐야').map((c) => c.id), ['red']);
+});
