@@ -82,7 +82,7 @@ function buildArbiterUser(it, fullText) {
   return [
     `제목: ${it.title}`,
     `출처: ${it.source_name || it.source_url} (${it.type})`,
-    `발행일: ${it.published_at ? String(it.published_at).slice(0, 10) : '미확인'}`,
+    `발행일: ${require('./isoDate').isoDate(it.published_at) || '미확인'}`,
     it.ai_summary || it.summary ? `1차 요약: ${(it.ai_summary || it.summary).slice(0, 700)}` : null,
     `1차 적합 판정: ${it.ai_eligible === true ? '적합' : it.ai_eligible === false ? '비적합' : '미판정'} — ${(it.ai_eligibility_reason || '').slice(0, 250)}`,
     `1차 발행 점검: ${it.ai_qa_decision || '없음'} — ${(it.ai_qa_reason || '').slice(0, 250)}`,

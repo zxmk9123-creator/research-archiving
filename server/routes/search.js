@@ -224,6 +224,7 @@ const termGroups = require('../lib/termGroups');
 const EDIBLE_PREFIX_EXCLUDE = { '식용유': '폐비', '식용유지': '비' };
 const glossary = require('../lib/glossary');
 const synthesis = require('../lib/synthesis');
+const { isoDate } = require('../lib/isoDate');
 const MAX_CONCEPTS = 16;
 
 // Returns concepts: each is an array of surface forms treated as ONE concept
@@ -625,7 +626,7 @@ function buildMaterialsBlock(candidates, { onlyWithQuantities = false, onlyIndic
     return [
       `자료 ${i + 1} — 제목: ${m.title}`,
       `출처: ${m.source_name || '미확인'}`,
-      `발행일: ${m.published_at ? String(m.published_at).slice(0, 10) : '미확인'}`,
+      `발행일: ${isoDate(m.published_at) || '미확인'}`,
       `요약: ${truncateField(m.summary || m.ai_summary || '(요약 없음)', tail ? TAIL_SUMMARY_CHARS : MAX_SUMMARY_CHARS)}`,
       (m.insight || m.ai_insight) ? `인사이트: ${truncateField(m.insight || m.ai_insight, tail ? TAIL_INSIGHT_CHARS : MAX_INSIGHT_CHARS)}` : null,
     ].filter(Boolean).join('\n');
@@ -1641,7 +1642,7 @@ async function handleSearch(req, res, signal) {
   const synthesisMode = !quick && intent.type === 'general' && !required.length && !glossary.matchCards(question).length
     && !datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) && !diagram.isDiagramQuestion(question)
     && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && synthesis.isBroadQuestion(question);
-  if (synthesisMode) candidates = synthesis.rankForSynthesis(candidates);
+  if (synthesisMode) candidates = synthesis.selectForSynthesis(candidates);
   const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {

@@ -42,19 +42,21 @@ test('rankForSynthesis: a recent, relevant, quantified material outranks an old 
 
 test('promptBlock: 3+ materials -> issue structure; fewer -> an explicit limit instead of padding', () => {
   assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단[\s\S]*# 추가 모니터링/);
-  assert.match(synthesis.promptBlock('팜유 동향', 5), /억지로 채우지 않는다/);
-  assert.match(synthesis.promptBlock('국내 팜유 동향', 5), /해외 이슈/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /채우지 않는다/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /하위 불릿 줄을 만들지 않는다/);
+  assert.match(synthesis.promptBlock('국내 팜유 동향', 5), /해외→국내 영향/);
   const thin = synthesis.promptBlock('팜유 동향', 1);
   assert.match(thin, /1건뿐/);
   assert.ok(!/# 핵심 이슈/.test(thin));
 });
 
 test('POST /: several relevant materials -> the writer gets the synthesis structure, priority-ordered, and sources carry date + original link', async () => {
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000); // a Date object, as pg returns DATE columns
   const rows = [
-    row(1, '팜유 가격 동향 A', '2026-09-01', 5, '9월 팜유 가격이 올랐다'),
-    row(2, '팜유 수출 동향 B', '2026-10-22', 5, '수출이 늘었다'),
-    row(3, '팜유 재고 동향 C', '2026-10-20', 5, '재고가 351만 톤이다'),
-    row(4, '팜유 정책 동향 D', '2026-10-15', 5, '정책이 바뀌었다'),
+    row(1, '팜유 가격 동향 A', daysAgo(60), 5, '두 달 전 팜유 가격이 올랐다'),
+    row(2, '팜유 수출 동향 B', daysAgo(1), 5, '수출이 늘었다'),
+    row(3, '팜유 재고 동향 C', daysAgo(3), 5, '재고가 351만 톤이다'),
+    row(4, '팜유 정책 동향 D', daysAgo(8), 5, '정책이 바뀌었다'),
   ];
   const restore = mockPool([
     ['FROM items i', () => ({ rows })],
@@ -66,7 +68,10 @@ test('POST /: several relevant materials -> the writer gets the synthesis struct
   try {
     await withServer(async (base) => {
       const body = await ask(base, '최근 팜유 시장 동향 알려줘');
-      assert.match(seen, /아카이브 종합 분석/);
+      assert.match(seen, /핵심 위주 종합 브리핑/);
+      // dates reach the writer as ISO yyyy-mm-dd, never "Fri Dec 26"
+      assert.match(seen, /발행일: \d{4}-\d{2}-\d{2}\n/);
+      assert.ok(!/발행일: [A-Z][a-z]{2} /.test(seen));
       // priority order: the quantified, recent items come first and the oldest (9월) material is last
       assert.match(seen, /자료 1 — 제목: 팜유 재고 동향 C/);
       assert.match(seen, /자료 4 — 제목: 팜유 가격 동향 A/);
@@ -108,4 +113,17 @@ test('POST /: a link is only passed on when the stored URL is http(s)', async ()
       assert.equal(body.sources[0].url, undefined);
     });
   } finally { provider.callProviderWithFallback = original; restore(); }
+});
+
+test('selectForSynthesis: stale materials are dropped when 3+ recent ones exist, and at most 8 are kept', () => {
+  const now = Date.now();
+  const day = (n) => new Date(now - n * 86400000);
+  const stale = [row(90, 's1', day(300), 9, 'x'), row(91, 's2', day(400), 9, 'x')];
+  const recent = Array.from({ length: 10 }, (_, i) => row(i + 1, `r${i}`, day(i + 1), 5, 'y'));
+  const out = synthesis.selectForSynthesis([...stale, ...recent], now);
+  assert.equal(out.length, 8);
+  assert.ok(out.every((m) => m.id < 90));
+  // too few recent -> keep the stale ones rather than answer from almost nothing
+  const thin = synthesis.selectForSynthesis([...stale, row(1, 'r', day(2), 5, 'y')], now);
+  assert.equal(thin.length, 3);
 });
