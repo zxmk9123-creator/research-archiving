@@ -3,6 +3,7 @@ const { callProviderWithFallback } = require('./ai/provider');
 const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
 const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
+const { topicDuplicateOf, TOPIC_DUPLICATE_VERSION } = require('./topicDuplicate');
 const { hasGroundedClassification, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
 const { extractCompanyNames, recordCompanyMentions } = require('./companyDiscovery');
 const { extractFactsInBackground } = require('./itemFacts');
@@ -560,6 +561,14 @@ async function applyAiDraftIfEligible(itemId) {
   if (trustFailure) {
     console.log(`applyAiDraftIfEligible: item ${itemId} failed the trust gate (${trustFailure}) — not publishing`);
     await recordGateHold(itemId, trustFailure, TRUST_GATE_VERSION);
+    return { archived: false };
+  }
+
+  // Same-event guard: already-covered topic without new figures is not published again.
+  const duplicateOf = await topicDuplicateOf(pool, item);
+  if (duplicateOf) {
+    console.log(`applyAiDraftIfEligible: item ${itemId} repeats published item ${duplicateOf} without new detail — not publishing`);
+    await recordGateHold(itemId, 'topic_duplicate', TOPIC_DUPLICATE_VERSION);
     return { archived: false };
   }
 

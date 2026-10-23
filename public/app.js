@@ -2720,6 +2720,7 @@ const GATE_HOLD_LABELS = {
   unusable_ai_summary: 'AI 요약 생성에 실패했거나 내용이 비정상적입니다.',
   bot_block_or_empty_title: '제목이 비었거나 봇 차단 페이지로 추정됩니다.',
   no_grounded_sector: 'AI가 제시한 섹터가 본문 내용과 연결되지 않습니다.',
+  topic_duplicate: '이미 발행된 같은 이슈이며 새 수치·상세 정보가 없습니다.',
 };
 
 // Mirrors the exact failureType strings provider.js's markFallback()/
