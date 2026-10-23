@@ -310,6 +310,8 @@ function parseQaDecision(value) {
 // Pure validation: parses the model's raw text, enforces the contract, and
 // discards any sector/usage id not present in the taxonomy passed in. Never
 // touches the DB — fully unit-testable without a provider or a database.
+const { fixTerms } = require('./termFix');
+
 function parseDraftResponse(raw, taxonomy) {
   let parsed;
   try {
@@ -354,7 +356,10 @@ function parseDraftResponse(raw, taxonomy) {
 
   const companies = extractCompanyNames(parsed.companies);
 
-  return { summary, insight, keyTakeaway, eligible, eligibilityReason, facts, suggestedSectors, suggestedUsages, qaDecision, qaReason, companies };
+  return {
+    summary: fixTerms(summary), insight: fixTerms(insight), keyTakeaway: fixTerms(keyTakeaway), eligible,
+    eligibilityReason: fixTerms(eligibilityReason), facts, suggestedSectors, suggestedUsages, qaDecision, qaReason: fixTerms(qaReason), companies,
+  };
 }
 
 async function getTaxonomy() {
@@ -583,7 +588,7 @@ async function applyAiDraftIfEligible(itemId) {
 
   await pool.query(
     `UPDATE items SET summary = $1, insight = $2, content_category = $3, status = 'Published' WHERE id = $4`,
-    [item.ai_summary, item.ai_insight, deriveContentCategory(item.type), itemId]
+    [fixTerms(item.ai_summary), fixTerms(item.ai_insight), deriveContentCategory(item.type), itemId]
   );
 
   // Auto company intake (tagging + candidate/promotion); never blocks publishing.
