@@ -40,3 +40,8 @@ test('비식용유지 questions do not get the edible-oil card', () => {
   assert.ok(!glossary.matchCards('비식용유지 종류').some((c) => c.id === 'edible'));
   assert.deepEqual(glossary.matchCards('식용유지 종류가 뭐야').map((c) => c.id), ['edible']);
 });
+
+test('generic request words (알려줘/설명/비교) alone do not turn a trend question into a definition question', () => {
+  assert.deepEqual(glossary.matchCards('최근 팜유 시장 동향 알려줘'), []);
+  assert.deepEqual(glossary.matchCards('팜유 가격 전망 설명해줘'), []);
+});

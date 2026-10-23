@@ -335,6 +335,10 @@ p { margin: 0; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ai-source-chip-link { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); }
+.ai-source-chip-main { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; text-decoration: none; }
+.ai-source-date { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.ai-source-ext { flex: 0 0 auto; font-size: 11px; color: var(--action); text-decoration: none; }
+.ai-source-ext:hover { text-decoration: underline; }
 .ai-source-chip-num { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--action); }
 
 /* Inline per-claim citation link — the same [N] rendered next to the

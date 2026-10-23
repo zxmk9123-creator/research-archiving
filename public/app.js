@@ -1469,7 +1469,7 @@ function renderAnswerHtml(rawAnswer, sources) {
   return `<div class="ai-answer">${renderedBlocks.join('')}</div>`;
 }
 
-// Compact citation chips — title/link indicator only, no dates/URLs/
+// Compact citation chips — title, date and original-article link; descriptions stay one click away on the Detail page. Formerly no dates/URLs/
 // descriptions (those stay one click away on the Detail page). The title
 // and the #/detail/<id> href come only from the DB rows the server already
 // returned (never parsed out of the model's text) — see
@@ -1501,14 +1501,19 @@ function aiEvidenceHtml(sources) {
 
 function aiSearchSourcesHtml(sources) {
   if (!sources || !sources.length) return '';
+  // title (opens the archive detail page), publication date, and the original article link when the server supplied an http(s) one
   return `<div class="ai-search-sources">
     <div class="ai-search-sources-label">SOURCES · ${sources.length}</div>
-    <div class="ai-source-chips">${sources.map((s, i) => `
-      <a class="ai-source-chip" href="#/detail/${s.id}" title="${escapeHtml(s.title)}">
-        <span class="ai-source-chip-num">[${i + 1}]</span>
-        <span class="ai-source-chip-title">${escapeHtml(s.title)}</span>
-        <span class="ai-source-chip-link" aria-hidden="true">↗</span>
-      </a>`).join('')}</div>
+    <div class="ai-source-chips">${sources.map((s, i) => {
+    const date = s.published_at ? escapeHtml(String(s.published_at).slice(0, 10)) : '';
+    const ext = s.url && /^https?:\/\//i.test(s.url) ? `<a class="ai-source-ext" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" title="원문 열기" aria-label="원문 열기">원문 ↗</a>` : '';
+    return `<span class="ai-source-chip">
+        <a class="ai-source-chip-main" href="#/detail/${s.id}" title="${escapeHtml(s.title)}">
+          <span class="ai-source-chip-num">[${i + 1}]</span>
+          <span class="ai-source-chip-title">${escapeHtml(s.title)}</span>
+        </a>${date ? `<span class="ai-source-date">${date}</span>` : ''}${ext}
+      </span>`;
+  }).join('')}</div>
   </div>`;
 }
 

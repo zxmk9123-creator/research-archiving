@@ -30,7 +30,7 @@ const CARDS = [
   { id: 'rspo', name: 'RSPO', terms: ['rspo', '지속가능 팜유 인증'], def: 'Roundtable on Sustainable Palm Oil의 약자로, 환경·사회 기준을 충족한 팜유 생산·유통에 인증을 부여하는 국제 협의체이자 인증 제도입니다.' },
 ];
 
-const DEFINITION_CUE = /(뭐(야|예요|에요|지|임|니|가)|무엇|뜻|의미|정의|이란|란\?|란\s*$|차이|구분|비교|설명|알려|개념|종류|what\s+is|define|difference|\bvs\.?\b|types?\s+of)/i;
+const DEFINITION_CUE = /(뭐(야|예요|에요|지|임|니|가)|무엇|뜻|의미|정의|이란|란\?|란\s*$|차이|구분|개념|종류|what\s+is|define|difference|\bvs\.?\b|types?\s+of)/i;
 const pad = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function termHit(q, term) {

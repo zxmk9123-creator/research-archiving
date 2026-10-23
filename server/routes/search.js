@@ -223,6 +223,7 @@ const termGroups = require('../lib/termGroups');
 // 식용유 ⊂ 폐식용유·비식용유지, 식용유지 ⊂ 비식용유지 (sector names): the plain substring match mixed non-edible/UCO material into edible-oil questions
 const EDIBLE_PREFIX_EXCLUDE = { '식용유': '폐비', '식용유지': '비' };
 const glossary = require('../lib/glossary');
+const synthesis = require('../lib/synthesis');
 const MAX_CONCEPTS = 16;
 
 // Returns concepts: each is an array of surface forms treated as ONE concept
@@ -1432,7 +1433,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     const only = dataset.markdown;
     const citedOnly = extractCitedIndices(only, candidates.length);
     const answerOnly = moveCitationsAfterPunctuation(remapCitationMarkers(only, citedOnly));
-    return { answer: answerOnly, sources: (citedOnly.length ? citedOnly.map((i) => candidates[i - 1]) : candidates).map((c) => ({ id: c.id, title: c.title, source: c.source_name || null, published_at: c.published_at })) };
+    return { answer: answerOnly, sources: await withSourceLinks((citedOnly.length ? citedOnly.map((i) => candidates[i - 1]) : candidates).map((c) => ({ id: c.id, title: c.title, source: c.source_name || null, published_at: c.published_at }))) };
   }
   // "not mentioned" is not "did not take part": a participation cell the materials never denied is reworded
   if (/\|\s*(미참여|불참)\s*\|/.test(modelText) && !candidates.some((c) => /(미참여|불참|참여하지\s*않)/.test(materialText(c)))) {
@@ -1481,13 +1482,27 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
   const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(remapCitationMarkers(text, citedIndices)), candidates, question);
-  const sources = citedCandidates.map((c) => ({
+  const sources = await withSourceLinks(citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
     source: c.source_name || null,
     published_at: c.published_at,
-  }));
+  })));
   return { answer, sources };
+}
+
+// The original article URL for each cited source, read from the DB by id (never from the model's text); only http(s) links are
+// passed on. Best-effort: a failed lookup leaves the sources without `url`, the answer is unaffected.
+async function withSourceLinks(sources) {
+  if (!sources.length) return sources;
+  try {
+    const { rows } = await pool.query('SELECT id, source_url FROM items WHERE id = ANY($1::bigint[])', [sources.map((x) => x.id)]);
+    const urls = new Map(rows.map((r) => [Number(r.id), /^https?:\/\//i.test(String(r.source_url || '')) ? r.source_url : null]));
+    return sources.map((x) => (urls.get(Number(x.id)) ? { ...x, url: urls.get(Number(x.id)) } : x));
+  } catch (err) {
+    console.error('ai-search source link lookup failed:', err.message);
+    return sources;
+  }
 }
 
 // A client that can render incrementally sends Accept: text/event-stream
@@ -1621,6 +1636,12 @@ async function handleSearch(req, res, signal) {
   // The verified dataset (extraction call) runs IN PARALLEL with the writing call: total
   // wait = the slower of the two, not their sum. If it succeeds, its table/chart replace
   // any the writer produced; if it fails, the writer's own answer stands.
+  // SYNTHESIS MODE: a broad "trend / issue / outlook / impact" question that is not a company profile, roster sweep, table or
+  // definition is answered as a ranked, cross-article analysis (see lib/synthesis.js).
+  const synthesisMode = !quick && intent.type === 'general' && !required.length && !glossary.matchCards(question).length
+    && !datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) && !diagram.isDiagramQuestion(question)
+    && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && synthesis.isBroadQuestion(question);
+  if (synthesisMode) candidates = synthesis.rankForSynthesis(candidates);
   const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
@@ -1695,7 +1716,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
