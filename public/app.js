@@ -803,34 +803,32 @@ let aiSearchTurnsHtml = [];
 const REX_STATES = ['run', 'study', 'lie', 'wave'];
 const REX_HTML = `<div class="rex" data-state="wave" aria-hidden="true"><svg viewBox="0 0 80 80" width="64" height="64">
   <defs>
-    <radialGradient id="rexG" cx="35%" cy="28%" r="80%"><stop offset="0" stop-color="#b6f7b0"/><stop offset=".42" stop-color="#58d56f"/><stop offset="1" stop-color="#27a447"/></radialGradient>
-    <radialGradient id="rexD" cx="35%" cy="28%" r="85%"><stop offset="0" stop-color="#6fe083"/><stop offset="1" stop-color="#1f9440"/></radialGradient>
-    <radialGradient id="rexB" cx="40%" cy="30%" r="80%"><stop offset="0" stop-color="#fffdf0"/><stop offset=".6" stop-color="#e6f8cc"/><stop offset="1" stop-color="#b5e29a"/></radialGradient>
-    <radialGradient id="rexC" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#ff9db0"/><stop offset="1" stop-color="#ff6b86"/></radialGradient>
-    <radialGradient id="rexS" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1b3a22" stop-opacity=".35"/><stop offset="1" stop-color="#1b3a22" stop-opacity="0"/></radialGradient>
+    <radialGradient id="rexG" cx="36%" cy="24%" r="85%"><stop offset="0" stop-color="#d4f6cf"/><stop offset=".4" stop-color="#8fe0a6"/><stop offset="1" stop-color="#4fb877"/></radialGradient>
+    <radialGradient id="rexD" cx="36%" cy="28%" r="85%"><stop offset="0" stop-color="#7fd89a"/><stop offset="1" stop-color="#379a60"/></radialGradient>
+    <radialGradient id="rexB" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#f6fbe6"/><stop offset=".65" stop-color="#e0f1c6"/><stop offset="1" stop-color="#bddfa6"/></radialGradient>
+    <radialGradient id="rexC" cx="45%" cy="40%" r="65%"><stop offset="0" stop-color="#ffa3a3"/><stop offset=".7" stop-color="#f98f94"/><stop offset="1" stop-color="#f98f94" stop-opacity=".55"/></radialGradient>
+    <radialGradient id="rexS" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1b3a22" stop-opacity=".32"/><stop offset="1" stop-color="#1b3a22" stop-opacity="0"/></radialGradient>
   </defs>
-  <ellipse class="rex-shadow" cx="40" cy="74" rx="22" ry="4" fill="url(#rexS)"/>
-  <g class="rex-z"><text x="56" y="16" font-size="10" fill="#8b95a1">z</text><text x="63" y="9" font-size="7" fill="#8b95a1">z</text></g>
+  <ellipse class="rex-shadow" cx="40" cy="76" rx="24" ry="3.6" fill="url(#rexS)"/>
+  <g class="rex-z"><text x="58" y="14" font-size="10" fill="#8b95a1">z</text><text x="65" y="7" font-size="7" fill="#8b95a1">z</text></g>
   <g class="rex-body">
-    <g class="rex-tail"><path d="M56 66c15 3 20-14 8-17-8-2-11 8-4 9" fill="none" stroke="#2fb04d" stroke-width="7" stroke-linecap="round"/><path d="M56 66c15 3 20-14 8-17-8-2-11 8-4 9" fill="none" stroke="#e0644f" stroke-width="2.6" stroke-linecap="round" stroke-dasharray=".1 6.5"/></g>
-    <ellipse class="rex-leg rex-leg-l" cx="30" cy="70" rx="7.5" ry="5" fill="url(#rexD)"/>
-    <ellipse class="rex-leg rex-leg-r" cx="50" cy="70" rx="7.5" ry="5" fill="url(#rexD)"/>
-    <ellipse cx="40" cy="55" rx="21" ry="18.5" fill="url(#rexG)"/>
-    <ellipse cx="40" cy="59" rx="13" ry="13" fill="url(#rexB)"/>
-    <ellipse cx="31" cy="46" rx="7" ry="3.5" fill="#fff" opacity=".28" transform="rotate(-25 31 46)"/>
-    <ellipse class="rex-arm rex-arm-l" cx="19.5" cy="56" rx="4.2" ry="6.4" fill="url(#rexD)"/>
+    <g class="rex-tail"><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#3a9d62" stroke-width="7.4" stroke-linecap="round"/><path d="M57 66C70 69 75 57 69 52C63 48 57 54 62 59" fill="none" stroke="#e8776c" stroke-width="7.4" stroke-dasharray="3.2 5.2" stroke-dashoffset="1"/></g>
+    <ellipse class="rex-leg rex-leg-l" cx="30" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/>
+    <ellipse class="rex-leg rex-leg-r" cx="50" cy="73" rx="8.5" ry="4.6" fill="url(#rexD)"/>
+    <ellipse cx="37" cy="5.5" rx="3.8" ry="3.2" fill="url(#rexG)"/>
+    <path d="M40 5C55 5 66 17 66 31C66 40 61 45 61 52C64 58 63 68 52 71L28 71C17 68 16 58 19 52C19 45 14 40 14 31C14 17 25 5 40 5Z" fill="url(#rexG)"/>
+    <ellipse cx="40" cy="59" rx="15" ry="12" fill="url(#rexB)"/>
+    <ellipse cx="29" cy="15" rx="9" ry="5" fill="#fff" opacity=".34" transform="rotate(-32 29 15)"/>
+    <g class="rex-arm rex-arm-l"><ellipse cx="17.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/><path d="M13.5 51.4q4.4 1.6 8.8 0M13.3 55.4q4.4 1.6 8.8 0" fill="none" stroke="#e8776c" stroke-width="2" stroke-linecap="round"/></g>
     <g class="rex-head">
-      <circle cx="23.5" cy="25" r="5" fill="url(#rexD)"/><circle cx="29" cy="16.5" r="5.6" fill="url(#rexD)"/><circle cx="38" cy="12" r="6" fill="url(#rexD)"/><circle cx="48" cy="14" r="5.6" fill="url(#rexD)"/><circle cx="55" cy="21" r="5" fill="url(#rexD)"/>
-      <circle cx="40" cy="31" r="21" fill="url(#rexG)"/>
-      <circle cx="30" cy="18" r="2.2" fill="#a8f5a2" opacity=".9"/><circle cx="44" cy="15" r="1.7" fill="#a8f5a2" opacity=".9"/><circle cx="52" cy="21" r="1.4" fill="#a8f5a2" opacity=".9"/><circle cx="36" cy="14" r="1.2" fill="#a8f5a2" opacity=".9"/>
-      <ellipse cx="31" cy="20" rx="8" ry="4" fill="#fff" opacity=".3" transform="rotate(-30 31 20)"/>
-      <g class="rex-eyes"><ellipse cx="32" cy="29" rx="2.5" ry="3" fill="#25302a"/><ellipse cx="48" cy="29" rx="2.5" ry="3" fill="#25302a"/><circle cx="32.8" cy="27.9" r=".9" fill="#fff"/><circle cx="48.8" cy="27.9" r=".9" fill="#fff"/></g>
-      <g class="rex-eyes-shut" fill="none" stroke="#25302a" stroke-width="1.8" stroke-linecap="round"><path d="M29 29q3 2.6 6 0"/><path d="M45 29q3 2.6 6 0"/></g>
-      <ellipse cx="24.5" cy="36" rx="5.4" ry="4.4" fill="url(#rexC)" opacity=".92"/><ellipse cx="55.5" cy="36" rx="5.4" ry="4.4" fill="url(#rexC)" opacity=".92"/>
-      <path d="M35 36.5q5 7 10 0z" fill="#7a2b3a"/><path d="M37.6 39.4q2.4 1.9 4.8 0q-2.4-1.3-4.8 0z" fill="#ff8da0"/>
+      <circle cx="21.5" cy="40" r="7.2" fill="url(#rexC)"/><circle cx="58.5" cy="40" r="7.2" fill="url(#rexC)"/>
+      <g class="rex-eyes"><ellipse cx="29" cy="33.5" rx="1.9" ry="2.3" fill="#1f2a24"/><ellipse cx="51" cy="33.5" rx="1.9" ry="2.3" fill="#1f2a24"/><circle cx="29.6" cy="32.7" r=".6" fill="#fff"/><circle cx="51.6" cy="32.7" r=".6" fill="#fff"/></g>
+      <g class="rex-eyes-shut" fill="none" stroke="#1f2a24" stroke-width="1.6" stroke-linecap="round"><path d="M26.6 33.6q2.4 2 4.8 0"/><path d="M48.6 33.6q2.4 2 4.8 0"/></g>
+      <path class="rex-smile" d="M36.5 36.8q3.5 3.4 7 0" fill="none" stroke="#1f2a24" stroke-width="1.5" stroke-linecap="round"/>
+      <g class="rex-mouth-open"><path d="M34.5 35.6q5.5 8.6 11 0z" fill="#8a2f3f"/><path d="M37.4 39.2q2.6 2 5.2 0q-2.6-1.4-5.2 0z" fill="#ff8d9e"/></g>
     </g>
-    <g class="rex-book"><rect x="29" y="56" width="22" height="14" rx="2" fill="#fff" stroke="#8b95a1" stroke-width="1.3"/><path d="M40 56v14M32 60h5M43 60h5M32 63.5h5M43 63.5h5" stroke="#b0b8c1" stroke-width="1"/></g>
-    <g class="rex-arm rex-arm-r"><ellipse cx="60.5" cy="56" rx="4.2" ry="6.4" fill="url(#rexD)"/><circle cx="58.6" cy="50.4" r="1.7" fill="#3dbb57"/><circle cx="60.9" cy="49.8" r="1.7" fill="#3dbb57"/><circle cx="63" cy="50.8" r="1.6" fill="#3dbb57"/></g>
+    <g class="rex-book"><rect x="29" y="58" width="22" height="14" rx="2" fill="#fff" stroke="#8b95a1" stroke-width="1.3"/><path d="M40 58v14M32 62h5M43 62h5M32 65.5h5M43 65.5h5" stroke="#b0b8c1" stroke-width="1"/></g>
+    <g class="rex-arm rex-arm-r"><ellipse cx="62.5" cy="54" rx="4.4" ry="7" fill="url(#rexD)"/><path d="M58.5 51.4q4.4 1.6 8.8 0M58.7 55.4q4.4 1.6 8.8 0" fill="none" stroke="#e8776c" stroke-width="2" stroke-linecap="round"/><circle cx="60.4" cy="47.6" r="1.8" fill="#4fb877"/><circle cx="62.8" cy="47" r="1.8" fill="#4fb877"/><circle cx="65" cy="48" r="1.7" fill="#4fb877"/></g>
   </g>
 </svg></div>`;
 

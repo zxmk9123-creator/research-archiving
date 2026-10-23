@@ -1303,7 +1303,9 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 @keyframes rex-sway { 0%, 100% { transform: rotateY(-16deg); } 50% { transform: rotateY(16deg); } }
 .rex[data-state="lie"] svg { animation-duration: 8s; }
 .rex g, .rex ellipse, .rex path { transform-box: fill-box; transform-origin: center; }
-.rex-eyes-shut, .rex-book, .rex-z { opacity: 0; }
+.rex-eyes-shut, .rex-book, .rex-z, .rex-mouth-open { opacity: 0; }
+.rex[data-state="wave"] .rex-mouth-open, .rex[data-state="run"] .rex-mouth-open { opacity: 1; }
+.rex[data-state="wave"] .rex-smile, .rex[data-state="run"] .rex-smile { opacity: 0; }
 .rex[data-state="run"] .rex-shadow { animation: rex-shadow .3s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
 @keyframes rex-shadow { 50% { transform: scale(.82); opacity: .7; } }
 .rex-eyes { animation: rex-blink 4s infinite; }
