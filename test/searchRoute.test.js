@@ -1492,3 +1492,9 @@ test('one hierarchy per table: companies, countries/regions and institutions are
   assert.equal(cs.levelFor('국가별 SAF 생산능력', null), 'country');
   assert.deepEqual(names(cs.enforceLevel(recs, '', { kind: 'all' })), ['Petrobras', 'Neste']);
 });
+
+test('remapCitationMarkers: a 3-digit item-id style marker is dropped, a year in brackets is kept', () => {
+  const out = searchRouter.remapCitationMarkers('수출 증가 [3][212]. 전망 [2025] [999]', [3]);
+  assert.equal(out, '수출 증가 [1]. 전망 [2025] ');
+  assert.equal(searchRouter.remapCitationMarkers('근거 없음 [212].', []), '근거 없음 .');
+});

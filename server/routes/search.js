@@ -676,9 +676,12 @@ function extractCitedIndices(text, maxIndex) {
 // rather than left in the text pointing at nothing.
 function remapCitationMarkers(text, citedIndices) {
   const newIndexByOld = new Map(citedIndices.map((orig, i) => [orig, i + 1]));
-  return String(text || '').replace(/\[(\d{1,2})\]/g, (whole, digits) => {
+  // 3-4 digit markers (the model citing an item id such as [212]) can never be a 자료 번호: dropped like any out-of-range marker, years like [2025] excepted
+  return String(text || '').replace(/\[(\d{1,4})\]/g, (whole, digits) => {
     const newIndex = newIndexByOld.get(Number(digits));
-    return newIndex ? `[${newIndex}]` : '';
+    if (newIndex) return `[${newIndex}]`;
+    const n = Number(digits);
+    return digits.length === 4 && n >= 1900 && n <= 2100 ? whole : '';
   });
 }
 
@@ -1417,7 +1420,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
     // no appended extras, no extra chart.
     const only = dataset.markdown;
     const citedOnly = extractCitedIndices(only, candidates.length);
-    const answerOnly = moveCitationsAfterPunctuation(citedOnly.length ? remapCitationMarkers(only, citedOnly) : only);
+    const answerOnly = moveCitationsAfterPunctuation(remapCitationMarkers(only, citedOnly));
     return { answer: answerOnly, sources: (citedOnly.length ? citedOnly.map((i) => candidates[i - 1]) : candidates).map((c) => ({ id: c.id, title: c.title, source: c.source_name || null, published_at: c.published_at })) };
   }
   // "not mentioned" is not "did not take part": a participation cell the materials never denied is reworded
@@ -1466,7 +1469,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   // back to showing every retrieved candidate rather than an empty list.
   const citedIndices = extractCitedIndices(text, candidates.length);
   const citedCandidates = citedIndices.length ? citedIndices.map((i) => candidates[i - 1]) : candidates;
-  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(citedIndices.length ? remapCitationMarkers(text, citedIndices) : text), candidates, question);
+  const answer = await enrichChartBlocks(moveCitationsAfterPunctuation(remapCitationMarkers(text, citedIndices)), candidates, question);
   const sources = citedCandidates.map((c) => ({
     id: c.id,
     title: c.title,
