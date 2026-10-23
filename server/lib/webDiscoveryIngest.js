@@ -10,6 +10,7 @@
 // method already uses unmodified. No link-following, no sitemap discovery,
 // no query generation — see adapters/webSearch.js.
 const pool = require('../db/pool');
+const { classifyFailure } = require('./failureReason');
 // Required as module objects (not destructured) so tests can swap
 // searchWeb/extractMetadata for a synthetic result without a real
 // network call — same convention structuredDataIngest.js uses for
@@ -287,6 +288,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
     return {
       sourceId: source.id, ok: true,
       discovered: candidates.length, filtered, archived, rejected, failed,
+      failedReasons: failureCounts(details),
       details,
       // fetched/count aliases so this result shape stays drop-in
       // compatible with collectAllSourcesNow()'s existing totals reducer.
@@ -297,6 +299,17 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
     await pool.query('UPDATE sources SET last_error = $1, last_error_at = now() WHERE id = $2', [err.message, source.id]);
     return { sourceId: source.id, ok: false, error: err.message };
   }
+}
+
+function failureCounts(details) {
+  const out = {};
+  for (const d of details) {
+    if (!d.error || !/failed/.test(d.stage)) continue;
+    const reason = classifyFailure(d.error);
+    out[reason] = (out[reason] || 0) + 1;
+    console.log(`discovery_failure reason=${reason} stage=${d.stage} url=${d.link} error=${String(d.error).slice(0, 120)}`);
+  }
+  return out;
 }
 
 module.exports = { collectWebDiscoverySource, normalizeUrl, attemptAcquisitionFallback, isClearlyStale, STALE_THRESHOLD_DAYS };

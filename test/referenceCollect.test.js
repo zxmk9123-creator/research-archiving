@@ -30,3 +30,13 @@ test('extractMetadata reads a PDF response through the text layer', async () => 
     assert.match(meta.body_text, /Indonesia/);
   } finally { safeUrl.safeFetch = origFetch; pdfExtract.extractPdfText = origExtract; delete require.cache[require.resolve('../server/lib/extractMetadata')]; }
 });
+
+test('classifyFailure buckets common acquisition errors', () => {
+  const { classifyFailure } = require('../server/lib/failureReason');
+  assert.strictEqual(classifyFailure('fetch failed: 403'), 'blocked_403');
+  assert.strictEqual(classifyFailure('fetch failed: 404'), 'not_found');
+  assert.strictEqual(classifyFailure('bot-block interstitial detected: "x"'), 'bot_block');
+  assert.strictEqual(classifyFailure('The operation was aborted due to timeout'), 'timeout');
+  assert.strictEqual(classifyFailure('PDF text extraction produced no text'), 'pdf_unreadable');
+  assert.strictEqual(classifyFailure('weird'), 'other');
+});
