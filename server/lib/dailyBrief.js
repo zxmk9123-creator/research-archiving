@@ -114,6 +114,7 @@ function validateBrief(raw, evidence) {
   const lead = String(raw.lead || '').trim().replace(/[.。]+$/u, '');
   const marketSummary = String(raw.market_summary || '').trim();
   if (!lead || !marketSummary) throw new Error('incomplete_brief');
+  if (/\d+\s*건\s*중|수집된\s*(?:\S+\s*){0,3}자료|[두세네다]\s*갈래|다음과 같|살펴보면|확인됐다\.?$/u.test(`${lead} ${marketSummary}`)) throw new Error('meta_phrase_in_summary');
   const allEvidenceText = evidence.map((item) => [item.title, item.summary, item.insight].filter(Boolean).join(' ')).join(' ');
   assertSupportedCertainty(`${lead} ${marketSummary}`, allEvidenceText);
   if (lead.length > 150) throw new Error('headline_lead_too_long');
@@ -199,7 +200,8 @@ function validateBrief(raw, evidence) {
     '가격·수급·생산·투자·정책·규제·확정 계약 등 실질적 변화를 보인 자료만 주목 후보로 삼는다. 일반 동향, 단순 행사 공지, 반복 보도, 광고성 시장규모 페이지, 영향이 불명확한 자료는 제외한다.',
     '각 후보의 중요도를 1~5 정수로 평가한다. 중요도 4 이상만 developments에 넣고 최대 5개까지만 고른다. 기준을 통과하는 자료가 적으면 5개를 채우지 말고 적은 수만 출력한다. 하나도 없으면 빈 배열을 출력한다.',
     '중요도 기준을 통과하는 자료만 developments에 넣는다. 날짜 범위별 최소 개수 조건은 없다. 자료가 적거나 기준을 통과하지 못하면 5개 미만 또는 빈 배열을 출력한다. summary와 significance는 한국어로 사실 및 시사점만 작성하고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
-    'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"오늘 자료 묶음의 관찰 요약","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
+    'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"현상→영향 순서의 2~3문장 브리핑","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
+    '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 가장 시의적인 현상부터 사실과 영향을 이어서 쓴다.',
     'developments는 중요도 4 이상, 최대 5개, watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
