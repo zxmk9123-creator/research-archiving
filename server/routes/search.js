@@ -220,6 +220,7 @@ function spellingVariants(token) {
 }
 
 const termGroups = require('../lib/termGroups');
+const glossary = require('../lib/glossary');
 const MAX_CONCEPTS = 16;
 
 // Returns concepts: each is an array of surface forms treated as ONE concept
@@ -1580,6 +1581,15 @@ async function handleSearch(req, res, signal) {
 
   if (!candidates.length) {
     const httpStatus = 200;
+    const cards = glossary.matchCards(question);
+    if (cards.length) {
+      // nothing archived matches, but the question asks what a known term is: answer from the reviewed cards (no model call)
+      await recordSearchTelemetry({
+        requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
+        candidateCount: 0, sourceCount: 0, provider: 'glossary', isFollowup, questionFingerprint: fingerprint, streamed: streaming,
+      });
+      return res.status(httpStatus).json({ answer: glossary.cardsAnswer(cards), insufficient: false, glossary: true, sources: [] });
+    }
     await recordSearchTelemetry({
       requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
       candidateCount: 0, sourceCount: 0, isFollowup, questionFingerprint: fingerprint, streamed: streaming,
@@ -1676,7 +1686,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;

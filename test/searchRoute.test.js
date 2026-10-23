@@ -162,6 +162,26 @@ test('POST /: no matching Published materials returns an explicit insufficient-e
   }
 });
 
+test('POST /: nothing archived but a definition question about a known term is answered from the reviewed cards, with no model call', async () => {
+  const { restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
+  let providerCalled = false;
+  const restoreProvider = mockProvider(async () => { providerCalled = true; return { text: 'x', provider: 'freellmapi' }; });
+  try {
+    await withServer(async (base) => {
+      const res = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'HVO가 뭐야?' }) });
+      const body = await res.json();
+      assert.equal(body.insufficient, false);
+      assert.equal(body.glossary, true);
+      assert.deepEqual(body.sources, []);
+      assert.match(body.answer, /# 기초 지식[\s\S]*HVO/);
+      assert.equal(providerCalled, false);
+    });
+  } finally {
+    restore();
+    restoreProvider();
+  }
+});
+
 test('POST /: AI provider failure returns a generic 502 without leaking provider error details', async () => {
   const { restore } = mockPool([
     ['FROM items i', () => ({ rows: [SAMPLE_ROW] })],
