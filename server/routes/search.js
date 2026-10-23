@@ -224,6 +224,7 @@ const termGroups = require('../lib/termGroups');
 const EDIBLE_PREFIX_EXCLUDE = { '식용유': '폐비', '식용유지': '비' };
 const glossary = require('../lib/glossary');
 const synthesis = require('../lib/synthesis');
+const topicShift = require('../lib/topicShift');
 const { isoDate } = require('../lib/isoDate');
 const MAX_CONCEPTS = 16;
 
@@ -1549,17 +1550,38 @@ async function handleSearch(req, res, signal) {
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
   // CONVERSATION CONTEXT: a follow-up inherits the sector, the card answers and the companies of the previous
   // table (structured values kept by the client between turns), unless it states that dimension itself.
-  const prevContext = isFollowup ? classificationScope.sanitizeContext(req.body.context) : null;
+  // A question on a different topic than the previous turn is answered on its own: nothing is inherited from the conversation
+  // (see lib/topicShift.js) — otherwise "팜유 시장 동향" followed by "AtJ 프로젝트 리스트업" was searched as "팜유 AtJ 프로젝트".
+  let history = Array.isArray(req.body.history) ? req.body.history : [];
+  const sentContext = isFollowup ? classificationScope.sanitizeContext(req.body.context) : null;
+  const newTopic = isFollowup && topicShift.isNewTopic(question, history, sentContext, extractConcepts);
+  if (newTopic) history = [];
+  const prevContext = newTopic ? null : sentContext;
   const carried = classificationScope.carry(prevContext, question);
-  const choices = classification !== null || carried.choices ? { ...(carried.choices || {}), ...(classification || {}) } : null;
-  const referencedEntities = prevContext && prevContext.entities.length && classificationScope.refersBack(question) ? prevContext.entities : [];
+  let choices = classification !== null || carried.choices ? { ...(carried.choices || {}), ...(classification || {}) } : null;
+  let referencedEntities = prevContext && prevContext.entities.length && classificationScope.refersBack(question) ? prevContext.entities : [];
   const confirmed = scope.confirmed === true || classification !== null || carried.cardAnswered;
   const quick = confirmed && scope.mode === 'quick';
 
   const datasetTrace = [];
   let candidates;
   try {
-    candidates = await retrieveCandidates(`${feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)))}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, req.body.history, { light: quick, trace: req.body.debug === true ? datasetTrace : null });
+    const baseQuestion = feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)));
+    const retrievalOpts = { light: quick, trace: req.body.debug === true ? datasetTrace : null };
+    candidates = await retrieveCandidates(`${baseQuestion}${choices && choices.subject ? ` ${choices.subject}` : ''}${referencedEntities.length ? ` ${referencedEntities.join(' ')}` : ''}`, history, retrievalOpts);
+    // SAFETY NET: the conversation was used and found (almost) nothing — retry on the question alone; if that finds more, the
+    // question is not about the earlier topic: drop the inherited context for the rest of this request.
+    const usedContext = history.length > 0 || Boolean(choices && choices.subject && classification === null) || referencedEntities.length > 0;
+    if (usedContext && candidates.length < 3) {
+      const alone = await retrieveCandidates(baseQuestion, [], retrievalOpts);
+      if (alone.length > candidates.length) {
+        console.log(`ai-search context_separated with_context=${candidates.length} alone=${alone.length}`);
+        candidates = alone;
+        history = [];
+        choices = classification !== null ? classification : null;
+        referencedEntities = [];
+      }
+    }
     {
       const rosterForFresh = await getRoster();
       if (feedstockSupply.isFeedstockChainQuestion(question)) candidates = candidates.concat(await feedstockSupplyExtras(candidates));
@@ -1643,7 +1665,7 @@ async function handleSearch(req, res, signal) {
     && !datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) && !diagram.isDiagramQuestion(question)
     && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && synthesis.isBroadQuestion(question);
   if (synthesisMode) candidates = synthesis.selectForSynthesis(candidates);
-  const cacheKey = Array.isArray(req.body.history) && req.body.history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
+  const cacheKey = history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
     await recordSearchTelemetry({
@@ -1717,7 +1739,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(req.body.history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
