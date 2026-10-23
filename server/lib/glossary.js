@@ -4,20 +4,20 @@
 // and (2) as a labelled "기초 지식" layer in front of the archive-grounded answer. Add or fix cards here; nothing else needs to change.
 const CARDS = [
   { id: 'palm', name: '팜유', terms: ['팜유', 'palm oil', '팜오일'], def: '기름야자 열매의 과육에서 짜낸 식물성 유지입니다. 상온에서 반고체 상태이며 식용유·가공식품·유지화학 제품·바이오디젤 원료로 쓰입니다. 원유 형태는 CPO(Crude Palm Oil), 정제를 거친 것은 RBD 팜유라고 부릅니다.' },
-  { id: 'palm-kernel', name: '팜핵유', terms: ['팜핵유', 'palm kernel oil', 'pko'], def: '기름야자 열매의 씨앗(핵)에서 얻는 유지로, 과육에서 얻는 팜유와는 별개의 제품입니다. 라우르산 함량이 높아 주로 비누·세제·유지화학 용도에 쓰입니다.' },
+  { id: 'palm-kernel', name: '팜핵유', terms: ['팜핵유', 'palm kernel oil', 'pko'], def: '기름야자 열매의 씨앗(핵)에서 얻는 유지로, 과육에서 얻는 팜유와는 별개의 제품입니다. 라우르산 함량이 높아 제과·마가린 등 식품 용도와 비누·세제·유지화학 용도에 쓰입니다.' },
   { id: 'olein', name: '팜 올레인·스테아린', terms: ['올레인', 'olein', '스테아린', 'stearin', 'rbd'], def: '팜유를 온도에 따라 분리(분별)하면 액체 분획인 올레인과 고체 분획인 스테아린이 얻어집니다. RBD는 정제(Refined)·탈색(Bleached)·탈취(Deodorized)를 모두 거친 유지를 뜻합니다.' },
   { id: 'soy', name: '대두유', terms: ['대두유', 'soybean oil', 'soy oil', '콩기름'], def: '대두(콩)를 착유해 얻는 식물성 유지입니다. 착유 과정에서 사료용 대두박이 함께 생산되며, 식용유와 바이오디젤·재생디젤 원료로 널리 쓰입니다.' },
   { id: 'crush', name: '크러싱 마진', terms: ['크러싱', 'crush margin', '크러쉬', 'crushing'], def: '대두 등 유지종자를 착유해 얻는 기름과 박(meal)의 가치 합계에서 원료 종자 가격을 뺀 가공 마진을 말합니다. 착유업체의 수익성과 가동 의욕을 가늠하는 지표로 쓰입니다.' },
   { id: 'rapeseed', name: '유채씨유(카놀라유·채종유)', terms: ['유채씨유', '카놀라유', '채종유', '유채유', 'rapeseed oil', 'canola oil', '카놀라'], def: '유채 씨앗에서 얻는 식물성 유지입니다. 카놀라유는 에루스산과 글루코시놀레이트를 낮춘 식용 품종 유채에서 얻은 것을 가리키며, 유럽에서는 주로 rapeseed oil이라고 부릅니다. 채종유는 유채씨유의 다른 이름이고, 식용 외에 바이오디젤 원료로도 쓰입니다.' },
   { id: 'sunflower', name: '해바라기유', terms: ['해바라기유', 'sunflower oil'], def: '해바라기 씨앗에서 얻는 식물성 유지로, 주로 식용으로 쓰입니다. 흑해 지역(우크라이나·러시아)이 대표적인 공급지여서 이 지역의 작황·물류·수출 정책이 시장에 영향을 줍니다.' },
   { id: 'uco', name: 'UCO(폐식용유)', terms: ['uco', 'used cooking oil', '폐식용유'], def: '식당·식품 가공 등에서 사용한 뒤 회수한 식용유입니다. 바이오디젤(FAME)·HVO·SAF의 대표적인 폐기물계 원료이며, 원산지 추적과 진위(다른 유지 혼입) 확인이 중요한 이슈입니다.' },
-  { id: 'tallow', name: 'Tallow(우지)', terms: ['tallow', '우지'], def: '소 등 반추동물의 지방을 가공해 얻는 동물성 유지입니다. 비누·사료·유지화학 용도 외에 바이오연료 원료로도 쓰입니다.' },
+  { id: 'tallow', name: 'Tallow(우지)', terms: ['tallow', '우지'], def: '소·양 등 반추동물의 지방을 가공해 얻는 동물성 유지입니다(우지는 그중 소 지방을 가리킵니다). 비누·사료·유지화학 용도 외에 바이오연료 원료로도 쓰입니다.' },
   { id: 'fame', name: '바이오디젤(FAME)', terms: ['fame', '바이오디젤', 'biodiesel', 'ucome'], def: '유지를 메탄올과 반응시켜(에스테르 교환) 만든 지방산 메틸에스테르(Fatty Acid Methyl Ester)입니다. 경유에 일정 비율로 혼합해 쓰며, UCO를 원료로 한 것은 UCOME이라고 부릅니다.' },
   { id: 'hvo', name: 'HVO(재생디젤)', terms: ['hvo', '재생디젤', 'renewable diesel'], def: '유지를 수소로 처리(수첨)해 만든 파라핀계 디젤입니다. 화학 조성이 화석 디젤과 비슷해 FAME 바이오디젤보다 혼합 제약이 적고, 저온 특성이 좋은 것으로 알려져 있습니다.' },
   { id: 'hefa', name: 'HEFA', terms: ['hefa'], def: 'Hydroprocessed Esters and Fatty Acids의 약자로, UCO·동물성 지방·식물성 유지를 수소처리해 SAF나 재생디젤(HVO)을 만드는 공정 경로입니다. 현재 SAF 상업 생산의 중심이 되는 경로입니다.' },
   { id: 'saf', name: 'SAF(지속가능항공유)', terms: ['saf', '지속가능항공유', 'sustainable aviation fuel', '바이오항공유'], def: '폐식용유·지방·바이오매스·재생전력 기반 수소와 CO₂ 등 지속가능한 원료로 만들어, 기존 제트유와 섞어 쓸 수 있는 항공 연료입니다. 주요 생산 경로로 HEFA, Alcohol-to-Jet, Fischer-Tropsch, Power-to-Liquid(e-SAF) 등이 있습니다.' },
-  { id: 'mandate', name: '혼합의무', terms: ['혼합의무', '혼합 의무', '블렌딩', 'blending mandate', 'mandate'], def: '연료 공급업자에게 화석연료에 일정 비율 이상의 바이오연료나 SAF를 혼합해 공급하도록 법으로 의무화하는 제도입니다. 해당 연료의 수요를 정책으로 만들어 원료 시장에도 영향을 줍니다.' },
-  { id: 'eudr', name: 'EUDR(EU 삼림전용방지 규정)', terms: ['eudr', '삼림전용방지', 'deforestation regulation'], def: '팜유·대두·소고기·커피·코코아·목재·고무 등 특정 상품과 그 파생품이 2020년 12월 31일 이후 삼림 벌채가 이뤄진 토지에서 생산되지 않았음을 입증해야 EU 시장에 유통할 수 있도록 한 EU 규정입니다.' },
+  { id: 'mandate', name: '혼합의무', terms: ['혼합의무', '혼합 의무', '블렌딩', 'blending mandate', 'mandate'], def: '연료 공급업자에게 화석연료에 일정 비율 이상의 바이오연료나 SAF를 혼합해 공급하도록 법령으로 의무화하는 제도입니다. 해당 연료의 수요를 정책으로 만들어 원료 시장에도 영향을 줍니다.' },
+  { id: 'eudr', name: 'EUDR(EU 삼림전용방지 규정)', terms: ['eudr', '삼림전용방지', 'deforestation regulation'], def: '팜유·대두·소고기·커피·코코아·목재·고무 등 특정 상품과 그 파생품이 2020년 12월 31일 이후 삼림 벌채가 이뤄진 토지에서 생산되지 않았고 생산국 법령을 지켜 생산되었음을 실사로 입증해야 EU 시장에 출시하거나 수출할 수 있도록 한 EU 규정입니다.' },
   { id: 'rspo', name: 'RSPO', terms: ['rspo', '지속가능 팜유 인증'], def: 'Roundtable on Sustainable Palm Oil의 약자로, 환경·사회 기준을 충족한 팜유 생산·유통에 인증을 부여하는 국제 협의체이자 인증 제도입니다.' },
 ];
 
