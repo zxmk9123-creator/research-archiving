@@ -138,6 +138,10 @@ body {
 }
 .daily-status-dot.ok { background: var(--success); }
 .daily-status-dot.pending { background: var(--danger); }
+.daily-status-dot.running { background: var(--action); animation: daily-status-pulse 1.4s ease-in-out infinite; }
+.daily-status-dot.waiting { background: var(--text-tertiary); }
+@keyframes daily-status-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .daily-status-dot.running { animation: none; } }
 
 /* Nav split into two role groups — reader-facing (Home/자료) vs
    operator-facing (Sources/Review) — separated by a visible divider so

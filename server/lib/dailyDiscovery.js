@@ -203,17 +203,30 @@ async function maybeRunDailyDiscovery(now = new Date()) {
 // Home status-bar read model: today's (KST) completion state for the
 // green/red light, without exposing claimDailyDiscoveryRunForToday()'s
 // internal claim mechanics to the route layer.
+// state: completed | running (a slice holds the lease) | waiting (before the 08:00 KST hour, nothing started yet) |
+// stalled (started but no progress for STALL_MS, or nothing started by 08:00 KST) — the home light shows each differently.
+const STALL_MS = 45 * 60 * 1000;
 async function getDailyDiscoveryStatus(now = new Date()) {
-  const today = kstPartsOf(now).date;
+  const { date: today, hour } = kstPartsOf(now);
   const { rows } = await pool.query(
-    `SELECT last_run_date, last_completed_at, last_totals, last_failed_sources FROM scheduler_jobs WHERE job_name = $1`,
-    [JOB_NAME]
+    `SELECT job_name, last_run_date, last_completed_at, last_totals, last_failed_sources FROM scheduler_jobs WHERE job_name = ANY($1)`,
+    [[JOB_NAME, CURSOR_JOB]]
   );
-  const row = rows[0];
-  if (!row) return { completedToday: false, totals: null, failedSources: [], completedAt: null };
-  const completedToday = Boolean(row.last_completed_at) && kstPartsOf(row.last_completed_at).date === today;
+  const row = rows.find((r) => r.job_name === JOB_NAME);
+  const cursorRow = rows.find((r) => r.job_name === CURSOR_JOB);
+  const completedToday = Boolean(row && row.last_completed_at) && kstPartsOf(row.last_completed_at).date === today;
+  const cursor = cursorRow && cursorRow.last_run_date && new Date(cursorRow.last_run_date).toISOString().slice(0, 10) === today ? cursorRow.last_totals || {} : null;
+  const total = (cursor && cursor.total) || null;
+  const done = cursor ? Number(cursor.offset) || 0 : 0;
+  let state = 'waiting';
+  if (completedToday) state = 'completed';
+  else if (cursor && cursor.leaseUntil && cursor.leaseUntil > now.getTime()) state = 'running';
+  else if (cursor) state = cursor.savedAt && now.getTime() - cursor.savedAt <= STALL_MS ? 'running' : 'stalled';
+  else if (hour >= 8) state = 'stalled';
   return {
-    completedToday: Boolean(completedToday),
+    completedToday,
+    state,
+    progress: total ? { done, total } : null,
     totals: completedToday ? row.last_totals : null,
     failedSources: completedToday ? (row.last_failed_sources || []) : [],
     completedAt: completedToday ? row.last_completed_at : null,
@@ -228,7 +241,7 @@ const CURSOR_JOB = 'daily_discovery_cursor';
 const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
 
 // Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
-async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, concurrency = 3, now = () => Date.now() } = {}) {
+async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, concurrency = 3, now = () => Date.now(), onGroup = null } = {}) {
   const started = now();
   const next = { offset: cursor.offset || 0, results: [...(cursor.results || [])] };
   while (next.offset < total && now() - started < budgetMs) {
@@ -237,6 +250,8 @@ async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, conc
     const done = await Promise.all(group.map((idx) => runOne(idx).then((r) => slimResult(r), (err) => ({ sourceId: null, ok: false, error: String(err && err.message).slice(0, 160) }))));
     next.results.push(...done);
     next.offset += group.length;
+    // progress is saved after EVERY group: a function killed by the host's time limit loses at most the group in flight
+    if (onGroup) await onGroup({ offset: next.offset, results: next.results });
   }
   return { ...next, done: next.offset >= total };
 }
@@ -257,11 +272,15 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
      ON CONFLICT (job_name) DO UPDATE SET last_run_date = $2::date, last_totals = $3`,
     [CURSOR_JOB, today, JSON.stringify(state)]
   );
-  await save({ ...saved, leaseUntil: Date.now() + budgetMs + 60000 });
+  await save({ ...saved, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + budgetMs + 60000 });
   console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
   const runOne = (idx) => collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx]));
-  const step = await advanceDiscovery(saved, srcRows.length, runOne, { budgetMs });
-  await save({ offset: step.offset, results: step.results, leaseUntil: 0 });
+  const leaseMs = budgetMs + 60000;
+  const step = await advanceDiscovery(saved, srcRows.length, runOne, {
+    budgetMs,
+    onGroup: (state) => save({ offset: state.offset, results: state.results, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + leaseMs }),
+  });
+  await save({ offset: step.offset, results: step.results, total: srcRows.length, savedAt: Date.now(), leaseUntil: 0 });
   if (!step.done) return { ran: true, done: false, progress: `${step.offset}/${srcRows.length}` };
   const failedSources = await recordDailyDiscoveryCompletion({ results: step.results });
   console.log(`daily_discovery sliced completed sources=${step.results.length} failed=${failedSources.length}`);

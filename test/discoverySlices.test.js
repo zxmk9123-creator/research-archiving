@@ -36,3 +36,44 @@ test('advanceDiscovery: a source that throws is recorded as failed and does not 
   assert.equal(out.results[1].ok, false);
   assert.match(out.results[1].error, /network down/);
 });
+
+test('advanceDiscovery: progress is reported after every group, so a killed function loses at most the group in flight', async () => {
+  const seen = [];
+  const run = async (idx) => ({ sourceId: idx, ok: true, discovered: 1, archived: 0, filtered: 0, failed: 0 });
+  await advanceDiscovery({ offset: 0, results: [] }, 7, run, { budgetMs: 10000, concurrency: 3, onGroup: async (s) => { seen.push(s.offset); } });
+  assert.deepEqual(seen, [3, 6, 7]);
+});
+
+const pool = require('../server/db/pool');
+const { getDailyDiscoveryStatus } = require('../server/lib/dailyDiscovery');
+
+function statusFor(rows, now) {
+  const original = pool.query;
+  pool.query = async () => ({ rows });
+  return getDailyDiscoveryStatus(now).finally(() => { pool.query = original; });
+}
+const KST_0955 = new Date('2026-10-24T00:55:00Z'); // 09:55 KST
+const cursor = (totals, runDate = '2026-10-24') => ({ job_name: 'daily_discovery_cursor', last_run_date: new Date(`${runDate}T00:00:00Z`), last_totals: totals });
+
+test('getDailyDiscoveryStatus: completed / running (lease or recent progress) / stalled (no progress, nothing started) / waiting', async () => {
+  const done = await statusFor([{ job_name: 'daily_discovery', last_run_date: '2026-10-24', last_completed_at: new Date('2026-10-24T00:30:00Z'), last_totals: { archived: 3 }, last_failed_sources: [] }], KST_0955);
+  assert.equal(done.state, 'completed');
+  assert.equal(done.completedToday, true);
+
+  const leased = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: KST_0955.getTime() + 60000, savedAt: KST_0955.getTime() - 1000 })], KST_0955);
+  assert.equal(leased.state, 'running');
+  assert.deepEqual(leased.progress, { done: 30, total: 66 });
+
+  const between = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 10 * 60000 })], KST_0955);
+  assert.equal(between.state, 'running'); // between two slices, saved 10 minutes ago
+
+  const stuck = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 3 * 3600000 })], KST_0955);
+  assert.equal(stuck.state, 'stalled');
+
+  const oldCursor = await statusFor([cursor({ offset: 66, total: 66, leaseUntil: 0, savedAt: 1 }, '2026-10-23')], KST_0955);
+  assert.equal(oldCursor.state, 'stalled'); // yesterday's cursor is ignored; it is past 08:00 and nothing started today
+  assert.equal(oldCursor.progress, null);
+
+  const early = await statusFor([], new Date('2026-10-23T21:00:00Z')); // 06:00 KST
+  assert.equal(early.state, 'waiting');
+});

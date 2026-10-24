@@ -1932,8 +1932,11 @@ async function renderDailyStatusBar() {
   if (!bar) return;
   try {
     const status = await api('/sources/daily-discovery-status');
-    const dotClass = status.completedToday ? 'ok' : 'pending';
-    const text = status.completedToday ? '오늘 기사 수집 완료' : '오늘 기사 수집 미완료';
+    // completed / running (n of m sources) / waiting for the 07:00 KST run / stalled (no progress, retrying)
+    const state = status.completedToday ? 'completed' : (status.state || 'waiting');
+    const p = status.progress && status.progress.total ? ` (${status.progress.done}/${status.progress.total})` : '';
+    const dotClass = { completed: 'ok', running: 'running', waiting: 'waiting', stalled: 'pending' }[state] || 'pending';
+    const text = { completed: '오늘 기사 수집 완료', running: `기사 수집 진행 중${p}`, waiting: '오늘 기사 수집 대기 중', stalled: `기사 수집 지연${p} — 재시도 대기` }[state] || '오늘 기사 수집 미완료';
     bar.innerHTML = `<span class="daily-status-dot ${dotClass}"></span><span>${text}</span>`;
     bar.hidden = false;
   } catch (err) {
