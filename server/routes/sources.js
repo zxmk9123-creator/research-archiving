@@ -106,7 +106,9 @@ router.post('/run-scheduled-daily-discovery', requireAuth, async (req, res) => {
 // status display, not an admin action.
 router.get('/daily-discovery-status', async (req, res) => {
   const status = await dailyDiscoveryModule.getDailyDiscoveryStatus();
-  res.json(status);
+  // the light covers the whole morning pipeline: collection, then the headline
+  const brief = await require('../lib/dailyBrief').getBriefState().catch(() => ({ state: 'none' }));
+  res.json({ ...status, brief: brief.state });
 });
 
 // Manual trigger: run all due RSS sources now.
