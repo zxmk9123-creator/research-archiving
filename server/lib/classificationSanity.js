@@ -37,9 +37,22 @@ const UNGROUNDABLE_SECTOR_NAMES = new Set([
   '식용유지', '비식용유지', '기타 식용유지', '기타 비식용유지', '기타', '물류', '운임료', '국제 정세',
 ]);
 
+// The four oils-and-fats umbrella buckets are NOT free: tanker-rate, OPEC and Hormuz articles were filed under all of them (the classifier
+// attached every parent when unsure) and then surfaced in oils-and-fats searches. An umbrella tag needs an oils/fats/biofuel term in the
+// item's own text (bare "oil" and "fuel" are deliberately not terms: crude oil and bunker fuel are the false friends).
+const OIL_FAT_PARENTS = new Set(['식용유지', '비식용유지', '기타 식용유지', '기타 비식용유지']);
+const OIL_FAT_TERMS = /식용유|식물성\s*유|팜유|팜\s*오일|대두|유채|카놀라|해바라기|올리브유|코코넛|쌀겨|바이오\s*(연료|디젤)|재생\s*디젤|항공유|폐식용유|\bUCO\b|\bSAF\b|e-SAF|\bHVO\b|\bFAME\b|\btallow\b|우지|vegetable oil|cooking oil|edible oil|palm|soybean|soy oil|rapeseed|canola|sunflower|biofuel|biodiesel|renewable diesel|oleochemical|\bfats?\b|oils?\s*(&|and)\s*fats?|margarine|shortening|crush|fatty/i;
+
+// sector rows [{id, name}] -> ids to store: umbrella oils/fats tags without grounding are dropped when another tag remains.
+function pruneUngroundedParents(rows, text) {
+  const grounded = OIL_FAT_TERMS.test(String(text || ''));
+  const kept = rows.filter((r) => grounded || !OIL_FAT_PARENTS.has(r.name));
+  return (kept.length ? kept : rows).map((r) => r.id);
+}
+
 // Bumped whenever SECTOR_KEYWORD_PATTERNS or UNGROUNDABLE_SECTOR_NAMES
 // changes — persisted alongside gate_hold_reason (see aiDraft.js).
-const CLASSIFICATION_SANITY_VERSION = 'classification-sanity-v1';
+const CLASSIFICATION_SANITY_VERSION = 'classification-sanity-v2';
 
 async function hasGroundedClassification(item) {
   const suggestedIds = item.ai_suggested_sectors || [];
@@ -49,6 +62,7 @@ async function hasGroundedClassification(item) {
   const text = `${item.title || ''} ${item.ai_summary || item.summary || ''}`;
 
   return rows.some(({ name }) => {
+    if (OIL_FAT_PARENTS.has(name)) return OIL_FAT_TERMS.test(text);
     if (UNGROUNDABLE_SECTOR_NAMES.has(name)) return true;
     const pattern = SECTOR_KEYWORD_PATTERNS[name];
     return pattern ? pattern.test(text) : true; // an unmapped sector name is never penalized
@@ -56,5 +70,5 @@ async function hasGroundedClassification(item) {
 }
 
 module.exports = {
-  hasGroundedClassification, SECTOR_KEYWORD_PATTERNS, UNGROUNDABLE_SECTOR_NAMES, CLASSIFICATION_SANITY_VERSION,
+  hasGroundedClassification, pruneUngroundedParents, OIL_FAT_TERMS, OIL_FAT_PARENTS, SECTOR_KEYWORD_PATTERNS, UNGROUNDABLE_SECTOR_NAMES, CLASSIFICATION_SANITY_VERSION,
 };

@@ -4,7 +4,7 @@ const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
 const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
 const { topicDuplicateOf, TOPIC_DUPLICATE_VERSION } = require('./topicDuplicate');
-const { hasGroundedClassification, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
+const { hasGroundedClassification, pruneUngroundedParents, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
 const { extractCompanyNames, recordCompanyMentions } = require('./companyDiscovery');
 const { extractFactsInBackground } = require('./itemFacts');
 
@@ -539,8 +539,11 @@ async function applyAiDraftIfEligible(itemId) {
   await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
   await pool.query('DELETE FROM item_usages WHERE item_id = $1', [itemId]);
   if (item.ai_suggested_sectors && item.ai_suggested_sectors.length) {
-    const values = item.ai_suggested_sectors.map((sid) => `(${itemId}, ${Number(sid)})`).join(',');
-    await pool.query(`INSERT INTO item_sectors (item_id, sector_id) VALUES ${values}`);
+    // umbrella oils/fats tags need grounding in the item's own text (see classificationSanity.js)
+    const { rows: sectorRows } = await pool.query('SELECT id, name FROM sectors WHERE id = ANY($1)', [item.ai_suggested_sectors.map(Number)]);
+    const ids = pruneUngroundedParents(sectorRows, `${item.title || ''} ${item.ai_summary || item.summary || ''}`);
+    const values = ids.map((sid) => `(${itemId}, ${Number(sid)})`).join(',');
+    if (values) await pool.query(`INSERT INTO item_sectors (item_id, sector_id) VALUES ${values}`);
   }
   if (item.ai_suggested_usages && item.ai_suggested_usages.length) {
     const values = item.ai_suggested_usages.map((uid) => `(${itemId}, ${Number(uid)})`).join(',');

@@ -719,7 +719,7 @@ test('applyAiDraftIfEligible: a sector-grounding failure persists its reason and
     const result = await applyAiDraftIfEligible(61);
     assert.equal(result.archived, false);
     const holdCall = calls.find((c) => c.text.includes('gate_hold_reason = $1'));
-    assert.deepEqual(holdCall.params, ['no_grounded_sector', 'classification-sanity-v1', 61]);
+    assert.deepEqual(holdCall.params, ['no_grounded_sector', 'classification-sanity-v2', 61]);
   } finally {
     restore();
   }
