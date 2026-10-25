@@ -53,6 +53,8 @@ async function runDailyCron(chainDepth) {
     ['collections', () => runDueCollections()],
     ['reference_collections', () => require('./referenceCollect').runReferenceCollections()],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
+    // news held for lack of a publication date: read the page, set the date, publish (see aiDraft.js date gate)
+    ['undated_news_dates', () => require('./publishedDates').fillHeldNewsDates()],
     // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
     ['review_autopilot', async () => {
       const autopilot = require('./reviewAutopilot');

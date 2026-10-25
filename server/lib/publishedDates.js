@@ -108,4 +108,41 @@ async function backfillFromPages({ limit = 40, afterId = 0, budgetMs = 200000 } 
   return { checked: rows.length - queue.length, updated, skipped, failed, nextAfterId: queue.length ? Math.min(...queue.map((q) => q.id)) - 1 : lastId, remainingAfter: Number(left[0].n) };
 }
 
-module.exports = { dateFromUrl, dateFromHtml, dateFromCheerio, normalizeDateString, backfillPublishedDates, backfillFromPages };
+// Held news (gate_hold_reason = 'undated_news'): read each page once for the date it declares and, when found, set it and run the publish
+// step again. A page that gives no date (or cannot be read, or is a social post) is marked 'undated_news_checked' so it is not fetched
+// every hour; it stays a Draft for a human. Only items collected in the last 3 days are tried.
+async function fillHeldNewsDates({ limit = 24, budgetMs = 60000 } = {}) {
+  const { safeFetch } = require('./safeUrl');
+  const { readResponseText } = require('./boundedResponse');
+  const { applyAiDraftIfEligible, UNDATED_NEWS_REASON } = require('./aiDraft');
+  const { rows } = await pool.query(
+    `SELECT id, source_url FROM items WHERE status = 'Draft' AND type = '뉴스' AND published_at IS NULL AND gate_hold_reason = $1
+        AND collected_at >= now() - interval '3 days' ORDER BY id DESC LIMIT $2`,
+    [UNDATED_NEWS_REASON, limit]
+  );
+  const started = Date.now();
+  const out = { held: rows.length, dated: 0, published: 0, unresolved: 0 };
+  const queue = [...rows];
+  const markChecked = (id) => pool.query("UPDATE items SET gate_hold_reason = 'undated_news_checked' WHERE id = $1 AND published_at IS NULL", [id]);
+  const worker = async () => {
+    while (queue.length && Date.now() - started < budgetMs) {
+      const r = queue.shift();
+      let date = dateFromUrl(r.source_url);
+      try {
+        const host = new URL(r.source_url).hostname;
+        if (!date && !SOCIAL_HOSTS.test(host) && !/\.pdf($|\?)/i.test(r.source_url)) {
+          const res = await safeFetch(r.source_url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchArchivingBot/1.0)' }, signal: AbortSignal.timeout(8000) });
+          if (res.ok) date = dateFromHtml(await readResponseText(res, 800000, 'page'));
+        }
+      } catch (_) { /* unreadable: treated as no date */ }
+      if (!date) { out.unresolved++; await markChecked(r.id); continue; }
+      await pool.query('UPDATE items SET published_at = $2 WHERE id = $1 AND published_at IS NULL', [r.id, date]);
+      out.dated++;
+      try { if ((await applyAiDraftIfEligible(r.id)).archived) out.published++; } catch (_) { /* the item keeps its hold reason */ }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  return out;
+}
+
+module.exports = { fillHeldNewsDates, dateFromUrl, dateFromHtml, dateFromCheerio, normalizeDateString, backfillPublishedDates, backfillFromPages };

@@ -239,7 +239,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         const { rows: inserted } = await pool.query(
           `INSERT INTO items (title, source_url, published_at, source_id, type, thumbnail_url, acquisition_fallback_url)
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-          [meta.title || candidate.title, candidate.link, meta.published_at, source.id, itemType, meta.thumbnail_url, fallbackUrl]
+          [meta.title || candidate.title, candidate.link, meta.published_at || require('./publishedDates').dateFromUrl(candidate.link), source.id, itemType, meta.thumbnail_url, fallbackUrl]
         );
         itemId = inserted[0].id;
         rememberUrl(candidate.link);

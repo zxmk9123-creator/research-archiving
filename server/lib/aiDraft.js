@@ -4,6 +4,8 @@ const { createLimiter } = require('./ai/concurrencyLimiter');
 const { hasValidClassification, deriveContentCategory } = require('./classification');
 const { trustGateFailureReason, TRUST_GATE_VERSION } = require('./trustGate');
 const { topicDuplicateOf, TOPIC_DUPLICATE_VERSION } = require('./topicDuplicate');
+const UNDATED_NEWS_REASON = 'undated_news';
+const UNDATED_NEWS_GATE_VERSION = 'undated-news-v1';
 const { hasGroundedClassification, pruneUngroundedParents, CLASSIFICATION_SANITY_VERSION } = require('./classificationSanity');
 const { extractCompanyNames, recordCompanyMentions } = require('./companyDiscovery');
 const { extractFactsInBackground } = require('./itemFacts');
@@ -572,6 +574,21 @@ async function applyAiDraftIfEligible(itemId) {
     return { archived: false };
   }
 
+  // DATE GATE: a news item must carry a publication date — the headline and the freshness rules are defined on it ("published within the
+  // last 7 days"), and an undated item can never be shown to satisfy them. The date is taken from the page's own URL when it has one;
+  // otherwise the item is held as 'undated_news' and the cron's date step (publishedDates.fillHeldNewsDates) reads the page and retries.
+  // Reports/statistics/regulation items are exempt (long shelf life, often undated by nature).
+  if (item.type === '뉴스' && !item.published_at) {
+    const fromUrl = require('./publishedDates').dateFromUrl(item.source_url);
+    if (fromUrl) {
+      await pool.query('UPDATE items SET published_at = $2 WHERE id = $1 AND published_at IS NULL', [itemId, fromUrl]);
+    } else {
+      console.log(`applyAiDraftIfEligible: news item ${itemId} has no publication date — held until a date is found`);
+      await recordGateHold(itemId, UNDATED_NEWS_REASON, UNDATED_NEWS_GATE_VERSION);
+      return { archived: false };
+    }
+  }
+
   // Same-event guard: already-covered topic without new figures is not published again.
   const duplicateOf = await topicDuplicateOf(pool, item);
   if (duplicateOf) {
@@ -605,6 +622,7 @@ async function applyAiDraftIfEligible(itemId) {
 module.exports = {
   SYSTEM_PROMPT,
   applyAiDraftIfEligible,
+  UNDATED_NEWS_REASON,
   UNCONFIRMED,
   INSIGHT_FALLBACK,
   buildTaxonomyBlock,

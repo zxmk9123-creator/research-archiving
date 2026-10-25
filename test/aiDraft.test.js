@@ -607,7 +607,7 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
     ['SELECT * FROM items WHERE id', () => ({
       rows: [{
         id: 43, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
-        source_url: 'https://example.org/news', title: '뉴스 제목',
+        source_url: 'https://example.org/news', title: '뉴스 제목', published_at: '2026-10-22',
         ai_summary: '인도네시아가 팜유 수출세를 인상했다.', ai_insight: 'i', type: '뉴스',
         ai_suggested_sectors: [3], ai_suggested_usages: [7],
       }],
@@ -622,6 +622,42 @@ test('applyAiDraftIfEligible: a 뉴스 item publishes with content_category=dail
   } finally {
     restore();
   }
+});
+
+function undatedItem(over = {}) {
+  return { id: 77, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', source_url: 'https://example.org/post', title: '뉴스', ai_summary: '팜유 가격이 올랐다.', ai_insight: 'i', type: '뉴스', published_at: null, ai_suggested_sectors: [3], ai_suggested_usages: [7], ...over };
+}
+const dateGateHandlers = (item) => [
+  ['SELECT * FROM items WHERE id', () => ({ rows: [item] })],
+  ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+  ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+];
+
+test('applyAiDraftIfEligible: an undated news item is held as undated_news and not published', async () => {
+  const { calls, restore } = mockPool(dateGateHandlers(undatedItem()));
+  try {
+    const r = await applyAiDraftIfEligible(77);
+    assert.equal(r.archived, false);
+    assert.deepEqual(calls.find((c) => c.text.includes('gate_hold_reason = $1')).params, ['undated_news', 'undated-news-v1', 77]);
+    assert.ok(!calls.some((c) => c.text.includes('UPDATE items SET summary')));
+  } finally { restore(); }
+});
+
+test('applyAiDraftIfEligible: an undated news item whose URL carries a date gets that date and publishes', async () => {
+  const { calls, restore } = mockPool(dateGateHandlers(undatedItem({ source_url: 'https://example.org/2026/10/22/palm-oil-rises' })));
+  try {
+    const r = await applyAiDraftIfEligible(77);
+    assert.equal(r.archived, true);
+    assert.deepEqual(calls.find((c) => /UPDATE items SET published_at/.test(c.text)).params, [77, '2026-10-22']);
+  } finally { restore(); }
+});
+
+test('applyAiDraftIfEligible: undated reports are exempt from the date gate', async () => {
+  const { calls, restore } = mockPool(dateGateHandlers(undatedItem({ type: '보고서' })));
+  try {
+    assert.equal((await applyAiDraftIfEligible(77)).archived, true);
+    assert.ok(!calls.some((c) => c.text.includes('gate_hold_reason = $1') && c.params[0] === 'undated_news'));
+  } finally { restore(); }
 });
 
 test('applyAiDraftIfEligible: skips sector/usage inserts when none were suggested', async () => {
