@@ -79,6 +79,24 @@ function assertSupportedCertainty(claimText, sourceText, itemId) {
   }
 }
 
+const MIN_IMPORTANCE = 3;      // 4-5 are preferred; 3 fills the list when fewer than five reach 4
+const MAX_DEVELOPMENTS = 5;
+const SUMMARY_MAX = 130;       // one compressed sentence: who/what + the key figure
+const SIGNIFICANCE_MAX = 90;   // one sentence: why it matters
+
+// One sentence, cut at its own end when it is short enough, otherwise at a word boundary with an ellipsis. Trailing full stops are dropped
+// (the page adds its own punctuation).
+function compactSentence(text, max) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const first = (t.match(/^.+?(?:[.!?。]|다\.)(?=\s|$)/u) || [t])[0].trim();
+  const base = first.length <= max ? first : t;
+  if (base.length <= max) return base.replace(/[.。]+$/u, '');
+  const cut = base.slice(0, max);
+  const at = cut.lastIndexOf(' ');
+  return `${(at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[\s,;:·-]+$/u, '')}…`;
+}
+
 function validateBrief(raw, evidence) {
   const evidenceById = new Map(evidence.map((item) => [Number(item.item_id), item]));
   const developments = Array.isArray(raw.developments) ? raw.developments : [];
@@ -87,7 +105,7 @@ function validateBrief(raw, evidence) {
     const itemId = Number(entry && entry.item_id);
     if (!evidenceById.has(itemId)) return null;
     const importance = Number(entry && entry.importance);
-    if (!Number.isInteger(importance) || importance < 4 || importance > 5 || seenIds.has(itemId)) return null;
+    if (!Number.isInteger(importance) || importance < MIN_IMPORTANCE || importance > 5 || seenIds.has(itemId)) return null;
     const summary = String(entry.summary || '').trim();
     const significance = String(entry.significance || '').trim();
     if (!summary || !significance) return null;
@@ -95,8 +113,12 @@ function validateBrief(raw, evidence) {
     const sourceText = [source.title, source.summary, source.insight].filter(Boolean).join(' ');
     assertSupportedCertainty(`${summary} ${significance}`, sourceText, itemId);
     seenIds.add(itemId);
-    return { item_id: itemId, summary: summary.slice(0, 500).replace(/[.。]+$/u, ''), significance: significance.slice(0, 400).replace(/[.。]+$/u, ''), importance };
+    return { item_id: itemId, summary: compactSentence(summary, SUMMARY_MAX), significance: compactSentence(significance, SIGNIFICANCE_MAX), importance };
   }).filter(Boolean)
+    // WHICH five: by importance first (then newest). Cutting by date first used to drop a more important older item.
+    .sort((a, b) => b.importance - a.importance || String(evidenceById.get(b.item_id).published_at || '').localeCompare(String(evidenceById.get(a.item_id).published_at || '')))
+    .slice(0, MAX_DEVELOPMENTS)
+    // HOW they are shown: newest first.
     .sort((a, b) => {
       const aEvidence = evidenceById.get(a.item_id);
       const bEvidence = evidenceById.get(b.item_id);
@@ -105,8 +127,24 @@ function validateBrief(raw, evidence) {
       const byCollectionTime = String(bEvidence.collected_at || '').localeCompare(String(aEvidence.collected_at || ''));
       return byCollectionTime || b.importance - a.importance;
     })
-    .slice(0, 5)
     .map(({ importance, ...entry }) => entry);
+
+  // TOP-UP: the page is meant to show five noteworthy materials. When the model returned fewer than the archive can supply, the remaining slots
+  // are filled from the materials' own stored summary/insight (one compressed sentence each; nothing is generated), newest first.
+  const wanted = Math.min(MAX_DEVELOPMENTS, evidence.length);
+  if (normalizedDevelopments.length < wanted) {
+    const used = new Set(normalizedDevelopments.map((d) => d.item_id));
+    const spare = [...evidence].filter((e) => !used.has(Number(e.item_id)))
+      .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')));
+    for (const e of spare) {
+      if (normalizedDevelopments.length >= wanted) break;
+      const summary = compactSentence(e.summary || e.title, SUMMARY_MAX);
+      const significance = compactSentence(e.insight, SIGNIFICANCE_MAX);
+      if (!summary || !significance) continue; // no stored insight: nothing honest to say about why it matters
+      normalizedDevelopments.push({ item_id: Number(e.item_id), summary, significance });
+    }
+    normalizedDevelopments.sort((a, b) => String(evidenceById.get(b.item_id).published_at || '').localeCompare(String(evidenceById.get(a.item_id).published_at || '')));
+  }
 
   const watchpoints = (Array.isArray(raw.watchpoints) ? raw.watchpoints : [])
     .map((value) => String(value || '').trim()).filter(Boolean).slice(0, 4).map((value) => value.slice(0, 250));
@@ -197,11 +235,11 @@ function validateBrief(raw, evidence) {
     '입력 자료는 모두 오늘 수집되었고 최근 7일(오늘 포함) 내 발행된 자료다. 발행일이 가장 최근인 자료부터 우선 검토하고, 결과도 발행일 최신순으로 정렬한다.',
     'lead는 150자 이내의 짧은 헤드라인 한 문장으로 쓴다. 가장 중요한 확인 사실 하나를 중심으로 쓰고, 직접 관련이 없는 자료를 쉼표로 나열하지 않는다. 사건·수치·정책·계약 등 관찰된 변화만 쓰며 “~한 하루”, 과장·비유·관용구, 평가성 결론은 금지한다. 중국어·일본어·태국어 문자를 섞지 말고, lead 끝에 온점을 붙이지 않는다.',
     '가격·수급·생산·투자·정책·규제·확정 계약 등 실질적 변화를 보인 자료만 주목 후보로 삼는다. 일반 동향, 단순 행사 공지, 반복 보도, 광고성 시장규모 페이지, 영향이 불명확한 자료는 제외한다.',
-    '각 후보의 중요도를 1~5 정수로 평가한다. 중요도 4 이상만 developments에 넣고 최대 5개까지만 고른다. 기준을 통과하는 자료가 적으면 5개를 채우지 말고 적은 수만 출력한다. 하나도 없으면 빈 배열을 출력한다.',
-    '중요도 기준을 통과하는 자료만 developments에 넣는다. 날짜 범위별 최소 개수 조건은 없다. 자료가 적거나 기준을 통과하지 못하면 5개 미만 또는 빈 배열을 출력한다. summary와 significance는 한국어로 사실 및 시사점만 작성하고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
+    '각 후보의 중요도를 1~5 정수로 평가한다. developments는 주목할 자료 5개를 목표로 한다: 중요도 4 이상을 먼저 고르고, 5개에 못 미치면 중요도 3 자료로 채운다. 같은 사건을 다룬 자료는 하나만 고른다. 입력 자료가 5개 미만이거나 나머지가 모두 중요도 2 이하일 때만 5개 미만으로 출력하고, 무관한 자료로 억지로 채우지 않는다.',
+    '각 development는 압축해서 쓴다: summary는 "누가/무엇이 + 핵심 수치"를 담은 한 문장(90자 안팎, 130자 이내), significance는 "그래서 어떤 영향인가"를 한 문장(60자 안팎, 90자 이내)이다. 배경 설명·부연·같은 말 반복 없이 수치, 주체, 영향만 쓴다. 한국어로 쓰고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
     'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"현상→영향 순서의 2~3문장 브리핑","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
     '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 가장 시의적인 현상부터 사실과 영향을 이어서 쓴다.',
-    'developments는 중요도 4 이상, 최대 5개, watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
+    'developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}`;
@@ -425,4 +463,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { ensureDailyBrief, getBriefState, maybeRefreshDailyBriefAtNoon, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { validateBrief, compactSentence, ensureDailyBrief, getBriefState, maybeRefreshDailyBriefAtNoon, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
