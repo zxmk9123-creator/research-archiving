@@ -172,13 +172,18 @@ router.get('/verification-status', requireAuth, async (req, res) => {
   res.json(await require('../lib/verificationRoutine').getStatus());
 });
 
-router.post('/backfill-7day-discovery', requireAuth, async (req, res) => {
+// ONE-TIME MANUAL TOOLS: one historical collection run over every daily-discovery query with a fixed Brave freshness window. They do not
+// touch frequency_days/is_daily_discovery or the query registry and create no scheduler; the pipeline (dedup, AI screening, QA,
+// classification, publish rules) is the normal one. Windows older than ~90 days pass skipStaleCheck (see collectWebDiscoverySource()).
+// The 2026fullyear run also sets itemType per source from is_archive_discovery (the older runs predate that fix and insert '뉴스').
+// Intended to be removed once no longer needed; the four URLs are unchanged.
+async function runDiscoveryBackfill(label, optionsFor, res) {
   const { rows: sources } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
   );
   const perQuery = [];
   for (const source of sources) {
-    const result = await collectWebDiscoverySource(source, { freshness: 'pw' });
+    const result = await collectWebDiscoverySource(source, optionsFor(source));
     perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
   }
   const totals = perQuery.reduce(
@@ -192,114 +197,19 @@ router.post('/backfill-7day-discovery', requireAuth, async (req, res) => {
     }),
     { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
   );
-  console.log(`backfill_7day_discovery run_completed ${JSON.stringify(totals)}`);
+  console.log(`${label} run_completed ${JSON.stringify(totals)}`);
   res.json({ totals, perQuery });
-});
+}
 
-// ONE-TIME MANUAL TOOL — same shape as backfill-7day-discovery above, for a
-// single historical diagnostic/collection run over 2026-09-01..2026-09-30.
-// Does not touch sources.frequency_days/is_daily_discovery or the query
-// registry; does not create any new scheduler. Only the Brave Search
-// freshness window passed to collectWebDiscoverySource() differs — same
-// pipeline, same dedup/AI screening/QA/classification/publish rules. Intended
-// to be removed after the one-time backfill it was added for.
-router.post('/backfill-sept2026-discovery', requireAuth, async (req, res) => {
-  const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
-  );
-  const perQuery = [];
-  for (const source of sources) {
-    const result = await collectWebDiscoverySource(source, { freshness: '2026-09-01to2026-09-30' });
-    perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
-  }
-  const totals = perQuery.reduce(
-    (acc, r) => ({
-      discovered: acc.discovered + (r.discovered || 0),
-      filtered: acc.filtered + (r.filtered || 0),
-      archived: acc.archived + (r.archived || 0),
-      rejected: acc.rejected + (r.rejected || 0),
-      failed: acc.failed + (r.failed || 0),
-      failedQueries: acc.failedQueries + (r.ok ? 0 : 1),
-    }),
-    { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
-  );
-  console.log(`backfill_sept2026_discovery run_completed ${JSON.stringify(totals)}`);
-  res.json({ totals, perQuery });
-});
+router.post('/backfill-7day-discovery', requireAuth, (req, res) => runDiscoveryBackfill('backfill_7day_discovery', () => ({ freshness: 'pw' }), res));
+router.post('/backfill-sept2026-discovery', requireAuth, (req, res) => runDiscoveryBackfill('backfill_sept2026_discovery', () => ({ freshness: '2026-09-01to2026-09-30' }), res));
+router.post('/backfill-2026h1-discovery', requireAuth, (req, res) => runDiscoveryBackfill('backfill_2026h1_discovery', () => ({ freshness: '2026-01-01to2026-06-30', skipStaleCheck: true }), res));
+router.post('/backfill-2026fullyear-discovery', requireAuth, (req, res) => runDiscoveryBackfill('backfill_2026fullyear_discovery', (source) => ({
+  freshness: '2026-01-01to2026-10-07',
+  skipStaleCheck: true,
+  itemType: source.is_archive_discovery ? '보고서' : '뉴스',
+}), res));
 
-// ONE-TIME MANUAL TOOL — same shape as backfill-sept2026-discovery above,
-// for a single historical diagnostic/collection run over 2026-01-01..
-// 2026-06-30 (H1 2026). Does not touch sources.frequency_days/
-// is_daily_discovery or the query registry; does not create any new
-// scheduler. Passes skipStaleCheck: true because this window is itself
-// more than STALE_THRESHOLD_DAYS (90d) before today — see the comment on
-// collectWebDiscoverySource() in webDiscoveryIngest.js. Same pipeline,
-// same dedup/AI screening/QA/classification/publish rules otherwise.
-// Intended to be removed after the one-time backfill it was added for.
-router.post('/backfill-2026h1-discovery', requireAuth, async (req, res) => {
-  const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
-  );
-  const perQuery = [];
-  for (const source of sources) {
-    const result = await collectWebDiscoverySource(source, { freshness: '2026-01-01to2026-06-30', skipStaleCheck: true });
-    perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
-  }
-  const totals = perQuery.reduce(
-    (acc, r) => ({
-      discovered: acc.discovered + (r.discovered || 0),
-      filtered: acc.filtered + (r.filtered || 0),
-      archived: acc.archived + (r.archived || 0),
-      rejected: acc.rejected + (r.rejected || 0),
-      failed: acc.failed + (r.failed || 0),
-      failedQueries: acc.failedQueries + (r.ok ? 0 : 1),
-    }),
-    { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
-  );
-  console.log(`backfill_2026h1_discovery run_completed ${JSON.stringify(totals)}`);
-  res.json({ totals, perQuery });
-});
-
-// ONE-TIME MANUAL TOOL — same shape as backfill-2026h1-discovery above,
-// for a single historical diagnostic/collection run over 2026-01-01..
-// 2026-10-07 (full year to date, superseding the need to separately
-// re-run Sept/H1 for the Archive Discovery queries added after those
-// ran — exact-URL dedup makes re-covering the same months a no-op for
-// anything already archived). Unlike the two routes above, this one
-// computes itemType per source from is_archive_discovery — those two
-// historical routes predate the Archive-pipeline fix and would otherwise
-// insert every candidate as '뉴스' regardless of query intent, same bug
-// webDiscoveryIngest.js's INSERT used to have unconditionally. Does not
-// touch sources.frequency_days/is_daily_discovery/is_archive_discovery or
-// the query registry; does not create any new scheduler. Intended to be
-// removed after the one-time backfill it was added for.
-router.post('/backfill-2026fullyear-discovery', requireAuth, async (req, res) => {
-  const { rows: sources } = await pool.query(
-    `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL ORDER BY id`
-  );
-  const perQuery = [];
-  for (const source of sources) {
-    const result = await collectWebDiscoverySource(source, {
-      freshness: '2026-01-01to2026-10-07',
-      skipStaleCheck: true,
-      itemType: source.is_archive_discovery ? '보고서' : '뉴스',
-    });
-    perQuery.push({ sourceId: source.id, name: source.name, query: source.url, ...result });
-  }
-  const totals = perQuery.reduce(
-    (acc, r) => ({
-      discovered: acc.discovered + (r.discovered || 0),
-      filtered: acc.filtered + (r.filtered || 0),
-      archived: acc.archived + (r.archived || 0),
-      rejected: acc.rejected + (r.rejected || 0),
-      failed: acc.failed + (r.failed || 0),
-      failedQueries: acc.failedQueries + (r.ok ? 0 : 1),
-    }),
-    { discovered: 0, filtered: 0, archived: 0, rejected: 0, failed: 0, failedQueries: 0 }
-  );
-  console.log(`backfill_2026fullyear_discovery run_completed ${JSON.stringify(totals)}`);
-  res.json({ totals, perQuery });
-});
 
 router.get('/', async (req, res) => {
   // Staleness only means something for a source that is actively ingested —
