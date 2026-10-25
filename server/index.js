@@ -5,6 +5,7 @@ const { maybeRunDailyDiscovery } = require('./lib/dailyDiscovery');
 const { refreshScopeTerms, maybeRunWeeklyScopeAnalysis } = require('./lib/scopeAnalysis');
 const { requeueStalledPendingDrafts } = require('./lib/aiDraft');
 
+const { isCronAuthorized } = require('./lib/cronRunner');
 const asyncSafety = require('./lib/asyncSafety');
 asyncSafety.patchAsyncRoutes();
 asyncSafety.installProcessGuards();
@@ -20,8 +21,7 @@ app.use(express.json());
 // more than once (e.g. an external scheduler) never double-runs anything, and an interrupted discovery run is resumed on the next call.
 // One-time (idempotent) schema setup for a fresh database, same SQL as `npm run db:init`; no shell exists on Vercel to run it.
 app.get('/api/cron/init-db', async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   const sql = require('fs').readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
   await require('./db/pool').query(sql);
   res.json({ ok: true, applied: 'schema.sql' });
@@ -30,97 +30,18 @@ app.get('/api/cron/init-db', async (req, res) => {
 // One-off data move from the previous host (needs SOURCE_DATABASE_URL); resumable, call again until "complete": true.
 // The first call on a fresh database uses ?truncate=1 (clears the schema's seed rows); later calls must NOT, or they restart the copy.
 app.get('/api/cron/migrate-data', async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!process.env.SOURCE_DATABASE_URL) return res.status(400).json({ error: 'SOURCE_DATABASE_URL is not set' });
   res.json(await require('./lib/dataMigration').migrate({ sourceUrl: process.env.SOURCE_DATABASE_URL, truncateFirst: req.query.truncate === '1' }));
 });
 
 // Dependency check (database, AI gateway, every search tier, feed egress, PDF parser); needs the same bearer token.
 app.get('/api/cron/diagnose', async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
+  if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   res.json(await require('./lib/diagnose').runDiagnostics());
 });
 
-app.get('/api/cron/daily', async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.get('authorization') !== `Bearer ${secret}`) return res.status(401).json({ error: 'unauthorized' });
-  const background = require('./lib/background');
-  const guard = require('./lib/cronGuard');
-  // A chained hop (see lib/cronGuard.js) answers at once and keeps working in the background of its own invocation.
-  const chainDepth = Number(req.get('x-cron-chain')) || 0;
-  const exec = () => runDailyCron(chainDepth);
-  if (chainDepth > 0) {
-    background.track(exec().catch((err) => console.error('cron chain hop failed:', err.message)));
-    return res.status(202).json({ chained: true, depth: chainDepth });
-  }
-  res.json(await exec());
-});
-
-async function runDailyCron(chainDepth) {
-  const started = Date.now();
-  const background = require('./lib/background');
-  const guard = require('./lib/cronGuard');
-  const dailyDiscovery = require('./lib/dailyDiscovery');
-  const dailyBrief = require('./lib/dailyBrief');
-  const BUDGET_MS = Number(process.env.CRON_BUDGET_MS) || 240000;
-  const isChain = chainDepth > 0;
-  const steps = [
-    // FIRST, so it gets the whole time budget. Sliced: one call cannot run all sources (the function time limit), so each call advances a persisted cursor
-    ['daily_discovery', () => dailyDiscovery.runDailyDiscoverySliced({ budgetMs: Math.max(20000, Math.min(200000, 250000 - (Date.now() - started))) })],
-    ['collections', () => runDueCollections()],
-    ['reference_collections', () => require('./lib/referenceCollect').runReferenceCollections()],
-    ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
-    // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
-    ['review_autopilot', async () => {
-      const autopilot = require('./lib/reviewAutopilot');
-      const total = { rounds: 0, archived: 0, published: 0, retry: 0, human: 0 };
-      for (let i = 0; i < 6 && Date.now() - started < Math.min(BUDGET_MS, 170000); i++) {
-        const r = await autopilot.runAutopilot({ aiBudget: 8 });
-        if (!r || r.skipped) break;
-        total.rounds++;
-        for (const k of ['archived', 'published', 'retry', 'human']) total[k] += r[k] || 0;
-        if (!(r.archived || r.published || r.retry || r.human)) break;
-      }
-      return total;
-    }],
-    // the headline is guaranteed: generated when collection is done (or at the 10:00 KST deadline), refreshed when more items were published
-    ['ensure_daily_brief', async () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: (await dailyDiscovery.getDailyDiscoveryStatus()).completedToday })],
-    ['noon_brief_refresh', () => dailyBrief.maybeRefreshDailyBriefAtNoon()],
-    ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
-    ['entity_maintenance', () => require('./lib/entityMaintenance').maybeRunEntityMaintenance()],
-    ['verification', () => require('./lib/verificationRoutine').runQueue()],
-    // a stalled morning pipeline turns this response into an error, which fails the GitHub Actions run (email notification)
-    ['pipeline_watchdog', async () => {
-      const [status, brief] = await Promise.all([dailyDiscovery.getDailyDiscoveryStatus(), dailyBrief.getBriefState()]);
-      const hourKst = dailyDiscovery.kstPartsOf(new Date()).hour;
-      const incident = guard.pipelineIncident(status, brief, { hourKst });
-      if (incident) throw new Error(incident);
-      return { ran: true, reason: `${status.state}/${brief.state}` };
-    }],
-  ];
-  // chained hops only continue the morning pipeline (the hourly call runs the rest)
-  const chainSteps = new Set(['daily_discovery', 'ensure_daily_brief', 'pipeline_watchdog']);
-  // the scope-term cache that feeds the relevance filter is loaded at boot on a long-lived server; a fresh function instance starts empty
-  await refreshScopeTerms().catch((err) => console.error('scope terms load failed', err));
-  const results = {};
-  for (const [name, run] of steps) {
-    if (isChain && !chainSteps.has(name)) continue;
-    if (Date.now() - started > BUDGET_MS && name !== 'pipeline_watchdog') { results[name] = 'skipped_budget'; continue; }
-    try {
-      const out = await run();
-      results[name] = Array.isArray(out)
-        ? { sources: out.length, ok: out.filter((r) => r && r.ok).length, failed: out.filter((r) => r && !r.ok).length, newItems: out.reduce((n, r) => n + ((r && r.count) || 0), 0) }
-        : out && typeof out === 'object' ? { ran: out.ran, reason: out.reason, totals: out.totals, requeued: out.requeued, processed: out.processed, done: out.done, progress: out.progress, rounds: out.rounds, archived: out.archived, published: out.published, retry: out.retry, human: out.human } : 'done';
-    } catch (err) { results[name] = `error: ${String(err && err.message).slice(0, 120)}`; }
-  }
-  // discovery is not finished: call the next hop now instead of waiting for the next external trigger
-  if (guard.shouldChain(results.daily_discovery, chainDepth)) results.chained = await guard.chainNext(chainDepth + 1);
-  // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
-  results.background_unfinished = await background.drain(Math.max(5000, 280000 - (Date.now() - started)));
-  return { ok: true, elapsedMs: Date.now() - started, chain: chainDepth, results };
-}
+app.get('/api/cron/daily', require('./lib/cronRunner').dailyHandler());
 
 // A fresh function instance starts with an empty in-memory scope-term cache (loaded at boot on a long-lived server). The relevance
 // filter reads it synchronously, so make sure it is loaded, and at most ten minutes old, before any API work runs.
