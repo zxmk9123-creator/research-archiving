@@ -229,6 +229,8 @@ const rateLimit = require('../lib/rateLimit');
 const EDIBLE_STRICT_PATTERN = { '식용유': '(^|[^폐비])식용유(?!지)', '식용유지': '(^|[^비])식용유지' };
 const glossary = require('../lib/glossary');
 const synthesis = require('../lib/synthesis');
+const oilTaxonomy = require('../lib/oilTaxonomy');
+const oilMarket = require('../lib/oilMarket');
 const topicShift = require('../lib/topicShift');
 const { isoDate } = require('../lib/isoDate');
 const MAX_CONCEPTS = 16;
@@ -1574,6 +1576,9 @@ async function handleSearch(req, res, signal) {
 
   const datasetTrace = [];
   let candidates;
+  let opportunityMode = false;
+  let oilStats = null;
+  const oilScope = oilTaxonomy.scopeOf(question);
   try {
     const baseQuestion = feedstockSupply.retrievalHint(subjectScope.retrievalHint(question, subjectScope.forQuestion(question)));
     const retrievalOpts = { light: quick, trace: req.body.debug === true ? datasetTrace : null };
@@ -1626,6 +1631,26 @@ async function handleSearch(req, res, signal) {
         } catch (_) { /* best-effort */ }
       }
     }
+    // OIL CLASSIFICATION (lib/oilTaxonomy.js). An edible-oil question is answered from edible-oil material only: waste oil (UCO), SAF and
+    // biofuel items are dropped. A market-opportunity / minor-oil question is answered from per-oil evidence computed in code
+    // (lib/oilMarket.js): the dominant staples (palm, soybean) are only a baseline, never the answer.
+    if (!quick && oilScope === 'edible') {
+      const rosterForOil = await getRoster();
+      if (classifyIntent(question, rosterForOil).type === 'general') {
+        opportunityMode = oilTaxonomy.isOpportunityQuestion(question);
+        if (opportunityMode) {
+          oilStats = await oilMarket.loadOilStats(pool);
+          const { ranked } = oilMarket.rankOpportunities(oilStats);
+          const evidence = await oilMarket.loadEvidenceItems(pool, ranked);
+          const dominant = new RegExp(oilTaxonomy.OILS.filter((o) => o.tier === 'dominant').map((o) => o.pattern).join('|'), 'i');
+          const other = new RegExp(oilTaxonomy.OILS.filter((o) => o.tier !== 'dominant').map((o) => o.pattern).join('|'), 'i');
+          const keep = candidates.filter((c) => { const t = materialText(c); return !(dominant.test(t) && !other.test(t)); });
+          const seen = new Set(evidence.map((e) => e.id));
+          candidates = evidence.concat(keep.filter((c) => !seen.has(c.id)));
+        }
+        candidates = await oilMarket.dropNonEdible(pool, candidates);
+      }
+    }
     if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);
     if (signal.aborted || res.destroyed) return;
   } catch (err) {
@@ -1670,9 +1695,9 @@ async function handleSearch(req, res, signal) {
   // any the writer produced; if it fails, the writer's own answer stands.
   // SYNTHESIS MODE: a broad "trend / issue / outlook / impact" question that is not a company profile, roster sweep, table or
   // definition is answered as a ranked, cross-article analysis (see lib/synthesis.js).
-  const synthesisMode = !quick && intent.type === 'general' && !required.length && !glossary.matchCards(question).length
+  const synthesisMode = !quick && intent.type === 'general' && !required.length && (opportunityMode || !glossary.matchCards(question).length)
     && !datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) && !diagram.isDiagramQuestion(question)
-    && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && synthesis.isBroadQuestion(question);
+    && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && (opportunityMode || synthesis.isBroadQuestion(question));
   const spotlight = synthesisMode && synthesis.isSpotlightQuestion(question);
   if (spotlight) {
     // "what is promising lately" has few topic words, so keyword retrieval alone returns generic staple-commodity reports:
@@ -1690,7 +1715,7 @@ async function handleSearch(req, res, signal) {
       for (const m of notable) if (!have.has(m.id)) candidates.push(m);
     } catch (err) { console.error('ai-search spotlight extras failed:', err.message); }
   }
-  if (synthesisMode) candidates = synthesis.selectForSynthesis(candidates, Date.now(), { spotlight });
+  if (synthesisMode && !opportunityMode) candidates = synthesis.selectForSynthesis(candidates, Date.now(), { spotlight });
   const cacheKey = history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
@@ -1765,7 +1790,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${oilScope === 'edible' ? oilTaxonomy.CLASSIFICATION_NOTE : ''}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${opportunityMode && oilStats ? oilMarket.evidenceBlock(oilStats) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
