@@ -27,7 +27,6 @@ test('sanitizeInText rewrites valid blocks with an evidence line and removes inv
 });
 
 test('sanitize: canonical names merge the same company, markets/countries are dropped, node and edge ceilings hold', () => {
-  const canon = (n) => (/^(SD Guthrie|Sime Darby Plantation.*)$/i.test(n) ? 'SD Guthrie' : n);
   const isNonCompany = (n) => /시장$|^일본$/.test(n);
   const d = dg.sanitize({ type: 'valuechain', stages: [{ id: 's1', label: 'a' }], nodes: [
     { id: 'a', label: 'Sime Darby Plantation Bhd.', stage: 's1' }, { id: 'b', label: 'SD Guthrie', stage: 's1' }, { id: 'c', label: 'PT.ARC' }, { id: 'd', label: '인도 시장' },

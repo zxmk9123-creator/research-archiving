@@ -164,7 +164,6 @@ function describeChoices(choices) {
 // Structured memory of the conversation, owned by the server, carried by the client between turns:
 //   subject (sector), classification (the card answers), entities (companies of the last table/answer).
 // A follow-up inherits what it does not itself state — never by re-reading old answer text.
-const CTX_UNITS = ['operator', 'owner', 'site'];
 function sanitizeContext(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const strs = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.length <= 80).slice(0, 30) : []);

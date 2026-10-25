@@ -1,7 +1,6 @@
 const pool = require('../db/pool');
 const { callProvider } = require('./ai/provider');
 
-const JOB_NAME = 'daily_headlines_brief';
 const MAX_EVIDENCE_ITEMS = 24;
 const GENERATION_STALE_AFTER_MINUTES = 25;
 const MAX_AUTOMATIC_RETRIES = 5;

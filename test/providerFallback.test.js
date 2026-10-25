@@ -2,12 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { runProviderChain, buildProviderChain, requireNonEmptyText, hasDegenerateRepetition, requireNonDegenerateText, callProviderWithFallback, callFreeLLMAPI, FREELLMAPI_TIMEOUT_MS } = require('../server/lib/ai/provider');
 
-function transientError(message) {
-  const err = new Error(message);
-  err.transient = true;
-  return err;
-}
-
 function fakeProvider(name, behavior) {
   return { name, run: behavior };
 }

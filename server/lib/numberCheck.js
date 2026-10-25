@@ -109,7 +109,6 @@ function extractQuantities(text) {
     const q = raw[i];
     let unit = q.unit;
     let inherited = false;
-    let rangeEnd = null;
     if (!unit) {
       const next = raw[i + 1];
       const between = next ? src.slice(q.end, next.start) : '';
@@ -120,7 +119,6 @@ function extractQuantities(text) {
         const base = KO_UNITS.find((u) => u[0] === next.unit.unitText) || EN_UNITS.find(([re]) => re.test(next.unit.unitText));
         unit.mult = (sc ? KO_SCALE[sc] : (next.unit.scaleText && next.unit.scaleText in KO_SCALE ? KO_SCALE[next.unit.scaleText] : 1)) * (base ? base[1] : 1);
         inherited = true;
-        rangeEnd = next;
       } else if (q.cur) {
         const sm = src.slice(q.end).match(/^\s*(thousand|million|billion|mn|bn|k|m|b)\b/i);
         unit = { len: sm ? sm[0].length : 0, mult: sm ? EN_SCALE[sm[1].toLowerCase()] : 1, cls: q.cur, scaleText: sm ? sm[1].toLowerCase() : '', unitText: '' };

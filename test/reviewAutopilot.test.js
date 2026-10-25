@@ -51,7 +51,6 @@ test('reviewOne: a clear reject is archived with NO model call; dry run writes n
 test('reviewOne: arbiter archive / publish / low confidence -> archived / published (via the normal gates) / human', async () => {
   const hold = item({ ai_eligible: true, ai_qa_decision: 'HOLD', ai_qa_reason: '본문 부족' });
   const { calls, restore } = mockPool(() => ({ rows: [] }));
-  const fetchOff = async () => '';
   try {
     // the arbiter path fetches the page; stub the network by making fetchFullText fail fast (invalid host in tests)
     const a1 = await ra.reviewOne(hold, { names: [], fetcher: async () => 'Plant expansion news. '.repeat(60), arbiter: async () => ({ decision: 'archive', confidence: 0.8, reason: '홍보' }) });

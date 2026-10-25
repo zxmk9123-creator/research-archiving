@@ -1,3 +1,5 @@
+// Called from inline onclick attributes in the markup built below, which the linter cannot see:
+/* exported toggleHomeThemeRootReorderCard, moveHomeThemeRootReorderRow, saveHomeThemeRootReorderCard */
 const TYPE_CLASS = { '뉴스': 'news', '보고서': 'report', '통계': 'stat', '규제': 'reg' };
 const app = document.getElementById('app');
 
