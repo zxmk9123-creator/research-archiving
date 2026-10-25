@@ -160,7 +160,7 @@ async function getMarketData() {
     provider: 'Barchart OnDemand',
     historyInterval: '60-minute',
     generatedAt: new Date().toISOString(),
-    stale: errors.length > 0 && (quotes || Object.keys(history).length > 0),
+    stale: errors.length > 0 && Boolean(quotes || Object.keys(history).length > 0),
     errors,
     instruments,
   };
