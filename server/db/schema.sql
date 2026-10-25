@@ -1342,3 +1342,28 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_reason TEXT;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_at TIMESTAMPTZ;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS auto_review_attempts INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS items_auto_review_pending ON items (status, auto_review);
+
+
+-- Minor / niche edible oil coverage (market-opportunity questions): the archive held almost nothing about olive, coconut, rice bran, avocado,
+-- sesame/perilla, flax or corn/cottonseed/peanut oil, so such questions could only be answered with palm and soybean material. Demand,
+-- consumption, export and price angles per oil group, plus one Korean-language query. Same idempotent pattern and crawl /
+-- is_daily_discovery convention as every earlier registry expansion; existing queries and pipeline behavior are untouched.
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true
+FROM (VALUES
+  ('Web Discovery: olive oil production consumption exports price', 'olive oil global production consumption exports price market news'),
+  ('Web Discovery: coconut oil demand supply exports price', 'coconut oil demand supply exports price market Philippines Indonesia India'),
+  ('Web Discovery: rice bran oil market demand exports', 'rice bran oil market demand production exports India Japan'),
+  ('Web Discovery: avocado flaxseed linseed oil market growth', 'avocado oil flaxseed linseed oil market demand growth trade'),
+  ('Web Discovery: sesame perilla oil market demand exports', 'sesame oil perilla oil market demand production exports Korea Japan China'),
+  ('Web Discovery: corn cottonseed peanut oil market price demand', 'corn oil cottonseed oil peanut oil market price demand trade'),
+  ('Web Discovery: 비주류 식용유 시장 소비 수출', '올리브유 코코넛유 참기름 들기름 쌀겨유 시장 소비 수출 가격')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+INSERT INTO sources (name, url, method, frequency_days, trust_grade, is_daily_discovery, is_archive_discovery)
+SELECT v.name, v.url, 'crawl', 7, 'B', true, true
+FROM (VALUES
+  ('Archive Discovery: niche specialty edible oils market report', 'niche specialty edible oils market report high oleic avocado rice bran olive coconut demand growth outlook')
+) AS v(name, url)
+WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);

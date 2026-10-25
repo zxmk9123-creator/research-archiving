@@ -101,6 +101,10 @@ const MARKET_IMPACT_CONTEXT = /\b(price|prices|expensive|cost|costs|shortage|exp
 // ---------------------------------------------------------------------
 // Scope 3: Regulations & Policies Affecting Edible and Industrial Oils
 // ---------------------------------------------------------------------
+// the minor edible oils (olive, coconut, rice bran, avocado ... in English and Korean) come from the shared taxonomy, so a new oil added there
+// is accepted by the collector too; without them a market article about such an oil was dropped as out of scope before AI screening
+const MINOR_OIL_PATTERNS = require('./oilTaxonomy').OILS.filter((o) => o.tier === 'minor').map((o) => new RegExp(o.pattern, 'i'));
+
 const OIL_FAT_PRODUCT_PATTERNS = [
   /\bedible[- ]oils?\b/i,
   /\bvegetable oils?\b/i,
@@ -128,6 +132,7 @@ const OIL_FAT_PRODUCT_PATTERNS = [
   // Korean sector names, in case a bilingual/Korean-language description
   // is ever collected.
   /식용유지/, /비식용유지/, /팜유/, /대두유/, /유채씨유/, /카놀라유/, /채종유/, /해바라기유/,
+  ...MINOR_OIL_PATTERNS,
 ];
 
 const POLICY_MECHANISM_PATTERNS = [
