@@ -221,7 +221,9 @@ function spellingVariants(token) {
 
 const termGroups = require('../lib/termGroups');
 // 식용유 ⊂ 폐식용유·비식용유지, 식용유지 ⊂ 비식용유지 (sector names): the plain substring match mixed non-edible/UCO material into edible-oil questions
-const EDIBLE_PREFIX_EXCLUDE = { '식용유': '폐비', '식용유지': '비' };
+// (식용유 also must not be the start of 식용유지: that is the sector NAME — matching it pulled in the whole 식용유지 sector, ~400 items tagged by
+// the classifier, among them misfiled e-SAF items that won on recency)
+const EDIBLE_STRICT_PATTERN = { '식용유': '(^|[^폐비])식용유(?!지)', '식용유지': '(^|[^비])식용유지' };
 const glossary = require('../lib/glossary');
 const synthesis = require('../lib/synthesis');
 const topicShift = require('../lib/topicShift');
@@ -474,13 +476,13 @@ async function retrieveCandidates(question, history, { light = false, trace = nu
   // clause, so its weight is added at most once however many spellings match.
   // "식용유" is also inside "폐식용유" (UCO) and "비식용유지" (a sector name), and "식용유지" inside "비식용유지": a plain
   // substring match pulled the UCO/SAF corpus into edible-oil questions. Unless the question itself is about waste or
-  // non-edible oils, match those terms only when not preceded by 폐 / 비 (see EDIBLE_PREFIX_EXCLUDE).
+  // non-edible oils, match those terms only when not preceded by 폐 / 비 (see EDIBLE_STRICT_PATTERN).
   const wantsWasteOrNonEdible = concepts.flat().some((f) => /폐|비식용|uco|used cooking/i.test(f));
   const keywordClauses = concepts.map((forms) => {
     const idxs = forms.map((form) => {
-      const excluded = wantsWasteOrNonEdible ? null : EDIBLE_PREFIX_EXCLUDE[form];
-      const strict = Boolean(excluded);
-      params.push(strict ? `(^|[^${excluded}])${form}` : `%${form}%`);
+      const pattern = wantsWasteOrNonEdible ? null : EDIBLE_STRICT_PATTERN[form];
+      const strict = Boolean(pattern);
+      params.push(strict ? pattern : `%${form}%`);
       return { idx: params.length, op: strict ? '~*' : 'ILIKE' };
     });
     const perForm = ({ idx, op }) => `(i.title ${op} $${idx} OR i.summary ${op} $${idx} OR i.insight ${op} $${idx}
@@ -1664,7 +1666,24 @@ async function handleSearch(req, res, signal) {
   const synthesisMode = !quick && intent.type === 'general' && !required.length && !glossary.matchCards(question).length
     && !datasetPipeline.isDatasetRequest(requestCompliance.parseRequest(question), question) && !diagram.isDiagramQuestion(question)
     && !specQuestion.isSpecQuestion(question) && !feedstockSupply.isFeedstockSupplyQuestion(question) && synthesis.isBroadQuestion(question);
-  if (synthesisMode) candidates = synthesis.selectForSynthesis(candidates);
+  const spotlight = synthesisMode && synthesis.isSpotlightQuestion(question);
+  if (spotlight) {
+    // "what is promising lately" has few topic words, so keyword retrieval alone returns generic staple-commodity reports:
+    // add the most recent items that state a striking change or number
+    try {
+      const have = new Set(candidates.map((c) => c.id));
+      const { rows: notable } = await pool.query(
+        `SELECT i.id, i.title, i.summary, i.insight, i.ai_summary, i.ai_insight, i.published_at, s.name AS source_name, 0 AS relevance_score
+           FROM items i LEFT JOIN sources s ON s.id = i.source_id
+          WHERE i.status = 'Published' AND i.published_at >= (now() - interval '21 days')::date
+            AND (i.title || ' ' || coalesce(i.summary, '')) ~* '식용유|팜유|대두|유채|카놀라|해바라기|올리브|코코넛|쌀겨|바이오디젤|재생디젤|항공유|폐식용유|palm|soy|rapeseed|canola|sunflower|vegetable oil|edible oil|biodiesel|\\mHVO\\M|\\mSAF\\M|\\mUCO\\M|tallow'
+            AND (i.summary ~ '[0-9][0-9.,]*\\s*%' OR i.summary ~ '급증|급락|급등|폭등|폭락|사상|역대|돌파|처음')
+          ORDER BY i.published_at DESC NULLS LAST, i.id DESC LIMIT 14`
+      );
+      for (const m of notable) if (!have.has(m.id)) candidates.push(m);
+    } catch (err) { console.error('ai-search spotlight extras failed:', err.message); }
+  }
+  if (synthesisMode) candidates = synthesis.selectForSynthesis(candidates, Date.now(), { spotlight });
   const cacheKey = history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
@@ -1739,7 +1758,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;

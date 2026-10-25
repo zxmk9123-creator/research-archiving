@@ -25,3 +25,10 @@ test('expandConcepts: the phrase "canola oil" (two tokens) adds the group as one
 test('expandConcepts: unrelated questions are unchanged', () => {
   assert.deepEqual(expandConcepts([['팜유'], ['수출']], '팜유 수출'), [['팜유'], ['수출']]);
 });
+
+test('expandConcepts: "비주류 식용유" adds the minor oils as one concept; "비주류 기업" does not', () => {
+  const { MINOR_OILS } = require('../server/lib/termGroups');
+  const out = expandConcepts([['비주류'], ['식용유']], '비주류 식용유');
+  assert.ok(out.some((forms) => MINOR_OILS.every((o) => forms.includes(o))));
+  assert.equal(expandConcepts([['비주류'], ['기업']], '비주류 기업').length, 2);
+});

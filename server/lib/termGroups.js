@@ -28,8 +28,15 @@ function expandConcepts(concepts, question) {
     const present = out.some((forms) => g.forms.every((f) => forms.includes(f)));
     if (!present && g.forms.some((f) => f.includes(' ') && q.includes(f))) out.push([...g.forms]);
   }
+  if (MINOR_CUE.test(question) && OIL_CUE.test(question)) out.push([...MINOR_OILS]);
   return out;
 }
+
+// "비주류/마이너 식용유" names no oil, so keyword search finds nothing; the oils it stands for are searched instead.
+const MINOR_OILS = ['쌀겨유', '아보카도유', '아마씨유', '포도씨유', '홍화씨유', '홍화유', '면실유', '호두유', '코코넛유', '올리브유', '땅콩유', '옥수수유', '참기름', '들기름',
+  'rice bran oil', 'avocado oil', 'flaxseed oil', 'linseed oil', 'grapeseed oil', 'safflower oil', 'cottonseed oil', 'walnut oil', 'coconut oil', 'olive oil', 'peanut oil', 'corn oil', 'sesame oil'];
+const MINOR_CUE = /(비주류|마이너|틈새|소규모|minor|niche)/i;
+const OIL_CUE = /(식용유|식물성\s*유|식용\s*오일|오일|\boils?\b)/i;
 
 // Archive filter: all forms of the group when the whole query is a member, else just the query.
 function filterForms(q) {
@@ -37,4 +44,4 @@ function filterForms(q) {
   return g ? g.forms : [String(q)];
 }
 
-module.exports = { GROUPS, groupFor, expandConcepts, filterForms };
+module.exports = { GROUPS, MINOR_OILS, groupFor, expandConcepts, filterForms };

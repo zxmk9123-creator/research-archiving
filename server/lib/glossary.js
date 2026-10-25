@@ -3,6 +3,7 @@
 // — concepts only, never figures, dates or company facts — used (1) as the whole answer when nothing in the archive matches,
 // and (2) as a labelled "기초 지식" layer in front of the archive-grounded answer. Add or fix cards here; nothing else needs to change.
 const CARDS = [
+  { id: 'minor-edible', name: '비주류(소규모) 식용유', cueless: true, terms: [/(비주류|마이너|틈새|소규모|특수)\s*(식용유|식물성\s*유|식용\s*오일)/], def: '대두유·팜유·유채씨유·해바라기유 같은 주류 식용유 밖에서는 쌀겨유, 아보카도유, 아마씨유(들기름과는 다른 식물), 포도씨유, 홍화씨유, 면실유, 호두유, 코코넛유, 올리브유, 땅콩유, 옥수수유, 참기름·들기름 등이 거래됩니다. 대체로 생산·소비 규모가 작고 건강·프리미엄·특수 용도(고온 조리, 화장품 원료 등)를 내세우는 경우가 많아, 가격과 물량은 주류 유지보다 변동이 크고 통계가 드뭅니다.' },
   { id: 'edible', name: '식용유(식용 유지)의 종류', terms: [/(^|[^폐비])식용유(?!지)/, /(^|[^비])식용유지/, '식물성유', 'cooking oil', 'edible oil', 'vegetable oil'], def: '식용유는 원료에 따라 크게 식물성과 동물성으로 나뉩니다. 식물성에는 대두유(콩기름), 팜유, 유채씨유(카놀라유), 해바라기유, 옥수수유, 올리브유, 참기름·들기름, 코코넛유, 땅콩유 등이 있고, 동물성에는 우지, 라드(돼지 지방), 버터 등이 있습니다. 같은 유지라도 정제 정도와 지방산 조성(포화·불포화)에 따라 용도와 가격이 달라집니다. 폐식용유(UCO)는 사용 후 회수한 식용유를 가리키며 일반 식용유의 종류와는 구분됩니다.' },
   { id: 'palm', name: '팜유', terms: ['팜유', 'palm oil', '팜오일'], def: '기름야자 열매의 과육에서 짜낸 식물성 유지입니다. 상온에서 반고체 상태이며 식용유·가공식품·유지화학 제품·바이오디젤 원료로 쓰입니다. 원유 형태는 CPO(Crude Palm Oil), 정제를 거친 것은 RBD 팜유라고 부릅니다.' },
   { id: 'palm-kernel', name: '팜핵유', terms: ['팜핵유', 'palm kernel oil', 'pko'], def: '기름야자 열매의 씨앗(핵)에서 얻는 유지로, 과육에서 얻는 팜유와는 별개의 제품입니다. 라우르산 함량이 높아 제과·마가린 등 식품 용도와 비누·세제·유지화학 용도에 쓰입니다.' },
@@ -39,11 +40,12 @@ function termHit(q, term) {
   return /^[a-z0-9 ]+$/.test(t) ? new RegExp(`(^|[^a-z0-9])${pad(t)}([^a-z0-9]|$)`).test(q) : q.includes(t);
 }
 
-// Cards for a definition-style question (at most `max`); [] when the question is not asking what something is.
+// Cards for a definition-style question (at most `max`); [] when the question is not asking what something is. A card marked
+// cueless names its own topic precisely enough to apply without a definition cue.
 function matchCards(question, max = 3) {
   const q = String(question || '').toLowerCase();
-  if (!DEFINITION_CUE.test(q)) return [];
-  return CARDS.filter((c) => c.terms.some((t) => termHit(q, t))).slice(0, max);
+  const cue = DEFINITION_CUE.test(q);
+  return CARDS.filter((c) => (cue || c.cueless) && c.terms.some((t) => termHit(q, t))).slice(0, max);
 }
 
 const FOOTNOTE = '※ 위 내용은 Research Center가 편집한 기초 지식이며 아카이빙 자료에 기반한 분석이 아닙니다. 시장 동향·수치는 관련 자료가 축적되면 확인할 수 있습니다.';

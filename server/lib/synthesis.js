@@ -5,11 +5,17 @@
 // interpretation and outlook, and follow-up monitoring — or, when the archive is thin, a plain statement of the limit.
 const numberCheck = require('./numberCheck');
 
-const BROAD = /(동향|이슈|현황|전망|흐름|트렌드|추세|영향|변화|최근|종합|무슨\s*일|뉴스|근황|리스크|시사점|trend|outlook|impact|latest|update)/i;
+const BROAD = /(동향|이슈|현황|전망|흐름|트렌드|추세|영향|변화|최근|종합|무슨\s*일|뉴스|근황|리스크|시사점|유망|주목|떠오르|뜨는|화제|핫|괄목|급등|급증|급락|신흥|신규|새로운|trend|outlook|impact|latest|update|promising|emerging)/i;
+// "what is promising / notable lately": not only the staple commodities' market report, but items with striking numbers or issues
+const SPOTLIGHT = /(유망|주목|떠오르|뜨는|화제|핫한|핫이슈|괄목|급등|급증|급락|신흥|새로운|promising|emerging|notable|rising)/i;
 const SIMPLE_FACT = /(얼마|몇\s*(%|퍼센트|톤|개|곳|명|원|달러)|언제|누가|누구|어디)/;
 const DOMESTIC = /(국내|한국|우리나라)/;
 const MIN_FOR_SYNTHESIS = 3; // fewer relevant materials than this: answer within them and state the limit
 const DAY = 86400000;
+
+function isSpotlightQuestion(question) {
+  return SPOTLIGHT.test(String(question || ''));
+}
 
 function isBroadQuestion(question) {
   const q = String(question || '');
@@ -18,42 +24,51 @@ function isBroadQuestion(question) {
 
 const textOf = (m) => [m.title, m.summary, m.ai_summary, m.insight, m.ai_insight].filter(Boolean).join(' ');
 
+// A striking change: a percentage, or wording of a jump/record.
+const NOTABLE = /(\d[\d.,]*\s*%|급증|급락|급등|폭등|폭락|최대|최저|최고|사상|역대|처음|돌파|배\s*(이상)?\s*(증가|확대|상승)|record|surge|plunge|soar|slump|highest|lowest)/i;
+
 // relevance (SQL order score) 50% + recency 35% (linear over 90 days) + evidence 15% (states a quantity).
-function priorityScore(m, topRel, now) {
+// Spotlight questions weigh a notable change (a % or jump/record wording) 30%, evidence 20%, recency 30%, relevance only 20% (topic words are weak signals there), so striking items are not buried under staple-commodity reports.
+function priorityScore(m, topRel, now, spotlight = false) {
   const rel = topRel > 0 ? Math.min(1, (Number(m.relevance_score) || 0) / topRel) : 0.5;
   const t = m.published_at ? new Date(m.published_at).getTime() : NaN;
   const recency = Number.isFinite(t) ? Math.max(0, 1 - (now - t) / (90 * DAY)) : 0;
   let evidence = 0;
   try { evidence = numberCheck.extractQuantities(textOf(m)).length ? 1 : 0; } catch (_) { evidence = 0; }
+  if (spotlight) return 0.2 * rel + 0.3 * recency + 0.2 * evidence + 0.3 * (NOTABLE.test(textOf(m)) ? 1 : 0);
   return 0.5 * rel + 0.35 * recency + 0.15 * evidence;
 }
 
-function rankForSynthesis(candidates, now = Date.now()) {
+function rankForSynthesis(candidates, now = Date.now(), { spotlight = false } = {}) {
   const topRel = Math.max(0, ...candidates.map((m) => Number(m.relevance_score) || 0));
   return candidates
-    .map((m, i) => ({ m, i, s: priorityScore(m, topRel, now) }))
+    .map((m, i) => ({ m, i, s: priorityScore(m, topRel, now, spotlight) }))
     .sort((a, b) => b.s - a.s || a.i - b.i)
     .map((x) => x.m);
 }
 
 const FRESH_DAYS = 120;     // older materials are background, not issues: dropped when enough recent ones exist
+const MAX_SPOTLIGHT_MATERIALS = 10; // a spotlight answer covers more distinct items
 const MAX_SYNTHESIS_MATERIALS = 8; // fewer, better materials -> fewer repeated citations and a tighter answer
 
-function selectForSynthesis(candidates, now = Date.now()) {
-  const ranked = rankForSynthesis(candidates, now);
+function selectForSynthesis(candidates, now = Date.now(), { spotlight = false } = {}) {
+  const ranked = rankForSynthesis(candidates, now, { spotlight });
   const fresh = ranked.filter((m) => {
     const t = m.published_at ? new Date(m.published_at).getTime() : NaN;
     return Number.isFinite(t) && now - t <= FRESH_DAYS * DAY;
   });
-  return (fresh.length >= MIN_FOR_SYNTHESIS ? fresh : ranked).slice(0, MAX_SYNTHESIS_MATERIALS);
+  return (fresh.length >= MIN_FOR_SYNTHESIS ? fresh : ranked).slice(0, spotlight ? MAX_SPOTLIGHT_MATERIALS : MAX_SYNTHESIS_MATERIALS);
 }
 
-function promptBlock(question, candidateCount) {
+function promptBlock(question, candidateCount, { spotlight = false } = {}) {
   if (candidateCount < MIN_FOR_SYNTHESIS) {
     return `\n\n[답변 방식: 근거 자료가 ${candidateCount}건뿐이다] 이 자료로 확인되는 범위만 간결히 답한다. 한 건의 사례로 산업 전체의 흐름을 단정하지 말고, 마지막에 "자료가 ${candidateCount}건뿐이라 종합 판단은 어렵다"는 취지로 한계를 한 줄로 밝힌다. 이슈를 억지로 늘리지 않는다.`;
   }
   const domestic = DOMESTIC.test(question)
     ? ' 질문이 국내를 묻는다: 이슈 제목 앞에 [국내] 또는 [해외→국내 영향]을 붙여 구분한다.'
+    : '';
+  const spotlightRule = spotlight
+    ? '\n[유망·주목 질문] 주요 작물·품목(팜유·대두유 등)의 일반 시황은 첫 이슈 한 줄로만 요약한다. 나머지 이슈는 증감률·물량·가격 같은 두드러진 수치나 새로운 이슈가 있는 항목(비주류 품목, 특정 지역·기업·정책 포함) 2~4개로 채우고, 각 이슈 제목에 핵심 수치를 넣는다. 수치는 자료에 적힌 그대로만 쓴다.'
     : '';
   return `\n\n[답변 방식: 핵심 위주 종합 브리핑 — 자료를 하나씩 요약하지 말고 공통 주제로 묶는다. 자료는 관련성·최신성·근거 수준 순이다]
 # 핵심 이슈
@@ -65,8 +80,8 @@ function promptBlock(question, candidateCount) {
 - **인사이트**
   - 복수 자료에서 확인되는 공통 흐름과 의미, 필요하면 향후 전망까지 합쳐 2문장 이내 [N][M]
 # 추가 모니터링
-- 확인할 지표·후속 이슈 2~3개, 한 줄씩, 인용 없이.
+- 확인할 지표·후속 이슈 2~3개, 한 줄씩, 인용 없이.${spotlightRule}
 지킬 것: ① 모든 내용은 위 불릿 층위(상위 굵은 제목 → 하위 "- " 두 칸 들여쓰기)로 쓰고 줄글 문단을 쓰지 않는다. 하위 불릿은 각각 한 문장이며 \"사실:\", \"시사점:\" 같은 라벨 접두어를 붙이지 않고 자연스러운 문장으로 쓴다. ② 같은 [N]을 한 항목 안에서 반복하지 않고, 한 문장에 [N]은 1~2개만 쓴다. ③ 날짜를 본문에 쓰지 않는다(출처 목록에 표시된다). 시점이 의미를 바꿀 때만 "10월 22일"처럼 쓰고, 날짜가 불명이면 아무것도 쓰지 않는다. ④ 시장규모 전망 보고서·광고성 자료는 사실로 쓰지 않는다. ⑤ 자료에 없는 사실·수치·출처는 만들지 않는다. ⑥ 단일 사례로 산업 전체 추세를 단정하지 않는다. ⑦ 분량은 한국어 250~400단어, 군더더기 서두·맺음말 없이.`;
 }
 
-module.exports = { isBroadQuestion, rankForSynthesis, selectForSynthesis, promptBlock, MIN_FOR_SYNTHESIS, FRESH_DAYS, MAX_SYNTHESIS_MATERIALS };
+module.exports = { isSpotlightQuestion, isBroadQuestion, rankForSynthesis, selectForSynthesis, promptBlock, MIN_FOR_SYNTHESIS, FRESH_DAYS, MAX_SYNTHESIS_MATERIALS };

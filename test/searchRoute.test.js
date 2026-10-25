@@ -1536,9 +1536,9 @@ test('POST /: a plain 식용유 question matches 식용유 only when not precede
     } finally { restore(); restoreProvider(); }
   };
   const plain = await run('식용유 종류 알려줘');
-  assert.ok(plain.length && plain.some((c) => c.params.includes('(^|[^폐비])식용유') && / ~\* \$/.test(c.text)));
+  assert.ok(plain.length && plain.some((c) => c.params.includes('(^|[^폐비])식용유(?!지)') && / ~\* \$/.test(c.text)));
   const waste = await run('폐식용유 공급업체');
-  assert.ok(!waste.some((c) => c.params.includes('(^|[^폐비])식용유')));
+  assert.ok(!waste.some((c) => c.params.includes('(^|[^폐비])식용유(?!지)')));
 });
 
 test('POST /: 식용유지 is matched only when not preceded by 비 (비식용유지 sector stays out of an edible-oil question)', async () => {

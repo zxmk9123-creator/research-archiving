@@ -45,3 +45,9 @@ test('generic request words (알려줘/설명/비교) alone do not turn a trend 
   assert.deepEqual(glossary.matchCards('최근 팜유 시장 동향 알려줘'), []);
   assert.deepEqual(glossary.matchCards('팜유 가격 전망 설명해줘'), []);
 });
+
+test('비주류 식용유 gets its card without a definition cue; "비주류 기업" does not', () => {
+  assert.deepEqual(glossary.matchCards('비주류 식용유 알려줘').map((c) => c.id), ['minor-edible']);
+  assert.deepEqual(glossary.matchCards('마이너 식물성 유지는?').map((c) => c.id), ['minor-edible']);
+  assert.deepEqual(glossary.matchCards('비주류 기업 알려줘'), []);
+});

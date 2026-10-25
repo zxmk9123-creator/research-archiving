@@ -131,3 +131,39 @@ test('selectForSynthesis: stale materials are dropped when 3+ recent ones exist,
   const thin = synthesis.selectForSynthesis([...stale, row(1, 'r', day(2), 5, 'y')], now);
   assert.equal(thin.length, 3);
 });
+
+test('isSpotlightQuestion + spotlight ranking: notable-number items outrank a staple report; the answer asks for numbers and issues beyond staples', () => {
+  assert.equal(synthesis.isSpotlightQuestion('최근 유망한 품목 알려줘'), true);
+  assert.equal(synthesis.isBroadQuestion('최근 유망한 품목 알려줘'), true);
+  assert.equal(synthesis.isSpotlightQuestion('팜유 시장 동향'), false);
+  const now = Date.now();
+  const day = (n) => new Date(now - n * 86400000);
+  const staple = row(1, '팜유 시황', day(1), 10, '팜유 가격이 소폭 변동했다');
+  const notable = row(2, '쌀겨유 수출 급증', day(2), 4, '쌀겨유 수출이 전년 대비 42% 급증했다');
+  assert.equal(synthesis.rankForSynthesis([staple, notable], now, { spotlight: true })[0].id, 2);
+  const block = synthesis.promptBlock('최근 유망한 품목', 5, { spotlight: true });
+  assert.match(block, /일반 시황은 첫 이슈 한 줄로만/);
+  assert.match(block, /제목에 핵심 수치/);
+  assert.ok(!/일반 시황은 첫 이슈/.test(synthesis.promptBlock('팜유 동향', 5)));
+  const many = Array.from({ length: 14 }, (_, i) => row(i + 1, `r${i}`, day(i + 1), 5, 'y'));
+  assert.equal(synthesis.selectForSynthesis(many, now, { spotlight: true }).length, 10);
+});
+
+test('POST /: a spotlight question pulls recent items with notable figures into the candidates (domain-filtered) and asks for numbers', async () => {
+  const base = row(1, '팜유 시황 일반', new Date(Date.now() - 86400000), 5, '팜유 시황 요약');
+  const notable = [row(11, '쌀겨유 수출 급증', new Date(Date.now() - 2 * 86400000), 0, '쌀겨유 수출이 42% 급증했다'), row(12, '아보카도유 가격 급락', new Date(Date.now() - 3 * 86400000), 0, '가격이 30% 급락했다')];
+  const sqls = [];
+  const restore = mockPool([
+    ['i.published_at >= (now()', (text) => { sqls.push(text); return { rows: notable }; }],
+    ['FROM items i', () => ({ rows: [base, row(2, '팜유 수출', new Date(Date.now() - 2 * 86400000), 5, '수출 증가'), row(3, '팜유 재고', new Date(Date.now() - 3 * 86400000), 5, '재고 351만 톤')] })],
+  ]);
+  const original = provider.callProviderWithFallback;
+  let seen = null;
+  provider.callProviderWithFallback = async ({ user }) => { if (!seen && /\[Research Center materials\]/.test(user)) seen = user; return { text: '답변 [1]', provider: 'freellmapi' }; };
+  try {
+    await withServer(async (b) => { await ask(b, '최근 유망한 품목 알려줘'); });
+    assert.ok(sqls.length === 1 && /식용유\|팜유/.test(sqls[0]), 'notable-extras query ran with a domain filter');
+    assert.match(seen, /쌀겨유 수출 급증/);
+    assert.match(seen, /일반 시황은 첫 이슈 한 줄로만/);
+  } finally { provider.callProviderWithFallback = original; restore(); }
+});
