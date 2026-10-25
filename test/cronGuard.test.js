@@ -91,3 +91,11 @@ test('ensureDailyBrief: a ready brief built from fewer items than are now eligib
     assert.deepEqual(await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true }), { ran: false, reason: 'up_to_date' });
   } finally { m.restore(); }
 });
+
+test('pipelineIncident: a brief that is generating right now (e.g. the noon refresh) is not an incident, a stuck one is', () => {
+  const now = new Date('2026-10-25T04:31:00Z').getTime();
+  const done = { completedToday: true, completedAt: new Date(now - 374 * 60000) };
+  assert.equal(guard.pipelineIncident(done, { state: 'generating', updatedAt: new Date(now - 5 * 1000) }, { hourKst: 13, now }), null);
+  assert.match(guard.pipelineIncident(done, { state: 'generating', updatedAt: new Date(now - 40 * 60000) }, { hourKst: 13, now }), /headline not ready/);
+  assert.match(guard.pipelineIncident(done, { state: 'failed', updatedAt: new Date(now - 1000) }, { hourKst: 13, now }), /headline not ready/);
+});

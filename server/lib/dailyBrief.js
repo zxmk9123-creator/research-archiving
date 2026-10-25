@@ -334,9 +334,9 @@ async function maybeRefreshDailyBriefAtNoon(now = new Date()) {
 
 // Today's headline state, for the home status and the watchdog.
 async function getBriefState(now = new Date()) {
-  const { rows } = await pool.query('SELECT status, completed_at FROM daily_briefs WHERE brief_date = $1', [kstDate(now)]);
+  const { rows } = await pool.query('SELECT status, completed_at, updated_at FROM daily_briefs WHERE brief_date = $1', [kstDate(now)]);
   const row = rows[0];
-  return { state: row ? row.status : 'none', completedAt: row ? row.completed_at : null };
+  return { state: row ? row.status : 'none', completedAt: row ? row.completed_at : null, updatedAt: row ? row.updated_at : null };
 }
 
 const BRIEF_DEADLINE_HOUR_KST = 10;  // a headline exists by now even if collection is still running

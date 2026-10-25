@@ -6,7 +6,8 @@
 //  3. WATCHDOG: a stalled pipeline fails the cron response loudly, which turns the GitHub Actions run red (email notification).
 const MAX_CHAIN_DEPTH = 15;
 const WATCHDOG_STALL_HOUR_KST = 9;      // started late / no progress by 09:00 KST is an incident
-const BRIEF_GRACE_MS = 30 * 60 * 1000;  // collection done, headline still missing after 30 minutes
+const BRIEF_GRACE_MS = 30 * 60 * 1000;
+const GENERATION_LEASE_MS = 25 * 60 * 1000; // same lease dailyBrief.js uses to reclaim a stuck generation  // collection done, headline still missing after 30 minutes
 
 // The production host Vercel injects (tracks the project's current primary domain, unlike a hard-coded URL).
 function chainTarget(env = process.env) {
@@ -44,6 +45,9 @@ function pipelineIncident(status, brief, { hourKst, now = Date.now() } = {}) {
     return null;
   }
   if (brief.state === 'ready') return null;
+  // A generation that is running right now (the noon refresh flips a ready brief to 'generating' in the same cron call) is not an incident;
+  // only one whose row has not moved for longer than the generation lease is.
+  if (brief.state === 'generating' && brief.updatedAt && now - new Date(brief.updatedAt).getTime() < GENERATION_LEASE_MS) return null;
   const since = status.completedAt ? now - new Date(status.completedAt).getTime() : 0;
   return since > BRIEF_GRACE_MS ? `headline not ready ${Math.round(since / 60000)} min after collection (brief ${brief.state})` : null;
 }
