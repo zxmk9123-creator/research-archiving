@@ -3,7 +3,8 @@ const pool = require('../db/pool');
 const { matchCompanies } = require('../lib/companyMatch');
 const { extractMetadata, extractMetadataWithRetry } = require('../lib/extractMetadata');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('../lib/aiDraft');
-const { requireAuth } = require('../lib/auth');
+const { requireAuth, isAuthenticated } = require('../lib/auth');
+const { publicView, scopeQueryForAnonymous } = require('../lib/publicItems');
 const { hasValidClassification, deriveContentCategory } = require('../lib/classification');
 
 const router = express.Router();
@@ -255,7 +256,10 @@ function buildItemFilterClauses(query) {
 // bounds, not by fetching everything at once — so pagination's performance
 // benefit for the main list is unaffected.
 router.get('/month-counts', async (req, res) => {
-  const { where, params } = buildItemFilterClauses(req.query);
+  const admin = isAuthenticated(req);
+  const query = admin ? req.query : scopeQueryForAnonymous(req.query);
+  if (!query) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  const { where, params } = buildItemFilterClauses(query);
   try {
     const { rows } = await pool.query(
       `SELECT to_char(date_trunc('month', i.published_at), 'YYYY-MM') AS month_key, COUNT(*)::int AS count
@@ -275,7 +279,10 @@ router.get('/month-counts', async (req, res) => {
 router.get('/', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
   const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
-  const { where, params } = buildItemFilterClauses(req.query);
+  const admin = isAuthenticated(req);
+  const query = admin ? req.query : scopeQueryForAnonymous(req.query);
+  if (!query) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  const { where, params } = buildItemFilterClauses(query);
   params.push(limit + 1, offset);
   const orderBy = req.query.status === 'Draft'
     ? 'ORDER BY CASE WHEN i.reviewer_eligible IS NULL THEN 0 ELSE 1 END, i.collected_at DESC, i.id DESC'
@@ -297,7 +304,7 @@ router.get('/', async (req, res) => {
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
     res.set('X-Has-More', String(hasMore));
-    res.json(rows);
+    res.json(admin ? rows : rows.map(publicView));
   } catch (err) {
     console.error('GET /api/items failed:', err.message);
     res.status(500).json({ error: '목록을 불러오는 중 오류가 발생했습니다.' });
@@ -307,8 +314,10 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { rows } = await pool.query(`${ITEM_SELECT} WHERE i.id = $1`, [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'not found' });
-    res.json(rows[0]);
+    const admin = isAuthenticated(req);
+    // an unpublished item does not exist for the public
+    if (!rows[0] || (!admin && rows[0].status !== 'Published')) return res.status(404).json({ error: 'not found' });
+    res.json(admin ? rows[0] : publicView(rows[0]));
   } catch (err) {
     console.error('GET /api/items/:id failed:', err.message);
     res.status(500).json({ error: '항목을 불러오는 중 오류가 발생했습니다.' });
@@ -331,7 +340,7 @@ router.get('/:id/related', async (req, res) => {
     ) DESC, i.published_at DESC NULLS LAST
     LIMIT 6
   `, [req.params.id]);
-  res.json(rows);
+  res.json(isAuthenticated(req) ? rows : rows.map(publicView));
 });
 
 // Manual trigger/retry for a Draft item's AI draft. Restricted to Draft

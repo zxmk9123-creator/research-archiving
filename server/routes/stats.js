@@ -249,7 +249,8 @@ router.get('/ai-search-usage', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/draft-triage', async (req, res) => {
+// Unlike the aggregate overview above, this lists individual unpublished items and AI error text: admin only.
+router.get('/draft-triage', requireAuth, async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
   const offset = Math.min(100000, Math.max(0, Number.parseInt(req.query.offset, 10) || 0));
   const includeClosed = req.query.includeClosed === 'true';
