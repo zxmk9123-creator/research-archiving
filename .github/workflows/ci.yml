@@ -45,6 +45,10 @@ jobs:
 
       - run: npm ci
 
+      # Real-bug rules only (undefined names, duplicate keys, unreachable code ...); warnings do not fail the job
+      - name: Lint
+        run: npm run lint
+
       # Catches incident #2's class of bug (a file that no longer parses)
       # before anything else runs — cheaper and faster to pinpoint than
       # waiting for the server-boot step below to time out.

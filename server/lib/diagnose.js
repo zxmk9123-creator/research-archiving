@@ -9,7 +9,7 @@ const EXPECTED_ENV = [
   ['FREELLMAPI_CHAT_API_KEY', false], ['FREELLMAPI_MODEL', false], ['BARCHART_ONDEMAND_API_KEY', false],
 ];
 
-const timed = async (fn) => { const t = Date.now(); try { return { ok: true, ms: 0, ...(await fn()), ms: Date.now() - t }; } catch (err) { return { ok: false, error: String(err && err.message).slice(0, 200), ms: Date.now() - t }; } };
+const timed = async (fn) => { const t = Date.now(); try { return { ok: true, ...(await fn()), ms: Date.now() - t }; } catch (err) { return { ok: false, error: String(err && err.message).slice(0, 200), ms: Date.now() - t }; } };
 const scrub = (s) => String(s || '').replace(/\s+/g, ' ').replace(/(sk|tvly|fc|key)[-_A-Za-z0-9]{12,}/gi, '[redacted]').slice(0, 140);
 
 async function checkFreeLLM() {
