@@ -108,6 +108,8 @@ async function recordSearchTelemetry(fields) {
 
 // Bounded candidate set — never send the whole table to the LLM.
 const MAX_CANDIDATES = 12;
+// A question longer than this is never a real question; it would only inflate prompts and cost.
+const MAX_QUESTION_CHARS = 1000;
 // Minimal conversation context: the last few turns, not persisted anywhere
 // (the client holds them in memory only, see renderHome()'s aiSearchHistory).
 const MAX_HISTORY_TURNS = 3;
@@ -220,6 +222,7 @@ function spellingVariants(token) {
 }
 
 const termGroups = require('../lib/termGroups');
+const rateLimit = require('../lib/rateLimit');
 // 식용유 ⊂ 폐식용유·비식용유지, 식용유지 ⊂ 비식용유지 (sector names): the plain substring match mixed non-edible/UCO material into edible-oil questions
 // (식용유 also must not be the start of 식용유지: that is the sector NAME — matching it pulled in the whole 식용유지 sector, ~400 items tagged by
 // the classifier, among them misfiled e-SAF items that won on recency)
@@ -1519,7 +1522,10 @@ function wantsStream(req) {
 
 // No cap on simultaneous searches: the tool is used by a whole team at once. (Provider-side rate limits are
 // handled per call by the stall retry / hedging in lib/ai/provider.js, not by queueing users here.)
-router.post('/', (req, res) => {
+// Public endpoint that spends LLM calls: per-address brake (see lib/rateLimit.js for what it does and does not guarantee).
+const searchRateCounter = rateLimit.createWindowCounter({ windowMs: 10 * 60 * 1000, max: () => Number(process.env.AI_SEARCH_RATE_MAX) || 40 });
+const searchLimiter = rateLimit.limitMiddleware(searchRateCounter, '질문이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+router.post('/', searchLimiter, (req, res) => {
   const controller = new AbortController();
   const onClose = () => {
     if (!res.writableEnded) controller.abort(Object.assign(new Error('client disconnected'), { name: 'AbortError' }));
@@ -1546,6 +1552,7 @@ async function handleSearch(req, res, signal) {
   // (existing callers/tests rely on this guard touching the DB at all).
   const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
   if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
+  if (question.length > MAX_QUESTION_CHARS) return res.status(400).json({ error: `질문은 ${MAX_QUESTION_CHARS}자 이내로 입력해 주세요.` });
   const fingerprint = questionFingerprint(question);
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
@@ -1895,6 +1902,7 @@ module.exports.splitClaimLines = splitClaimLines;
 module.exports.parseUnsupportedClaimNumbers = parseUnsupportedClaimNumbers;
 module.exports.VERIFICATION_SYSTEM_PROMPT = VERIFICATION_SYSTEM_PROMPT;
 module.exports.wantsStream = wantsStream;
+module.exports.searchRateCounter = searchRateCounter;
 module.exports.finalizeAnswer = finalizeAnswer;
 module.exports.truncateField = truncateField;
 module.exports.withTimeout = withTimeout;

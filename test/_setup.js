@@ -19,3 +19,6 @@ process.env.ROSTER_CACHE = 'off';
 process.env.TERM_EXPANSION = 'off';
 process.env.VERIFICATION_ROUTINE = 'off';
 process.env.AUTO_REVIEW = 'off';
+
+// The suite sends hundreds of search requests from one address; the per-address search limit (lib/rateLimit.js) is exercised in its own test.
+process.env.AI_SEARCH_RATE_MAX = process.env.AI_SEARCH_RATE_MAX || '1000000';

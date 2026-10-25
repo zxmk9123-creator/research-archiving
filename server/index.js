@@ -10,6 +10,8 @@ asyncSafety.patchAsyncRoutes();
 asyncSafety.installProcessGuards();
 
 const app = express();
+app.disable('x-powered-by');
+app.use(require('./lib/rateLimit').securityHeaders);
 app.use(express.json());
 
 // Vercel Cron entry (vercel.json "crons"): there is no long-lived process on Vercel, so the in-process timers below do not run

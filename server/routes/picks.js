@@ -1,5 +1,6 @@
 const express = require('express');
 const pool = require('../db/pool');
+const rateLimit = require('../lib/rateLimit');
 
 const router = express.Router();
 
@@ -44,7 +45,8 @@ router.get('/teams', async (req, res) => {
   res.json([...teams].sort((a, b) => a.localeCompare(b, 'ko')));
 });
 
-router.post('/', async (req, res) => {
+const picksLimiter = rateLimit.limitMiddleware(rateLimit.createWindowCounter({ windowMs: 10 * 60 * 1000, max: 120 }));
+router.post('/', picksLimiter, async (req, res) => {
   const { item_id, user_email, kind, memo, team } = req.body;
   if (!item_id) return res.status(400).json({ error: 'item_id required' });
   const resolvedKind = kind || 'personal';
@@ -67,7 +69,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', picksLimiter, async (req, res) => {
   await pool.query('DELETE FROM picks WHERE id = $1', [req.params.id]);
   res.status(204).end();
 });
