@@ -379,7 +379,8 @@ async function getBriefState(now = new Date()) {
 
 const BRIEF_DEADLINE_HOUR_KST = 10;  // a headline exists by now even if collection is still running
 const REFRESH_MIN_NEW_ITEMS = 3;     // regenerate a ready brief only when this many more eligible items exist
-async function countEligibleItems(briefDate) {
+// `collectedAfter`: count only items collected after the brief was made, so back-dating or cleaning existing rows never re-triggers a regeneration.
+async function countEligibleItems(briefDate, collectedAfter = null) {
   const since = new Date(`${briefDate}T12:00:00Z`);
   since.setUTCDate(since.getUTCDate() - 6);
   const until = new Date(`${briefDate}T12:00:00Z`);
@@ -387,8 +388,9 @@ async function countEligibleItems(briefDate) {
   const { rows } = await pool.query(
     `SELECT count(*)::int AS n FROM items i
       WHERE i.status = 'Published' AND i.collected_at >= $1::timestamptz AND i.collected_at <= $2::timestamptz
-        AND i.published_at >= $3::date AND i.published_at < $4::date`,
-    [new Date(`${briefDate}T00:00:00+09:00`), new Date(`${briefDate}T23:59:59.999+09:00`), since.toISOString().slice(0, 10), until.toISOString().slice(0, 10)]
+        AND i.published_at >= $3::date AND i.published_at < $4::date
+        AND ($5::timestamptz IS NULL OR i.collected_at > $5::timestamptz)`,
+    [new Date(`${briefDate}T00:00:00+09:00`), new Date(`${briefDate}T23:59:59.999+09:00`), since.toISOString().slice(0, 10), until.toISOString().slice(0, 10), collectedAfter]
   );
   return rows[0] ? rows[0].n : 0;
 }
@@ -400,15 +402,15 @@ async function ensureDailyBrief(now = new Date(), { discoveryDone = false } = {}
   const briefDate = kstDate(now);
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(now)) % 24;
   if (!discoveryDone && hour < BRIEF_DEADLINE_HOUR_KST) return { ran: false, reason: 'collection_running' };
-  const { rows } = await pool.query('SELECT status, item_count FROM daily_briefs WHERE brief_date = $1', [briefDate]);
+  const { rows } = await pool.query('SELECT status, item_count, completed_at FROM daily_briefs WHERE brief_date = $1', [briefDate]);
   const cur = rows[0];
   if (!cur || cur.status === 'failed' || cur.status === 'generating') {
     // non-force claim: starts when missing or failed, reclaims a generation stuck past its lease, leaves a live one alone
     const r = await queueDailyBriefGeneration(now);
     return { ran: r.started, reason: r.started ? 'generated' : r.reason };
   }
-  const eligible = Math.min(await countEligibleItems(briefDate), MAX_EVIDENCE_ITEMS);
-  if (eligible >= (cur.item_count || 0) + REFRESH_MIN_NEW_ITEMS) {
+  const newItems = await countEligibleItems(briefDate, cur.completed_at || null);
+  if (newItems >= REFRESH_MIN_NEW_ITEMS && (cur.item_count || 0) < MAX_EVIDENCE_ITEMS) {
     const r = await queueDailyBriefGeneration(now, { force: true });
     return { ran: r.started, reason: r.started ? 'refreshed_more_items' : r.reason };
   }

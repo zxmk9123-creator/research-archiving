@@ -70,19 +70,19 @@ test('ensureDailyBrief: past the deadline a missing brief is generated even thou
   } finally { m.restore(); }
 });
 
-test('ensureDailyBrief: a ready brief built from fewer items than are now eligible (+3) is force-regenerated; otherwise up to date', async () => {
-  const handler = (eligible, itemCount) => (text) => {
-    if (/SELECT status, item_count/.test(text)) return { rows: [{ status: 'ready', item_count: itemCount }] };
-    if (/count\(\*\)::int AS n/.test(text)) return { rows: [{ n: eligible }] };
+test('ensureDailyBrief: regenerates only when 3+ items were collected after the brief was made (back-dating existing rows does not count)', async () => {
+  const handler = (newItems, itemCount) => (text) => {
+    if (/SELECT status, item_count/.test(text)) return { rows: [{ status: 'ready', item_count: itemCount, completed_at: '2026-10-25T02:00:00Z' }] };
+    if (/count\(\*\)::int AS n/.test(text)) return { rows: [{ n: newItems }] };
     return { rows: [] };
   };
-  let m = mockPool(handler(20, 12));
+  let m = mockPool(handler(3, 12));
   try {
     await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true });
     const claim = m.calls.find((c) => /INSERT INTO daily_briefs/.test(c.text));
     assert.ok(claim && claim.params[4] === true, 'force claim');
   } finally { m.restore(); }
-  m = mockPool(handler(13, 12));
+  m = mockPool(handler(2, 12));
   try {
     assert.deepEqual(await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true }), { ran: false, reason: 'up_to_date' });
   } finally { m.restore(); }
