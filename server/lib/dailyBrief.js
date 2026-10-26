@@ -117,17 +117,8 @@ function validateBrief(raw, evidence) {
   }).filter(Boolean)
     // WHICH five: by importance first (then newest). Cutting by date first used to drop a more important older item.
     .sort((a, b) => b.importance - a.importance || String(evidenceById.get(b.item_id).published_at || '').localeCompare(String(evidenceById.get(a.item_id).published_at || '')))
-    .slice(0, MAX_DEVELOPMENTS)
-    // HOW they are shown: newest first.
-    .sort((a, b) => {
-      const aEvidence = evidenceById.get(a.item_id);
-      const bEvidence = evidenceById.get(b.item_id);
-      const byPublicationDate = String(bEvidence.published_at || '').localeCompare(String(aEvidence.published_at || ''));
-      if (byPublicationDate) return byPublicationDate;
-      const byCollectionTime = String(bEvidence.collected_at || '').localeCompare(String(aEvidence.collected_at || ''));
-      return byCollectionTime || b.importance - a.importance;
-    })
-    .map(({ importance, ...entry }) => entry);
+    .slice(0, MAX_DEVELOPMENTS);
+    // HOW they are shown: exactly that order (1 = most important, ties newest first); the lead and summary are written from the top ones.
 
   // TOP-UP: the page is meant to show five noteworthy materials. When the model returned fewer than the archive can supply, the remaining slots
   // are filled from the materials' own stored summary/insight (one compressed sentence each; nothing is generated), newest first.
@@ -143,8 +134,8 @@ function validateBrief(raw, evidence) {
       if (!summary || !significance) continue; // no stored insight: nothing honest to say about why it matters
       normalizedDevelopments.push({ item_id: Number(e.item_id), summary, significance });
     }
-    normalizedDevelopments.sort((a, b) => String(evidenceById.get(b.item_id).published_at || '').localeCompare(String(evidenceById.get(a.item_id).published_at || '')));
   }
+  for (const d of normalizedDevelopments) delete d.importance; // stored order is the importance order; top-ups follow, newest first
 
   const watchpoints = (Array.isArray(raw.watchpoints) ? raw.watchpoints : [])
     .map((value) => String(value || '').trim()).filter(Boolean).slice(0, 4).map((value) => value.slice(0, 250));
@@ -239,7 +230,7 @@ function validateBrief(raw, evidence) {
     '각 development는 압축해서 쓴다: summary는 "누가/무엇이 + 핵심 수치"를 담은 한 문장(90자 안팎, 130자 이내), significance는 "그래서 어떤 영향인가"를 한 문장(60자 안팎, 90자 이내)이다. 배경 설명·부연·같은 말 반복 없이 수치, 주체, 영향만 쓴다. 한국어로 쓰고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
     'JSON 객체만 출력한다. 형식: {"lead":"한 문장 핵심","market_summary":"현상→영향 순서의 2~3문장 브리핑","developments":[{"item_id":정수,"importance":1~5,"summary":"확인된 사실","significance":"이 자료가 주목할 이유"}],"watchpoints":["후속 확인할 사항"]}',
     '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 가장 시의적인 현상부터 사실과 영향을 이어서 쓴다.',
-    'developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
+    'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead와 market_summary는 앞쪽 자료를 중심으로 쓴다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}`;

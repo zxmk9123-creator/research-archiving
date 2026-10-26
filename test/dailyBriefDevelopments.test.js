@@ -13,14 +13,15 @@ test('compactSentence: first sentence only, trailing full stop dropped, long tex
   assert.ok(long.length <= 41 && long.endsWith('…'));
 });
 
-test('five developments are shown, chosen by importance first (an older important item is not dropped for a newer minor one), displayed newest first', () => {
+test('five developments are shown, chosen by importance first (an older important item is not dropped for a newer minor one), displayed in importance order (ties newest first)', () => {
   const evidence = [ev(1, '20'), ev(2, '21'), ev(3, '22'), ev(4, '23'), ev(5, '24'), ev(6, '25'), ev(7, '26')];
   const out = validateBrief(raw([dev(1, 5), dev(2, 3), dev(3, 4), dev(4, 3), dev(5, 4), dev(6, 3), dev(7, 3)]), evidence);
   const ids = out.developments.map((d) => d.item_id);
   assert.equal(ids.length, 5);
   assert.ok(ids.includes(1), 'importance 5 on the OLDEST item still makes the cut');
   assert.ok(ids.includes(3) && ids.includes(5));
-  assert.deepEqual(ids, [...ids].sort((a, b) => b - a), 'shown newest first');
+  assert.deepEqual(ids, [1, 5, 3, 7, 6], '1 = most important; equal importance newest first');
+  assert.ok(out.developments.every((d) => !('importance' in d)));
 });
 
 test('importance 3 fills the list; importance 2 and below never appears; the old "4 or nothing" rule is gone', () => {
