@@ -1780,9 +1780,19 @@ function aiSearchErrorHtml(message) {
     <button type="button" class="btn ai-search-retry-btn">재검색</button>`;
 }
 
+// The AI router sleeps when idle and takes a while to wake: tell the server a visitor is here, so it is already waking while the question is typed.
+// Once per page load and at most every 5 minutes per browser tab; failures are ignored (the search itself still works, just slower).
+let lastWarmAt = 0;
+function warmAiRouter() {
+  if (Date.now() - lastWarmAt < 5 * 60 * 1000) return;
+  lastWarmAt = Date.now();
+  fetch('/api/search/warm', { keepalive: true }).catch(() => {});
+}
+
 function bindAiSearchForm() {
   const form = document.getElementById('ai-search-form');
   if (!form) return;
+  warmAiRouter();
   bindRex(form);
   const resultEl = document.getElementById('ai-search-result');
   const submitBtn = form.querySelector('button[type="submit"]');

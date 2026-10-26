@@ -1527,6 +1527,14 @@ function wantsStream(req) {
 // Public endpoint that spends LLM calls: per-address brake (see lib/rateLimit.js for what it does and does not guarantee).
 const searchRateCounter = rateLimit.createWindowCounter({ windowMs: 10 * 60 * 1000, max: () => Number(process.env.AI_SEARCH_RATE_MAX) || 40 });
 const searchLimiter = rateLimit.limitMiddleware(searchRateCounter, '질문이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+// Visitor arrived: start waking the AI router (see lib/routerWarmup.js). Always answers 202 at once, never exposes the router's address.
+const warmCounter = rateLimit.createWindowCounter({ windowMs: 10 * 60 * 1000, max: 6 });
+router.get('/warm', rateLimit.limitMiddleware(warmCounter), (req, res) => {
+  const result = require('../lib/routerWarmup').warmRouter();
+  if (result.started) require('../lib/background').track(result.done);
+  res.status(202).json({ warming: result.started });
+});
+
 router.post('/', searchLimiter, (req, res) => {
   const controller = new AbortController();
   const onClose = () => {
