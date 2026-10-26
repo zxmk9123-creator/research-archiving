@@ -2296,13 +2296,15 @@ function groupByMonth(items) {
   for (const it of items) {
     const d = it.published_at ? new Date(it.published_at) : null;
     const valid = d && !isNaN(d.getTime());
-    const key = valid ? `${d.getFullYear()}-${d.getMonth()}` : 'unknown';
+    // UTC getters: published_at is a plain date serialized as midnight UTC, and the sidebar counts (server date_trunc) bucket by that
+    // date — local getters moved 1st-of-month items into the previous month for viewers west of UTC.
+    const key = valid ? `${d.getUTCFullYear()}-${d.getUTCMonth()}` : 'unknown';
     if (key !== currentKey) {
       // `key` doubles as this group's divider element id (prefixed
       // archive-month- below) so the year-month sidebar can scroll straight
       // to it — kept on the group itself rather than re-derived from the
       // label string, which isn't a safe DOM id (contains 년/월/공백).
-      groups.push({ key, label: valid ? `${d.getFullYear()}년 ${d.getMonth() + 1}월` : '날짜 미확인', items: [] });
+      groups.push({ key, label: valid ? `${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월` : '날짜 미확인', items: [] });
       currentKey = key;
     }
     groups[groups.length - 1].items.push(it);

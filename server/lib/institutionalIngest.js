@@ -18,14 +18,15 @@ const { fetchPdfBuffer, extractPdfText } = require('./pdfExtract');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
+const { urlKey, existingUrlKeys } = require('./urlKey');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 
 const MAX_REPORTS_PER_RUN = 10;
 const TITLE_SIMILARITY_THRESHOLD = 0.82;
 const RECENT_TITLES_LIMIT = 500;
 
-function isDuplicate(candidate, existingUrls, recentTitles) {
-  if (existingUrls.has(candidate.link)) return true;
+function isDuplicate(candidate, existingUrls, recentTitles, existingKeys) {
+  if (existingUrls.has(candidate.link) || (existingKeys && existingKeys.has(urlKey(candidate.link)))) return true;
   return recentTitles.some((t) => titleSimilarity(candidate.title, t) >= TITLE_SIMILARITY_THRESHOLD);
 }
 
@@ -45,6 +46,7 @@ async function collectInstitutionSource(source) {
       [candidates.map((c) => c.link)]
     );
     const existingUrls = new Set(urlRows.map((r) => r.source_url));
+    const existingKeys = await existingUrlKeys(pool, candidates.map((c) => c.link));
 
     const { rows: titleRows } = await pool.query(
       'SELECT title FROM items ORDER BY collected_at DESC LIMIT $1',
@@ -59,7 +61,7 @@ async function collectInstitutionSource(source) {
     const details = [];
 
     for (const candidate of candidates) {
-      if (isDuplicate(candidate, existingUrls, recentTitles)) continue;
+      if (isDuplicate(candidate, existingUrls, recentTitles, existingKeys)) continue;
 
       // Unlike RSS (which has a title+description to pre-filter on before
       // ever fetching anything), an institutional PDF candidate only has a

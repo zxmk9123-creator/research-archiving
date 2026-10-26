@@ -50,6 +50,7 @@ function recentlySeen(link) {
 }
 
 const freshness = require('./freshness');
+const { urlKey, existingUrlKeys } = require('./urlKey');
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/;
 const FALLBACK_CANDIDATES_TO_TRY = 3;
 
@@ -151,6 +152,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       }
       const norm = normalizeUrl(candidate.link);
       const { rows: existing } = await pool.query('SELECT id FROM items WHERE source_url = ANY($1)', [Array.from(new Set([candidate.link, norm, `${norm}/`]))]);
+      if (!existing.length && (await existingUrlKeys(pool, [candidate.link])).has(urlKey(candidate.link))) existing.push({ id: null });
       if (existing.length) {
         rememberUrl(candidate.link);
         details.push({ title: candidate.title, link: candidate.link, stage: 'already_ingested', itemId: existing[0].id });

@@ -3,6 +3,7 @@ const { parseFeed, toDateOnly } = require('./feedParser');
 const { readResponseText } = require('./boundedResponse');
 const { matchCompanies } = require('./companyMatch');
 const { titleSimilarity } = require('./similarity');
+const { urlKey, existingUrlKeys } = require('./urlKey');
 const { generateAiDraftForItem, applyAiDraftIfEligible } = require('./aiDraft');
 const { isRelevantToOilFatsScope } = require('./relevanceFilter');
 const { recordExclusion } = require('./discoveryExclusions');
@@ -87,8 +88,8 @@ async function fetchFeedItems(url) {
 
 // Dedup an incoming (title, url) against exact URL matches and near-duplicate
 // titles (Dice bigram similarity) among recently collected items.
-function isDuplicate(fi, existingUrls, recentTitles) {
-  if (existingUrls.has(fi.link)) return true;
+function isDuplicate(fi, existingUrls, recentTitles, existingKeys) {
+  if (existingUrls.has(fi.link) || (existingKeys && existingKeys.has(urlKey(fi.link)))) return true;
   return recentTitles.some((t) => titleSimilarity(fi.title, t) >= TITLE_SIMILARITY_THRESHOLD);
 }
 
@@ -103,6 +104,7 @@ async function collectSource(source) {
       [feedItems.map((fi) => fi.link)]
     );
     const existingUrls = new Set(urlRows.map((r) => r.source_url));
+    const existingKeys = await existingUrlKeys(pool, feedItems.map((fi) => fi.link));
 
     const { rows: titleRows } = await pool.query(
       'SELECT title FROM items ORDER BY collected_at DESC LIMIT $1',
@@ -113,7 +115,7 @@ async function collectSource(source) {
     let inserted = 0;
     let filtered = 0;
     for (const fi of feedItems) {
-      if (isDuplicate(fi, existingUrls, recentTitles)) continue;
+      if (isDuplicate(fi, existingUrls, recentTitles, existingKeys)) continue;
 
       // Topic pre-filter: skip entirely (no row, no AI call) for anything
       // outside the Oil & Fats scope — separate from ai_eligible, which
