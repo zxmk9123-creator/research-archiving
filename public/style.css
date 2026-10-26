@@ -362,9 +362,13 @@ p { margin: 0; }
   .ai-source-chip { max-width: calc(100vw - 64px); }
 }
 
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr), not 1fr: a plain 1fr track cannot shrink below its content, so one card with a long unbroken title (URL-style slugs,
+   common among undated items) stretched its column — and every other column — past the container. */
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.grid > .card { min-width: 0; }
+.card-body h3, .card-body .meta { overflow-wrap: anywhere; }
 
 /* Home entry modules: compact carousel showing 3 items at a time, with
    the heading itself acting as the link to the module's dedicated
