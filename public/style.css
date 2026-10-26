@@ -1354,3 +1354,27 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 @keyframes rc-breathe { 50% { transform: scale(1.04); } }
 @keyframes rc-float { 0% { transform: translateY(0); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-6px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .rex *, .rex { animation: none !important; transition: none !important; } .rc-z { opacity: 1; } }
+/* ---------------------------------------------------------------------
+   Mobile (<= 720px): header = brand + guide on row 1, one horizontally
+   scrollable nav row below (never wraps per character, never widens the
+   page); content gutters tightened; media never wider than its column.
+------------------------------------------------------------------------ */
+@media (max-width: 720px) {
+  html { -webkit-text-size-adjust: 100%; }
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; padding: 10px 14px; }
+  .brand { grid-column: 1; min-width: 0; font-size: 15px; }
+  .topbar-guide-link { grid-column: 2; grid-row: 1; }
+  .topbar nav {
+    grid-column: 1 / -1; grid-row: 2; justify-self: stretch; gap: 2px;
+    margin: 0 -14px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .topbar nav::-webkit-scrollbar { display: none; }
+  .nav-group, .topbar nav a, .nav-admin-auth, .nav-divider { flex-shrink: 0; white-space: nowrap; }
+  .topbar nav a { padding: 8px 11px; }
+  .daily-status-bar { right: 14px; }
+  #app { min-width: 0; padding: var(--sp-4) 14px var(--sp-7); }
+  #app img, #app video, #app canvas, #app svg { max-width: 100%; }
+  #app pre, #app code { overflow-wrap: anywhere; }
+  /* wide data tables scroll inside their own box instead of widening the page */
+  .sources-table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

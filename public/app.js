@@ -3915,8 +3915,9 @@ function runSpotlightTour(steps, seenKey, onDone) {
     if (!highlightedEl) return;
     const r = highlightedEl.getBoundingClientRect();
     card.style.top = `${r.bottom + window.scrollY + 10}px`;
-    const cardWidth = Math.min(360, window.innerWidth - 32);
-    card.style.left = `${Math.max(8, Math.min(window.innerWidth - cardWidth - 8, r.left + window.scrollX - 20))}px`;
+    const vw = document.documentElement.clientWidth; // not innerWidth: on mobile that can be the widened layout viewport
+    const cardWidth = Math.min(360, vw - 32);
+    card.style.left = `${Math.max(8, Math.min(vw - cardWidth - 8, r.left + window.scrollX - 20))}px`;
   }
   window.addEventListener('scroll', positionCard, { passive: true });
   window.addEventListener('resize', positionCard);
