@@ -1424,3 +1424,10 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   .headline-lead > p:last-child { font-size: 14px; line-height: 22px; }
   .topbar nav a { font-size: 14px; }
 }
+
+/* single archive tab row: divider between the category and view groups; scrolls sideways rather than wrapping */
+.archive-tabs-divider { align-self: center; flex: none; width: 1px; height: 14px; margin: 0 var(--sp-1); background: var(--border-strong); }
+.archive-tabs { overflow-x: auto; scrollbar-width: none; }
+.archive-tabs::-webkit-scrollbar { display: none; }
+.archive-tabs .archive-tab { flex: none; white-space: nowrap; }
+@media (max-width: 640px) { .archive-layout > .archive-main { margin-top: 0; } .archive-main > .section-header { justify-content: flex-start; } }

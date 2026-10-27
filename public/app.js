@@ -2049,8 +2049,9 @@ async function renderArchive(query = {}) {
           : '<span class="chip-empty">등록된 팀이 없습니다. 자료 카드의 팀 Pick에서 팀을 추가하세요.</span>'
       }${selectedTeams.size ? `<a class="team-chip-clear" href="#/archive?${toQuery({ ...query, view: 'team', team: '' }).slice(1)}">전체 팀 보기</a>` : ''}</div>`
     : '';
-  const viewTabsHtml = viewTabs.map((t) =>
-    `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(t.key)}">${t.label}</a>`
+  // One tab row: 전체/뉴스/보고서 (category) | 내 저장/팀 Pick (view toggles; tapping the active one returns to the full list).
+  const viewTabsHtml = viewTabs.filter((t) => t.key !== 'all').map((t) =>
+    `<a class="archive-tab ${view === t.key ? 'active' : ''}" href="#/archive?${tabQuery(view === t.key ? 'all' : t.key)}">${t.label}</a>`
   ).join('');
 
   const categoryTabs = [
@@ -2108,8 +2109,7 @@ async function renderArchive(query = {}) {
     <h1>자료</h1>
     <p class="page-lede">발행된 유지 시장 리서치를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있습니다.</p>
     ${TRUST_GRADE_EXPLANATION_HTML}
-    <div class="archive-tabs category-tabs">${categoryTabsHtml}</div>
-    <div class="archive-tabs">${viewTabsHtml}</div>
+    <div class="archive-tabs category-tabs">${categoryTabsHtml}<span class="archive-tabs-divider" aria-hidden="true"></span>${viewTabsHtml}</div>
     ${teamChipsHtml}
     <div class="archive">
       <div class="archive-search-bar">
@@ -2144,7 +2144,7 @@ async function renderArchive(query = {}) {
       <div class="archive-layout">
         ${monthNavHtml}
         <div class="section archive-main">
-          <div class="section-header"><h2>자료</h2><span class="count">${
+          <div class="section-header"><span class="count">${
             // visibleItems.length is only this one page's count (limit=100) —
             // showing it as "전체" undercounted every filtered result past
             // the first page. monthCounts (already fetched for the sidebar,
