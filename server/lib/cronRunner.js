@@ -49,7 +49,7 @@ async function runDailyCron(chainDepth) {
   const BUDGET_MS = Number(process.env.CRON_BUDGET_MS) || 240000;
   const steps = [
     // FIRST, so it gets the whole time budget. Sliced: one call cannot run all sources (the function time limit), so each call advances a persisted cursor
-    ['daily_discovery', () => dailyDiscovery.runDailyDiscoverySliced({ budgetMs: Math.max(20000, Math.min(200000, 250000 - (Date.now() - started))) })],
+    ['daily_discovery', () => dailyDiscovery.runDailyDiscoverySliced({ budgetMs: Math.max(20000, Math.min(130000, 250000 - (Date.now() - started))) })],
     // collection happens once a day, in the morning pass: these only run until today's discovery has completed
     ['collections', async () => ((await dailyDiscovery.getDailyDiscoveryStatus()).completedToday ? { ran: false, reason: 'collected_today' } : runDueCollections())],
     ['reference_collections', async () => ((await dailyDiscovery.getDailyDiscoveryStatus()).completedToday ? { ran: false, reason: 'collected_today' } : require('./referenceCollect').runReferenceCollections())],

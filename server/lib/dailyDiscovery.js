@@ -238,6 +238,7 @@ async function getDailyDiscoveryStatus(now = new Date()) {
 // sources as fit in its time budget (a few at a time, in parallel); the call that reaches the end records the completion exactly like
 // the single-process run does. Resuming never starts over: the cursor lives in scheduler_jobs (job 'daily_discovery_cursor').
 const CURSOR_JOB = 'daily_discovery_cursor';
+const SOURCE_TIMEOUT_MS = 90000;
 const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
 
 // Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
@@ -274,7 +275,12 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   );
   await save({ ...saved, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + budgetMs + 60000 });
   console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
-  const runOne = (idx) => collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx]));
+  // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
+  // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
+  const runOne = (idx) => Promise.race([
+    collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx])),
+    new Promise((resolve) => setTimeout(() => resolve({ sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }), SOURCE_TIMEOUT_MS).unref()),
+  ]);
   const leaseMs = budgetMs + 60000;
   const step = await advanceDiscovery(saved, srcRows.length, runOne, {
     budgetMs,
