@@ -10,8 +10,10 @@ name: Scheduled jobs
 on:
   schedule:
     - cron: '7 * * * *'
-    # the morning discovery run needs several calls to get through every source (each call advances a saved cursor): 07:00-10:59 KST every 20 min
-    - cron: '*/20 22,23,0,1 * * *'
+    # the morning discovery run needs several calls to get through every source (each call advances a saved cursor): 07:00-10:59 KST every
+    # 10 min. GitHub drops or delays scheduled runs now and then, so the triggers overlap on purpose; the concurrency group below keeps
+    # them from running at the same time, and a run that finds nothing to do is a few seconds long.
+    - cron: '*/10 22,23,0,1 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -21,7 +23,7 @@ concurrency:
 jobs:
   call-cron:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 75
     steps:
       - name: Call /api/cron/daily
         env:
@@ -29,13 +31,21 @@ jobs:
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET secret is not set"; exit 1; fi
-          code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/daily")
-          echo "HTTP $code"
-          cat out.json; echo
-          # a 3xx means the domain moved (the old research-archiving.vercel.app now redirects to oilfats-research.vercel.app): curl does not
-          # follow it, and following would drop the Authorization header — fix APP_URL instead
-          case "$code" in 3*) echo "::error::HTTP $code redirect from $APP_URL — update the APP_URL variable / workflow default to the new domain"; exit 1;; esac
-          [ "$code" = "200" ] || exit 1
-          # a step that errored is reported inside a 200 response: fail the run so GitHub sends its failure notification
-          if grep -q '"error:' out.json; then echo "::error::a cron step reported an error"; exit 1; fi
-          if grep -Eq '"background_unfinished":[1-9]' out.json; then echo "::warning::background work was still running when the response was sent"; fi
+          # The run keeps calling the endpoint until the morning discovery reports done (each call advances a saved cursor), so a hop
+          # that died or a trigger GitHub skipped never leaves collection half finished and needs no one to restart it.
+          for i in $(seq 1 14); do
+            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/daily" || echo 000)
+            echo "call $i: HTTP $code"
+            cat out.json 2>/dev/null | head -c 3000; echo
+            # a 3xx means the domain moved (the old research-archiving.vercel.app now redirects to oilfats-research.vercel.app): curl does not
+            # follow it, and following would drop the Authorization header — fix APP_URL instead
+            case "$code" in 3*) echo "::error::HTTP $code redirect from $APP_URL — update the APP_URL variable / workflow default to the new domain"; exit 1;; esac
+            if [ "$code" = "200" ]; then
+              # a step that errored is reported inside a 200 response: fail the run so GitHub sends its failure notification
+              if grep -q '"error:' out.json; then echo "::error::a cron step reported an error"; exit 1; fi
+              if grep -Eq '"background_unfinished":[1-9]' out.json; then echo "::warning::background work was still running when the response was sent"; fi
+              jq -e '.results.daily_discovery | (.done == false) or (.reason == "in_progress")' out.json >/dev/null 2>&1 || exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::morning discovery still not done after 14 calls"; exit 1
