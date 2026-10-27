@@ -344,23 +344,6 @@ async function requestDailyBriefRegeneration(now = new Date()) {
   return queueDailyBriefGeneration(now, { force: true });
 }
 
-// Noon refresh: items the review autopilot publishes after the morning collection are not in the first brief. The hourly cron calls
-// this; from 12:00 KST it regenerates today's brief once (a brief completed before noon is stale, one completed after is not).
-async function maybeRefreshDailyBriefAtNoon(now = new Date()) {
-  const briefDate = kstDate(now);
-  const noon = new Date(`${briefDate}T12:00:00+09:00`);
-  if (now < noon) return { ran: false, reason: 'before_noon' };
-  const { rows } = await pool.query('SELECT status, completed_at FROM daily_briefs WHERE brief_date = $1', [briefDate]);
-  const current = rows[0];
-  if (!current) return { ran: false, reason: 'no_morning_brief' };
-  if (current.status === 'generating') return { ran: false, reason: 'already_running' };
-  if (current.status === 'ready' && current.completed_at && new Date(current.completed_at) >= noon) {
-    return { ran: false, reason: 'already_refreshed' };
-  }
-  const result = await queueDailyBriefGeneration(now, { force: current.status !== 'failed' });
-  return { ran: result.started, reason: result.started ? 'refreshed' : result.reason };
-}
-
 // Today's headline state, for the home status and the watchdog.
 async function getBriefState(now = new Date()) {
   const { rows } = await pool.query('SELECT status, completed_at, updated_at FROM daily_briefs WHERE brief_date = $1', [kstDate(now)]);
@@ -369,41 +352,19 @@ async function getBriefState(now = new Date()) {
 }
 
 const BRIEF_DEADLINE_HOUR_KST = 10;  // a headline exists by now even if collection is still running
-const REFRESH_MIN_NEW_ITEMS = 3;     // regenerate a ready brief only when this many more eligible items exist
-// `collectedAfter`: count only items collected after the brief was made, so back-dating or cleaning existing rows never re-triggers a regeneration.
-async function countEligibleItems(briefDate, collectedAfter = null) {
-  const since = new Date(`${briefDate}T12:00:00Z`);
-  since.setUTCDate(since.getUTCDate() - 6);
-  const until = new Date(`${briefDate}T12:00:00Z`);
-  until.setUTCDate(until.getUTCDate() + 1);
-  const { rows } = await pool.query(
-    `SELECT count(*)::int AS n FROM items i
-      WHERE i.status = 'Published' AND i.collected_at >= $1::timestamptz AND i.collected_at <= $2::timestamptz
-        AND i.published_at >= $3::date AND i.published_at < $4::date
-        AND ($5::timestamptz IS NULL OR i.collected_at > $5::timestamptz)`,
-    [new Date(`${briefDate}T00:00:00+09:00`), new Date(`${briefDate}T23:59:59.999+09:00`), since.toISOString().slice(0, 10), until.toISOString().slice(0, 10), collectedAfter]
-  );
-  return rows[0] ? rows[0].n : 0;
-}
-
 // The headline is guaranteed, not hoped for. Called by the cron on every pass:
 //  - collection finished (or it is past the 10:00 KST deadline) and there is no usable brief -> generate it;
-//  - a ready brief was built from fewer items than are eligible now (items published after it was made) -> regenerate it.
+//  - a ready brief is final for the day: one morning collection, one headline (no noon or later refresh).
 async function ensureDailyBrief(now = new Date(), { discoveryDone = false } = {}) {
   const briefDate = kstDate(now);
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(now)) % 24;
   if (!discoveryDone && hour < BRIEF_DEADLINE_HOUR_KST) return { ran: false, reason: 'collection_running' };
-  const { rows } = await pool.query('SELECT status, item_count, completed_at FROM daily_briefs WHERE brief_date = $1', [briefDate]);
+  const { rows } = await pool.query('SELECT status FROM daily_briefs WHERE brief_date = $1', [briefDate]);
   const cur = rows[0];
   if (!cur || cur.status === 'failed' || cur.status === 'generating') {
     // non-force claim: starts when missing or failed, reclaims a generation stuck past its lease, leaves a live one alone
     const r = await queueDailyBriefGeneration(now);
     return { ran: r.started, reason: r.started ? 'generated' : r.reason };
-  }
-  const newItems = await countEligibleItems(briefDate, cur.completed_at || null);
-  if (newItems >= REFRESH_MIN_NEW_ITEMS && (cur.item_count || 0) < MAX_EVIDENCE_ITEMS) {
-    const r = await queueDailyBriefGeneration(now, { force: true });
-    return { ran: r.started, reason: r.started ? 'refreshed_more_items' : r.reason };
   }
   return { ran: false, reason: 'up_to_date' };
 }
@@ -456,4 +417,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { validateBrief, compactSentence, ensureDailyBrief, getBriefState, maybeRefreshDailyBriefAtNoon, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

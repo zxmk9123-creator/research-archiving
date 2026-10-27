@@ -70,29 +70,15 @@ test('ensureDailyBrief: past the deadline a missing brief is generated even thou
   } finally { m.restore(); }
 });
 
-test('ensureDailyBrief: regenerates only when 3+ items were collected after the brief was made (back-dating existing rows does not count)', async () => {
-  const handler = (newItems, itemCount) => (text) => {
-    if (/SELECT status, item_count/.test(text)) return { rows: [{ status: 'ready', item_count: itemCount, completed_at: '2026-10-25T02:00:00Z' }] };
-    if (/count\(\*\)::int AS n/.test(text)) return { rows: [{ n: newItems }] };
-    return { rows: [] };
-  };
-  let m = mockPool(handler(3, 12));
-  try {
-    await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true });
-    const claim = m.calls.find((c) => /INSERT INTO daily_briefs/.test(c.text));
-    assert.ok(claim && claim.params[4] === true, 'force claim');
-  } finally { m.restore(); }
-  m = mockPool(handler(2, 12));
+test('ensureDailyBrief: a ready brief is final for the day (no refresh, however many items arrive later)', async () => {
+  const m = mockPool((text) => (/SELECT status/.test(text) ? { rows: [{ status: 'ready' }] } : { rows: [{ n: 99 }] }));
   try {
     assert.deepEqual(await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true }), { ran: false, reason: 'up_to_date' });
-  } finally { m.restore(); }
-  m = mockPool(handler(60, 24)); // the evidence cap (24) is the ceiling: nothing to gain
-  try {
-    assert.deepEqual(await dailyBrief.ensureDailyBrief(AT_1100_KST, { discoveryDone: true }), { ran: false, reason: 'up_to_date' });
+    assert.ok(!m.calls.some((c) => /INSERT INTO daily_briefs/.test(c.text)));
   } finally { m.restore(); }
 });
 
-test('pipelineIncident: a brief that is generating right now (e.g. the noon refresh) is not an incident, a stuck one is', () => {
+test('pipelineIncident: a brief that is generating right now (e.g. a retry) is not an incident, a stuck one is', () => {
   const now = new Date('2026-10-25T04:31:00Z').getTime();
   const done = { completedToday: true, completedAt: new Date(now - 374 * 60000) };
   assert.equal(guard.pipelineIncident(done, { state: 'generating', updatedAt: new Date(now - 5 * 1000) }, { hourKst: 13, now }), null);

@@ -45,7 +45,7 @@ function pipelineIncident(status, brief, { hourKst, now = Date.now() } = {}) {
     return null;
   }
   if (brief.state === 'ready') return null;
-  // A generation that is running right now (the noon refresh flips a ready brief to 'generating' in the same cron call) is not an incident;
+  // A generation that is running right now (a retry flips the brief to 'generating' in the same cron call) is not an incident;
   // only one whose row has not moved for longer than the generation lease is.
   if (brief.state === 'generating' && brief.updatedAt && now - new Date(brief.updatedAt).getTime() < GENERATION_LEASE_MS) return null;
   const since = status.completedAt ? now - new Date(status.completedAt).getTime() : 0;

@@ -111,28 +111,3 @@ test('queueDailyBriefGeneration(non-force): the scheduled path is not subject to
   }
 });
 
-test('maybeRefreshDailyBriefAtNoon: skips before noon KST and when the brief was already completed after noon', async () => {
-  const before = mockPool(() => ({ rows: [] }));
-  try {
-    const r = await dailyBriefModule.maybeRefreshDailyBriefAtNoon(new Date('2026-10-23T02:00:00Z')); // 11:00 KST
-    assert.deepEqual(r, { ran: false, reason: 'before_noon' });
-    assert.equal(before.calls.length, 0);
-  } finally { before.restore(); }
-  const done = mockPool(() => ({ rows: [{ status: 'ready', completed_at: '2026-10-23T03:30:00Z' }] }));
-  try {
-    const r = await dailyBriefModule.maybeRefreshDailyBriefAtNoon(new Date('2026-10-23T04:07:00Z')); // 13:07 KST
-    assert.equal(r.reason, 'already_refreshed');
-  } finally { done.restore(); }
-});
-
-test('maybeRefreshDailyBriefAtNoon: a ready morning brief is force-regenerated after noon KST', async () => {
-  const { calls, restore } = mockPool((text, params, n) => (n === 1
-    ? { rows: [{ status: 'ready', completed_at: '2026-10-23T00:38:00Z' }] }
-    : n === 2 ? { rows: [] } : { rows: [{ brief_date: '2026-10-23', status: 'ready', item_count: 3, attempt_count: 1 }] }));
-  try {
-    const r = await dailyBriefModule.maybeRefreshDailyBriefAtNoon(new Date('2026-10-23T03:07:00Z')); // 12:07 KST
-    assert.equal(r.ran, false);
-    assert.match(calls[1].text, /INSERT INTO daily_briefs/);
-    assert.equal(calls[1].params[4], true); // force
-  } finally { restore(); }
-});

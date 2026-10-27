@@ -50,8 +50,9 @@ async function runDailyCron(chainDepth) {
   const steps = [
     // FIRST, so it gets the whole time budget. Sliced: one call cannot run all sources (the function time limit), so each call advances a persisted cursor
     ['daily_discovery', () => dailyDiscovery.runDailyDiscoverySliced({ budgetMs: Math.max(20000, Math.min(200000, 250000 - (Date.now() - started))) })],
-    ['collections', () => runDueCollections()],
-    ['reference_collections', () => require('./referenceCollect').runReferenceCollections()],
+    // collection happens once a day, in the morning pass: these only run until today's discovery has completed
+    ['collections', async () => ((await dailyDiscovery.getDailyDiscoveryStatus()).completedToday ? { ran: false, reason: 'collected_today' } : runDueCollections())],
+    ['reference_collections', async () => ((await dailyDiscovery.getDailyDiscoveryStatus()).completedToday ? { ran: false, reason: 'collected_today' } : require('./referenceCollect').runReferenceCollections())],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
     // news held for lack of a publication date: read the page, set the date, publish (see aiDraft.js date gate)
     ['undated_news_dates', () => require('./publishedDates').fillHeldNewsDates()],
@@ -68,9 +69,8 @@ async function runDailyCron(chainDepth) {
       }
       return total;
     }],
-    // the headline is guaranteed: generated when collection is done (or at the 10:00 KST deadline), refreshed when more items were published
+    // the headline is guaranteed: generated once, when collection is done (or at the 10:00 KST deadline); never refreshed
     ['ensure_daily_brief', async () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: (await dailyDiscovery.getDailyDiscoveryStatus()).completedToday })],
-    ['noon_brief_refresh', () => dailyBrief.maybeRefreshDailyBriefAtNoon()],
     ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
     ['entity_maintenance', () => require('./entityMaintenance').maybeRunEntityMaintenance()],
     ['verification', () => require('./verificationRoutine').runQueue()],
