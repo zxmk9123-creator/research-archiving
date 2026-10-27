@@ -1361,18 +1361,18 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 ------------------------------------------------------------------------ */
 @media (max-width: 720px) {
   html { -webkit-text-size-adjust: 100%; }
-  .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; padding: 10px 14px; }
-  .brand { grid-column: 1; min-width: 0; font-size: 15px; }
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 14px; column-gap: 16px; padding: 16px 16px 8px; }
+  .brand { grid-column: 1; min-width: 0; font-size: 16px; }
   .topbar-guide-link { grid-column: 2; grid-row: 1; }
   .topbar nav {
     grid-column: 1 / -1; grid-row: 2; justify-self: stretch; gap: 2px;
-    margin: 0 -14px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    margin: 0 -16px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
   .topbar nav::-webkit-scrollbar { display: none; }
   .nav-group, .topbar nav a, .nav-admin-auth, .nav-divider { flex-shrink: 0; white-space: nowrap; }
   .topbar nav a { padding: 8px 11px; }
-  .daily-status-bar { right: 14px; }
-  #app { min-width: 0; padding: var(--sp-4) 14px var(--sp-7); }
+  .daily-status-bar { right: 16px; }
+  #app { min-width: 0; padding: var(--sp-5) 16px var(--sp-7); }
   #app img, #app video, #app canvas, #app svg { max-width: 100%; }
   #app pre, #app code { overflow-wrap: anywhere; }
   /* wide data tables scroll inside their own box instead of widening the page */
@@ -1409,4 +1409,18 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   }
   .archive-month-nav::-webkit-scrollbar { display: none; }
   .archive-month-nav-item { flex: 0 0 auto; gap: 6px; padding: 7px 12px; border-radius: 999px; background: var(--surface-sunken); font-size: 13px; font-weight: 600; white-space: nowrap; }
+}
+
+/* Mobile type scale and rhythm: titles and ledes were desktop-sized (30px / 15px) and sections 40px apart. */
+@media (max-width: 640px) {
+  h1, .headlines-header h1 { font-size: 24px; line-height: 32px; }
+  h2 { font-size: 18px; }
+  .page-lede, .headlines-subtitle { font-size: 13px; line-height: 19px; color: var(--text-tertiary); margin-bottom: var(--sp-5); }
+  .headlines-subtitle { margin: 6px 0 0; }
+  .section { margin-top: var(--sp-6); }
+  .section-header { margin-bottom: var(--sp-2); }
+  .section-header h2 { margin-bottom: 0; }
+  .headline-lead h2 { font-size: 17px; }
+  .headline-lead > p:last-child { font-size: 14px; line-height: 22px; }
+  .topbar nav a { font-size: 14px; }
 }
