@@ -239,6 +239,12 @@ async function getDailyDiscoveryStatus(now = new Date()) {
 // the single-process run does. Resuming never starts over: the cursor lives in scheduler_jobs (job 'daily_discovery_cursor').
 const CURSOR_JOB = 'daily_discovery_cursor';
 const SOURCE_TIMEOUT_MS = 90000;
+// Resolves with `fallback` if `promise` has not settled in `ms` (the timer is cleared otherwise). The slow call itself is not cancelled:
+// it may still finish writing its own rows later (they are deduplicated by URL), but the slice no longer waits for it.
+function withTimeout(promise, ms, fallback) {
+  let timer;
+  return Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })]).finally(() => clearTimeout(timer));
+}
 const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
 
 // Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
@@ -277,10 +283,11 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
   // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
   // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
-  const runOne = (idx) => Promise.race([
+  const runOne = (idx) => withTimeout(
     collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx])),
-    new Promise((resolve) => setTimeout(() => resolve({ sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }), SOURCE_TIMEOUT_MS).unref()),
-  ]);
+    SOURCE_TIMEOUT_MS,
+    { sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }
+  );
   const leaseMs = budgetMs + 60000;
   const step = await advanceDiscovery(saved, srcRows.length, runOne, {
     budgetMs,
@@ -294,6 +301,7 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
 }
 
 module.exports = {
+  withTimeout,
   advanceDiscovery,
   runDailyDiscoverySliced,
   kstPartsOf,

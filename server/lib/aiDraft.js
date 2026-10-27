@@ -385,7 +385,14 @@ function sanitizeError(err) {
 // Safe to call repeatedly: it only ever updates the same row by id, so a
 // retry can never create a duplicate item. Never throws — always resolves
 // with { ok, error? } so a fire-and-forget caller can't crash on it.
+// ids this instance is generating right now: the stalled-draft requeue must not start a second generation for them
+const generatingNow = new Set();
 async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallback, extractedText) {
+  generatingNow.add(itemId);
+  try { return await generateAiDraftForItemInner(itemId, providerFn, extractedText); } finally { generatingNow.delete(itemId); }
+}
+
+async function generateAiDraftForItemInner(itemId, providerFn, extractedText) {
   const { rows } = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
   const item = rows[0];
   if (!item) return { ok: false, error: 'item not found' };
@@ -402,15 +409,25 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
     const feedbackExamples = selectFeedbackExamples(item, feedbackCandidates);
     const userPrompt = buildUserPrompt(item, taxonomy, extractedText, buildFeedbackBlock(feedbackExamples));
     providerCallStartedAt = Date.now();
-    const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
+    const callOnce = async () => {
+      const result = await limitAiCall(() => providerFn({ system: SYSTEM_PROMPT, user: userPrompt }));
+      // providerFn is callProviderWithFallback by default ({ text, provider }),
+      // but a caller (e.g. a test, or an explicit single-provider override)
+      // may still pass a function returning a bare string — accept both
+      // without changing the output contract.
+      const raw = typeof result === 'string' ? result : result.text;
+      return { draft: parseDraftResponse(raw, taxonomy), usedProvider: typeof result === 'string' ? null : result.provider };
+    };
+    // A malformed JSON reply is the most common failure (174 rows in production) and usually not repeated: one immediate retry
+    // keeps the material from waiting for the next autopilot round. Provider/transport errors are NOT retried here (the provider
+    // chain already falls back, and the autopilot retries later).
+    let outcome;
+    try { outcome = await callOnce(); } catch (firstErr) {
+      if (!/not valid JSON/.test(String(firstErr && firstErr.message))) throw firstErr;
+      outcome = await callOnce();
+    }
+    const { draft, usedProvider } = outcome;
     const latencyMs = Date.now() - providerCallStartedAt;
-    // providerFn is callProviderWithFallback by default ({ text, provider }),
-    // but a caller (e.g. a test, or an explicit single-provider override)
-    // may still pass a function returning a bare string — accept both
-    // without changing the output contract.
-    const raw = typeof result === 'string' ? result : result.text;
-    const usedProvider = typeof result === 'string' ? null : result.provider;
-    const draft = parseDraftResponse(raw, taxonomy);
 
     await pool.query(
       `UPDATE items SET
@@ -447,7 +464,9 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
     const failureType = err.failureType || null;
     console.error(`AI draft generation failed for item ${itemId}: ${reason} failure_type=${failureType || 'none'} latency_ms=${latencyMs}`);
     await pool.query(
-      `UPDATE items SET ai_status = 'failed', ai_error = $1, ai_failure_type = $2, ai_latency_ms = $3 WHERE id = $4`,
+      // only while still pending: a concurrent run for the same item (another instance's requeue) may already have completed it, and a
+      // late failure must not turn that finished draft into 'failed'
+      `UPDATE items SET ai_status = 'failed', ai_error = $1, ai_failure_type = $2, ai_latency_ms = $3 WHERE id = $4 AND ai_status = 'pending'`,
       [reason, failureType, latencyMs, itemId]
     );
     return { ok: false, error: reason };
@@ -477,7 +496,9 @@ async function generateAiDraftForItem(itemId, providerFn = callProviderWithFallb
 // unstick a small, occasional backlog, not block startup on it.
 async function requeueStalledPendingDrafts({ olderThanMinutes = 0 } = {}) {
   // olderThanMinutes: a cron run may overlap another instance's in-flight call, so it only takes rows that have been waiting a while
-  const { rows } = await pool.query(`SELECT id FROM items WHERE ai_status = 'pending' AND collected_at < now() - make_interval(mins => $1)`, [olderThanMinutes]);
+  // bounded per call (each requeue is an AI call); an item this instance is already generating is left alone
+  const { rows: pending } = await pool.query(`SELECT id FROM items WHERE ai_status = 'pending' AND collected_at < now() - make_interval(mins => $1) ORDER BY id LIMIT 10`, [olderThanMinutes]);
+  const rows = pending.filter((r) => !generatingNow.has(r.id));
   if (!rows.length) return { requeued: 0 };
   console.log(`ai_draft requeuing ${rows.length} item(s) stuck at ai_status='pending'`);
   for (const { id } of rows) {
@@ -536,6 +557,9 @@ async function applyAiDraftIfEligible(itemId) {
   if (!item || item.ai_status !== 'completed' || item.ai_eligible !== true || item.ai_qa_decision !== 'PASS') {
     return { archived: false };
   }
+  // Only an untouched Draft may be auto-published: this path replaces the item's sector/usage tags and its summary/insight, so a
+  // retry or re-run must never reach an item a person already Published, Archived or restored (auto_review = 'human').
+  if ((item.status && item.status !== 'Draft') || item.auto_review === 'human') return { archived: false };
   await clearGateHold(itemId);
 
   await pool.query('DELETE FROM item_sectors WHERE item_id = $1', [itemId]);
@@ -606,10 +630,14 @@ async function applyAiDraftIfEligible(itemId) {
     return { archived: false };
   }
 
-  await pool.query(
-    `UPDATE items SET summary = $1, insight = $2, content_category = $3, status = 'Published' WHERE id = $4`,
+  // Conditional, not just checked above: a concurrent run (an abandoned timed-out source job, the autopilot, a person in Review) may have
+  // published, archived or taken over this item since it was read. Losing that race means no overwrite and no second round of side effects.
+  const published = await pool.query(
+    `UPDATE items SET summary = $1, insight = $2, content_category = $3, status = 'Published'
+      WHERE id = $4 AND status = 'Draft' AND auto_review IS DISTINCT FROM 'human' RETURNING id`,
     [fixTerms(item.ai_summary), fixTerms(item.ai_insight), deriveContentCategory(item.type), itemId]
   );
+  if (published && published.rowCount === 0) return { archived: false };
 
   // Auto company intake (tagging + candidate/promotion); never blocks publishing.
   await recordCompanyMentions(item);

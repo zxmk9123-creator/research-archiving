@@ -1091,3 +1091,87 @@ test('requeueStalledPendingDrafts: fires generateAiDraftForItem per row without 
     restore();
   }
 });
+
+// --- ingestion-audit regressions ---
+
+test('applyAiDraftIfEligible: never touches an item a person already Published/Archived or restored (no tag/summary overwrite, no status flip)', async () => {
+  for (const row of [{ status: 'Published' }, { status: 'Archived' }, { status: 'Draft', auto_review: 'human' }]) {
+    const { calls, restore } = mockPool([
+      ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 1, ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS', ...row }] })],
+    ]);
+    try {
+      assert.deepEqual(await applyAiDraftIfEligible(1), { archived: false });
+      assert.equal(calls.filter((c) => /DELETE FROM item_sectors|UPDATE items SET summary/.test(c.text)).length, 0, JSON.stringify(row));
+    } finally { restore(); }
+  }
+});
+
+test('generateAiDraftForItem: one malformed-JSON reply is retried once and the draft is saved; provider errors are not retried here', async () => {
+  let n = 0;
+  const flaky = () => Promise.resolve(++n === 1 ? { text: 'not json at all', provider: 'p' } : { text: fullResponse(), provider: 'p' });
+  let m = mockTaxonomyAnd(() => ({ rows: [{ id: 1, title: 't', summary: 's' }] }));
+  try {
+    assert.equal((await generateAiDraftForItem(1, flaky)).ok, true);
+    assert.equal(n, 2);
+    assert.ok(m.calls.some((c) => c.text.includes("ai_status = 'completed'")));
+  } finally { m.restore(); }
+  let k = 0;
+  const down = () => { k++; return Promise.reject(Object.assign(new Error('AI provider request failed (502)'), { failureType: 'server_error' })); };
+  m = mockTaxonomyAnd(() => ({ rows: [{ id: 1, title: 't', summary: 's' }] }));
+  try {
+    assert.equal((await generateAiDraftForItem(1, down)).ok, false);
+    assert.equal(k, 1);
+    assert.ok(m.calls.some((c) => c.text.includes("ai_status = 'failed'")));
+  } finally { m.restore(); }
+});
+
+test('requeueStalledPendingDrafts: leaves alone an item this instance is generating right now, and takes at most 10 rows per call', async () => {
+  const { calls, restore } = mockPool([
+    ["ai_status = 'pending' AND collected_at <", () => ({ rows: [{ id: 1 }, { id: 2 }] })],
+    ['SELECT * FROM items WHERE id', () => ({ rows: [{ id: 1, title: 't', summary: 's' }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '식용' }] })],
+  ]);
+  try {
+    const slow = () => new Promise((resolve) => setTimeout(() => resolve({ text: fullResponse(), provider: 'p' }), 60));
+    const running = [generateAiDraftForItem(1, slow), generateAiDraftForItem(2, slow)];
+    await new Promise((r) => setTimeout(r, 15)); // both are inside the provider call
+    const { requeueStalledPendingDrafts } = require('../server/lib/aiDraft');
+    assert.deepEqual(await requeueStalledPendingDrafts({ olderThanMinutes: 20 }), { requeued: 0 });
+    assert.match(calls.find((c) => c.text.includes("ai_status = 'pending' AND collected_at <")).text, /LIMIT 10/);
+    await Promise.all(running);
+  } finally { restore(); }
+});
+
+test('applyAiDraftIfEligible: losing the publish race (the conditional UPDATE matches no row) reports not-published and runs no follow-up work', async () => {
+  const { calls, restore } = mockPool([
+    ['SELECT * FROM items WHERE id', () => ({
+      rows: [{
+        id: 42, status: 'Draft', ai_status: 'completed', ai_eligible: true, ai_qa_decision: 'PASS',
+        source_url: 'https://example.org/report', title: '보도자료 제목',
+        ai_summary: '팜유 가격이 전월 대비 5% 상승했다.', ai_insight: '인사이트', type: '보고서',
+        ai_suggested_sectors: [3], ai_suggested_usages: [7],
+      }],
+    })],
+    ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
+    ['UPDATE items SET summary', () => ({ rows: [], rowCount: 0 })],
+  ]);
+  try {
+    assert.deepEqual(await applyAiDraftIfEligible(42), { archived: false });
+    const publish = calls.find((c) => c.text.includes('UPDATE items SET summary'));
+    assert.match(publish.text, /status = 'Draft'/);
+    assert.match(publish.text, /auto_review IS DISTINCT FROM 'human'/);
+    assert.ok(!calls.some((c) => /company_mentions|item_facts|INSERT INTO item_companies/i.test(c.text)), 'no company/facts work after a lost race');
+  } finally { restore(); }
+});
+
+test('generateAiDraftForItem: a late failure only marks the item failed while it is still pending (never downgrades a draft another run completed)', async () => {
+  const { calls, restore } = mockTaxonomyAnd(() => ({ rows: [{ id: 1, title: 't', summary: 's' }] }));
+  try {
+    const result = await generateAiDraftForItem(1, () => Promise.reject(new Error('boom')));
+    assert.equal(result.ok, false);
+    const failed = calls.find((c) => c.text.includes("ai_status = 'failed'"));
+    assert.match(failed.text, /WHERE id = \$4 AND ai_status = 'pending'/);
+  } finally { restore(); }
+});

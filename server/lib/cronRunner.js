@@ -15,6 +15,10 @@ function isCronAuthorized(req, env = process.env) {
   return given.length === expected.length && crypto.timingSafeEqual(given, expected);
 }
 
+// Steps a chained hop runs. stalled_drafts is cheap and is what recovers the AI draft a killed hop left at 'pending' (the normal call that
+// would run it is budget-skipped while discovery is using the time).
+const CHAIN_STEPS = new Set(['daily_discovery', 'stalled_drafts', 'ensure_daily_brief', 'pipeline_watchdog']);
+
 // How one step's return value is reported in the response.
 function summarize(out) {
   if (Array.isArray(out)) {
@@ -55,7 +59,7 @@ async function runDailyCron(chainDepth) {
     ['reference_collections', async () => ((await dailyDiscovery.getDailyDiscoveryStatus()).completedToday ? { ran: false, reason: 'collected_today' } : require('./referenceCollect').runReferenceCollections())],
     ['stalled_drafts', () => requeueStalledPendingDrafts({ olderThanMinutes: 20 })],
     // news held for lack of a publication date: read the page, set the date, publish (see aiDraft.js date gate)
-    ['undated_news_dates', () => require('./publishedDates').fillHeldNewsDates()],
+    ['undated_news_dates', () => require('./publishedDates').fillHeldNewsDates({ budgetMs: Math.max(0, Math.min(60000, 265000 - (Date.now() - started))) })],
     // the long-lived server ran this every ten minutes with a small AI budget; one hourly call needs the same throughput, so it works in rounds
     ['review_autopilot', async () => {
       const autopilot = require('./reviewAutopilot');
@@ -85,7 +89,7 @@ async function runDailyCron(chainDepth) {
   ];
   // the scope-term cache that feeds the relevance filter is loaded at boot on a long-lived server; a fresh function instance starts empty
   await refreshScopeTerms().catch((err) => console.error('scope terms load failed', err));
-  const results = await runSteps(steps, { started, budgetMs: BUDGET_MS, isChain: chainDepth > 0, chainSteps: new Set(['daily_discovery', 'ensure_daily_brief', 'pipeline_watchdog']) });
+  const results = await runSteps(steps, { started, budgetMs: BUDGET_MS, isChain: chainDepth > 0, chainSteps: CHAIN_STEPS });
   // discovery is not finished: call the next hop now instead of waiting for the next external trigger
   if (guard.shouldChain(results.daily_discovery, chainDepth)) results.chained = await guard.chainNext(chainDepth + 1);
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
@@ -107,4 +111,4 @@ function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
   };
 }
 
-module.exports = { isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler };
+module.exports = { isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };

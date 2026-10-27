@@ -85,3 +85,9 @@ test('pipelineIncident: a brief that is generating right now (e.g. a retry) is n
   assert.match(guard.pipelineIncident(done, { state: 'generating', updatedAt: new Date(now - 40 * 60000) }, { hourKst: 13, now }), /headline not ready/);
   assert.match(guard.pipelineIncident(done, { state: 'failed', updatedAt: new Date(now - 1000) }, { hourKst: 13, now }), /headline not ready/);
 });
+
+test('chained hops also run stalled_drafts: the normal call that would is budget-skipped while discovery uses the time (production run 49: 280s elapsed, every later step skipped_budget)', () => {
+  const { CHAIN_STEPS } = require('../server/lib/cronRunner');
+  for (const step of ['daily_discovery', 'stalled_drafts', 'ensure_daily_brief', 'pipeline_watchdog']) assert.ok(CHAIN_STEPS.has(step), step);
+  assert.ok(!CHAIN_STEPS.has('review_autopilot'), 'heavy steps stay out of a hop');
+});

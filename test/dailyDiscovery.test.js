@@ -300,6 +300,8 @@ test('collectDailyDiscoveryNow: an eligible, classified candidate reaches Publis
     ['SELECT id, name FROM sectors', () => ({ rows: [{ id: 3, name: '팜유' }] })],
     ['SELECT id, name FROM usages', () => ({ rows: [{ id: 3, name: '시장 전망' }] })],
     ['SELECT EXISTS', () => ({ rows: [{ has_sector: true, has_usage: true }] })],
+    // the publish UPDATE is conditional on the row still being an untouched Draft; a real database reports the matched row
+    ['UPDATE items SET summary', () => ({ rows: [{ id: 555 }], rowCount: 1 })],
   ]);
   const prevKey = process.env.FREELLMAPI_API_KEY;
   const prevUrl = process.env.FREELLMAPI_BASE_URL;
@@ -443,3 +445,11 @@ test('collectDailyDiscoveryNow: the exact same old publication date from the aca
     restore();
   }
 }));
+
+test('withTimeout: a source that does not settle in time becomes a failed result instead of holding the slice; a fast one passes through', async () => {
+  const { withTimeout } = require('../server/lib/dailyDiscovery');
+  const fallback = { sourceId: 7, ok: false, error: 'source_timeout' };
+  assert.deepEqual(await withTimeout(new Promise(() => {}), 20, fallback), fallback);
+  assert.deepEqual(await withTimeout(Promise.resolve({ ok: true }), 1000, fallback), { ok: true });
+  await assert.rejects(withTimeout(Promise.reject(new Error('boom')), 1000, fallback), /boom/);
+});
