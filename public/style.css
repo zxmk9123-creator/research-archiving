@@ -1378,3 +1378,35 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   /* wide data tables scroll inside their own box instead of widening the page */
   .sources-table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* ---------------------------------------------------------------------
+   Mobile list (<= 640px), Toss-style: one compact row per item (small
+   rounded thumbnail left, 2-line title + one meta line right, hairline
+   divider) instead of tall image cards, so 5-6 items fit per screen; month
+   headers become large section titles; the month jump becomes a swipeable
+   chip row (the sidebar is hidden below 900px).
+------------------------------------------------------------------------ */
+@media (max-width: 640px) {
+  .grid, .home-carousel-slide { gap: 0; }
+  .card { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .card-media { width: 84px; aspect-ratio: 1; border-radius: 12px; }
+  .card-media-fallback { font-size: 11px; padding: 6px; }
+  .card-hover-summary, .card-summary-mobile { display: none !important; }
+  .card-body { min-width: 0; padding-top: 0; }
+  .card-eyebrow { margin-bottom: 4px; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
+  .card-eyebrow .pill { margin: 0; padding: 2px 7px; font-size: 11px; }
+  .card-eyebrow .tag, .card-eyebrow .pill { flex-shrink: 0; white-space: nowrap; }
+  .card-eyebrow .card-save-btn { margin-left: auto; flex-shrink: 0; white-space: nowrap; padding: 2px 6px; font-size: 11px; }
+  .card-eyebrow .card-team-pick-btn { display: none; } /* still available on the detail page */
+  .card h3 { font-size: 15px; line-height: 21px; margin-bottom: 2px; }
+  .card .meta { margin-top: 2px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .home-carousel-nav { margin-top: 0; align-self: center; width: 28px; height: 28px; }
+  .archive-month-divider { font-size: 18px; font-weight: 800; color: var(--text); margin: 28px 0 2px; padding-top: 0; border-top: none; letter-spacing: -.02em; }
+  .archive-layout { flex-direction: column; gap: var(--sp-3); }
+  .archive-month-nav {
+    display: flex; flex-direction: row; order: -1; position: static; flex: none; width: 100%; max-height: none;
+    overflow-x: auto; overflow-y: hidden; border-left: none; padding: 0; gap: 8px; scrollbar-width: none;
+  }
+  .archive-month-nav::-webkit-scrollbar { display: none; }
+  .archive-month-nav-item { flex: 0 0 auto; gap: 6px; padding: 7px 12px; border-radius: 999px; background: var(--surface-sunken); font-size: 13px; font-weight: 600; white-space: nowrap; }
+}
