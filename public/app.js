@@ -1524,9 +1524,13 @@ function aiSearchSourcesHtml(sources) {
 // bar, just what's genuinely happening while the one fetch is in flight.
 const AI_SEARCH_STATUS_STEPS = ['Searching Research Archive', 'Analyzing relevant sources', 'Preparing evidence'];
 let aiSearchStatusTimer = null;
+// The in-flight search request (one at a time). Resetting the conversation aborts it, so the server stops its AI calls too
+// (routes/search.js aborts the upstream provider call when the client disconnects) and a new search can start at once.
+let aiSearchAbort = null;
 
 function startAiSearchStatus(moduleEl, statusEl) {
   let i = 0;
+  clearInterval(aiSearchStatusTimer);
   statusEl.textContent = AI_SEARCH_STATUS_STEPS[0];
   moduleEl.classList.add('is-searching');
   setRexSearching(moduleEl, true);
@@ -1588,6 +1592,11 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
   bodyEl.innerHTML = '<p class="ai-search-status"></p>';
   const statusEl = bodyEl.querySelector('.ai-search-status');
   if (submitBtn) submitBtn.disabled = true;
+  const controller = new AbortController();
+  aiSearchAbort = controller;
+  // reset must be usable while a search is running (it is what cancels it), even before the first answer exists
+  const resetBtnNow = document.getElementById('ai-search-reset-btn');
+  if (resetBtnNow) resetBtnNow.disabled = false;
   startAiSearchStatus(moduleEl, statusEl);
   // Follow-up questions only — the opening question's turn sits right
   // where the user already is (just below the search box they typed
@@ -1630,6 +1639,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      signal: controller.signal,
       body: JSON.stringify({ question, history: aiSearchHistory, ...(aiSearchContext ? { context: aiSearchContext } : {}), ...(scope ? { scope } : {}) }),
     });
     const contentType = res.headers.get('content-type') || '';
@@ -1708,10 +1718,18 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
       }
     }
   } catch (err) {
+    // aborted by the conversation reset: the turn is already gone from the page, nothing to report
+    if (controller.signal.aborted) return;
     bodyEl.innerHTML = aiSearchErrorHtml('AI 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
   } finally {
-    stopAiSearchStatus(moduleEl);
-    if (submitBtn) submitBtn.disabled = false;
+    // an aborted run must not touch the state of a newer search that already started after the reset
+    if (aiSearchAbort === controller) {
+      aiSearchAbort = null;
+      stopAiSearchStatus(moduleEl);
+      if (submitBtn) submitBtn.disabled = false;
+      const rb = document.getElementById('ai-search-reset-btn');
+      if (rb) rb.disabled = aiSearchHistory.length === 0;
+    }
   }
 }
 
@@ -1799,6 +1817,10 @@ function bindAiSearchForm() {
   const resetBtn = document.getElementById('ai-search-reset-btn');
   if (resetBtn) {
     resetBtn.onclick = () => {
+      // stop the request that is still running (client side now; the server aborts its AI calls on disconnect) and free the form
+      if (aiSearchAbort) { aiSearchAbort.abort(); aiSearchAbort = null; }
+      stopAiSearchStatus(document.getElementById('ai-search'));
+      if (submitBtn) submitBtn.disabled = false;
       aiSearchHistory = [];
       aiSearchContext = null;
       aiSearchTurnsHtml = [];
