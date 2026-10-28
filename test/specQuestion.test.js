@@ -123,7 +123,7 @@ test('Umami analytics: script in index.html with auto-track off, app.js reports 
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   assert.match(html, /cloud\.umami\.is\/script\.js/);
-  assert.match(html, /data-website-id="a67938f9-6234-43bb-9b48-d4e43825b48b"/);
+  assert.match(html, /data-website-id="4378a16c-54b1-42fa-8d19-0490198566d0"/);
   assert.match(html, /data-auto-track="false"/);
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.ok(app.includes('function trackPageview') && app.includes('trackPageview(path, param);'));
