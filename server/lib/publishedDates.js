@@ -102,8 +102,9 @@ function dateFromCheerio($, now = new Date()) {
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-// Biomass Magazine renders its article as a JSON payload whose FIRST publishedAt is the article's own (createdAt differs, related-article cards
-// carry their own). Accepted only when the same calendar day is also printed on the page ("October 19, 2026"); otherwise it stays unresolved.
+// Biomass Magazine (and its BBI International sister sites Biodiesel Magazine and Ethanol Producer Magazine, same CMS payload) render the
+// article as a JSON payload whose FIRST publishedAt is the article's own (createdAt differs, related-article cards carry their own).
+// Accepted only when the same calendar day is also printed on the page ("October 19, 2026"); otherwise it stays unresolved.
 function dateFromBiomassJson(html, text, now = new Date()) {
   const m = String(html || '').match(/"publishedAt"\s*:\s*"([^"]+)"/);
   if (!m) return null;
@@ -128,12 +129,15 @@ function printedDateInText(date, text) {
 // `corroborated`: the same day is also printed on the page (a metadata date alone can be a template or a stale field).
 function dateFromPage(html, url, now = new Date()) {
   const $ = require('cheerio').load(String(html || '').slice(0, 600000));
-  const text = $('body').text().replace(/\s+/g, ' ');
+  // visible text only: script/style contents (JSON payloads, tracking snippets) would make a metadata date look "printed on the page"
+  const $visible = require('cheerio').load(String(html || '').slice(0, 600000));
+  $visible('script, style, noscript, template').remove();
+  const text = $visible('body').text().replace(/\s+/g, ' ');
   const generic = dateFromCheerioDetailed($, now);
   if (generic) return { date: generic.date, method: generic.evidence.startsWith('ld+json') ? 'page_ld_json' : 'page_meta', evidence: generic.evidence, corroborated: printedDateInText(generic.date, text) };
   let host = '';
   try { host = new URL(url).hostname; } catch (_) { /* no host */ }
-  if (/(^|\.)biomassmagazine\.com$/i.test(host)) {
+  if (/(^|\.)(biomassmagazine|biodieselmagazine|ethanolproducer)\.com$/i.test(host)) {
     const b = dateFromBiomassJson(html, text, now);
     if (b) return { date: b.date, method: 'biomass_publishedAt', evidence: b.evidence, corroborated: true };
   }
@@ -213,8 +217,9 @@ const TRANSIENT_STATUS = (n) => n === 408 || n === 425 || n === 429 || n >= 500;
 
 // -> { outcome: 'dated' | 'transient' | 'permanent', date?, precision?, method?, evidence?, reason?, httpStatus? }
 // Order: a full date in the URL (no fetch) > the page's own publication metadata > a month-only URL date (low confidence, precision 'month').
-async function resolvePublicationDate(url, { safeFetch, readResponseText, now = new Date() } = {}) {
-  const fromUrl = dateFromUrlDetailed(url, now);
+async function resolvePublicationDate(url, { safeFetch, readResponseText, now = new Date(), pageOnly = false } = {}) {
+  // pageOnly: ignore any date in the URL and read only the page (used to cross-check a URL date against the page's own metadata)
+  const fromUrl = pageOnly ? null : dateFromUrlDetailed(url, now);
   if (fromUrl && fromUrl.precision === 'day') return { outcome: 'dated', date: fromUrl.date, precision: 'day', method: fromUrl.method, evidence: `url:${String(url).slice(0, 120)}` };
   const monthOnly = () => (fromUrl ? { outcome: 'dated', date: fromUrl.date, precision: 'month', method: fromUrl.method, evidence: `url month only:${String(url).slice(0, 120)}` } : null);
   if (isUnreadableSocial(url)) return monthOnly() || { outcome: 'permanent', reason: 'social_host_unreadable' };

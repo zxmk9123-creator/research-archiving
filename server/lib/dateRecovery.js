@@ -28,21 +28,40 @@ function settledPermanently(r) {
     && !String(r.gate_hold_rule_version).startsWith('undated-news-v2:retry:');
 }
 
+const dayDiff = (a, b) => Math.round(Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+// compact 8-digit URL dates (20260915) can be an id; a separated form (/2026/09/15/, 2026-09-15) is a date by shape
+const SEPARATED_URL_DATE = /(?<![0-9])20[12]\d[\/_.-](0[1-9]|1[0-2])[\/_.-](0[1-9]|[12]\d|3[01])(?![0-9])/;
+
 async function classify(r, { now, deps }) {
   const base = {
     id: r.id, status: r.status, type: r.type, source_domain: domainOf(r.source_url), human_reviewed: r.auto_review === 'human',
-    current_hold: r.gate_hold_reason || null, candidate_date: null, corroboration: null, precision: null, method: null, evidence: null, outcome: null, reason: null,
-    social_post_timestamp: P.socialPostTimestamp(r.source_url, now), proposed_action: null, writes: 'none',
+    current_hold: r.gate_hold_reason || null, candidate_date: null, corroboration: null, cross_check: null, precision: null, method: null, evidence: null,
+    outcome: null, reason: null, social_post_timestamp: P.socialPostTimestamp(r.source_url, now), proposed_action: null, writes: 'none',
   };
   if (settledPermanently(r)) return { ...base, outcome: 'settled', reason: String(r.gate_hold_rule_version).slice('undated-news-v2:'.length), proposed_action: 'skip_settled_permanent' };
   const res = await P.resolvePublicationDate(r.source_url, { ...deps, now });
   const row = { ...base, outcome: res.outcome, reason: res.reason || null, method: res.method || null, evidence: res.evidence || null, precision: res.precision || null, candidate_date: res.date || null,
-    corroboration: res.method && res.method.startsWith('page_') ? (res.corroborated ? 'printed_on_page' : 'metadata_only') : (res.method ? 'url_pattern_or_rule' : null) };
+    corroboration: res.method && (res.method.startsWith('page_') || res.method === 'biomass_publishedAt') ? (res.corroborated ? 'printed_on_page' : 'metadata_only') : (res.method ? 'url_pattern_or_rule' : null) };
   if (res.outcome === 'dated') {
     if (res.precision === 'month') return { ...row, proposed_action: 'review_month_only_low_confidence' };
     if (!VERIFIED_METHODS.has(res.method)) return { ...row, proposed_action: 'review_unverified_method' };
+    // a date must not be later than the day the record was collected (a publication date cannot follow collection)
+    if (r.collected_at && res.date > new Date(new Date(r.collected_at).getTime() + 86400000).toISOString().slice(0, 10)) return { ...row, proposed_action: 'review_date_after_collection' };
     // a metadata date that the page itself does not print may be a template or stale field: shown for review, not proposed for writing
     if (res.method.startsWith('page_') && !res.corroborated) return { ...row, proposed_action: 'review_uncorroborated_metadata_date' };
+    if (res.method === 'url_date' || res.method === 'spglobal_url_mmddyy') {
+      // cross-check the URL date against the page's own publication metadata where the page can be read
+      const page = await P.resolvePublicationDate(r.source_url, { ...deps, now, pageOnly: true });
+      if (page.outcome === 'dated') {
+        const d = dayDiff(page.date, res.date);
+        row.cross_check = d === 0 ? `agrees:${page.method}` : d <= 1 ? `agrees_within_1_day:${page.method}=${page.date}` : `CONFLICT:${page.method}=${page.date}`;
+        if (d > 1) return { ...row, proposed_action: 'review_conflicting_dates' };
+      } else {
+        row.cross_check = `no_page_date:${page.outcome}:${page.reason || ''}`;
+        // no page evidence to confirm the URL date: only the separated shape or the verified S&P slug is trusted on its own
+        if (res.method === 'url_date' && !SEPARATED_URL_DATE.test(r.source_url)) return { ...row, proposed_action: 'review_url_date_uncorroborated' };
+      }
+    }
     // published_at is the only column a backfill would touch; summary, insight, tags and workflow status stay as they are, and for a
     // human-reviewed or already-published record nothing is re-judged or re-published
     return { ...row, proposed_action: 'set_published_at', writes: 'published_at only' };

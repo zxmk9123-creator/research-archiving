@@ -220,7 +220,46 @@ test('dry-run report: performs no database call, never fetches settled-permanent
     assert.equal(by[42].proposed_action, 'set_published_at', 'a legacy checked row is fetched once more');
     assert.equal(by[43].proposed_action, 'retry_later');
     assert.equal(by[44].proposed_action, 'review_uncorroborated_metadata_date');
-    assert.equal(fetches, 3, 'url-dated and settled rows cost no fetch');
+    assert.equal(fetches, 4, 'a URL-dated row costs one cross-check fetch; settled rows cost none');
+    assert.match(by[40].cross_check, /^agrees_within_1_day:page_meta/);
     for (const r of rep.rows) assert.ok(['none', 'published_at only'].includes(r.writes));
   } finally { pool.query = original; }
+});
+
+test('URL dates are cross-checked against the page: a conflict is held for review, an uncorroborated compact 8-digit date is not trusted alone, a separated date is', async () => {
+  const page = (d) => resp(200, html(`<meta property="article:published_time" content="${d}T00:00:00Z">`, ''));
+  const none = resp(200, html('<title>x</title>'));
+  const run = (rows, fetchFor) => buildDateRecoveryReport({ rows, now: NOW, deps: { safeFetch: async (url) => fetchFor(url), readResponseText: readBody } });
+  const rep = await run([
+    { id: 1, status: 'Draft', type: '뉴스', source_url: 'https://a.example/2026/10/20/story' },
+    { id: 2, status: 'Draft', type: '뉴스', source_url: 'https://b.example/news/20261020-story' },
+    { id: 3, status: 'Draft', type: '뉴스', source_url: 'https://c.example/2026/10/20/story' },
+    { id: 4, status: 'Draft', type: '뉴스', source_url: 'https://d.example/news/20261020-story' },
+    { id: 5, status: 'Draft', type: '뉴스', source_url: 'https://e.example/2026/10/20/story', collected_at: '2026-10-10T00:00:00Z' },
+  ], (url) => (/a\.example/.test(url) ? page('2026-09-01') : /d\.example/.test(url) ? page('2026-10-20') : none));
+  const by = Object.fromEntries(rep.rows.map((r) => [r.id, r]));
+  assert.equal(by[1].proposed_action, 'review_conflicting_dates');
+  assert.match(by[1].cross_check, /^CONFLICT/);
+  assert.equal(by[2].proposed_action, 'review_url_date_uncorroborated');
+  assert.equal(by[3].proposed_action, 'set_published_at');
+  assert.match(by[3].cross_check, /^no_page_date/);
+  assert.equal(by[4].proposed_action, 'set_published_at');
+  assert.equal(by[4].cross_check, 'agrees:page_meta');
+  assert.equal(by[5].proposed_action, 'review_date_after_collection', 'a publication date later than the collection day is not credible');
+});
+
+test('"printed on the page" means visible text: a date that only appears inside <script> JSON does not corroborate a metadata date', () => {
+  const only = P.dateFromPage(html('<meta property="article:published_time" content="2026-10-19T10:00:00Z"><script>{"d":"October 19, 2026"}</script>', 'no date shown'), 'https://n.example/a', NOW);
+  assert.deepEqual([only.date, only.corroborated], ['2026-10-19', false]);
+  const shown = P.dateFromPage(html('<meta property="article:published_time" content="2026-10-19T10:00:00Z">', 'Published October 19, 2026'), 'https://n.example/a', NOW);
+  assert.equal(shown.corroborated, true);
+});
+
+test('Biomass publishedAt rule also covers the BBI sister sites with the same CMS payload, with the same on-page corroboration', () => {
+  const payload = '{"createdAt":"2025-01-31T00:02:34Z","publishedAt":"2025-01-31T00:02:36Z"}';
+  for (const host of ['biodieselmagazine.com', 'ethanolproducer.com', 'biomassmagazine.com']) {
+    const r = P.dateFromPage(html(`<script>${payload}</script>`, 'January 31, 2025'), `https://www.${host}/articles/x`, NOW);
+    assert.deepEqual([r.date, r.method, r.corroborated], ['2025-01-31', 'biomass_publishedAt', true], host);
+  }
+  assert.equal(P.dateFromPage(html(`<script>${payload}</script>`, 'January 31, 2025'), 'https://example.com/articles/x', NOW), null);
 });
