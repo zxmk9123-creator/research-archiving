@@ -43,6 +43,19 @@ app.get('/api/cron/diagnose', async (req, res) => {
 
 app.get('/api/cron/daily', require('./lib/cronRunner').dailyHandler());
 
+// Self-heal on any visit: whoever opens the site while today's collection is unfinished and nobody is working on it starts the next hop
+// (see lib/pipelineGuardian.js). Throttled per instance and claimed once per 4 minutes across instances; never blocks or fails a request.
+if (process.env.VERCEL) {
+  let lastGuardianCheck = 0;
+  app.use('/api', (req, res, next) => {
+    if (!req.path.startsWith('/cron') && Date.now() - lastGuardianCheck > 60 * 1000) {
+      lastGuardianCheck = Date.now();
+      require('./lib/background').track(require('./lib/pipelineGuardian').maybeKickStalledPipeline().catch((err) => console.error('pipeline guardian failed:', err.message)));
+    }
+    next();
+  });
+}
+
 // A fresh function instance starts with an empty in-memory scope-term cache (loaded at boot on a long-lived server). The relevance
 // filter reads it synchronously, so make sure it is loaded, and at most ten minutes old, before any API work runs.
 if (process.env.VERCEL) {

@@ -205,7 +205,9 @@ async function maybeRunDailyDiscovery(now = new Date()) {
 // internal claim mechanics to the route layer.
 // state: completed | running (a slice holds the lease) | waiting (before the 08:00 KST hour, nothing started yet) |
 // stalled (started but no progress for STALL_MS, or nothing started by 08:00 KST) — the home light shows each differently.
-const STALL_MS = 45 * 60 * 1000;
+// No lease and no progress for this long = nobody is working on it (a hop hands over to the next within seconds). It was 45 minutes, which
+// kept the light green ("running") for most of an hour after a chain had already died; the self-heal in pipelineGuardian.js acts on this too.
+const STALL_MS = 5 * 60 * 1000;
 async function getDailyDiscoveryStatus(now = new Date()) {
   const { date: today, hour } = kstPartsOf(now);
   const { rows } = await pool.query(
@@ -227,6 +229,7 @@ async function getDailyDiscoveryStatus(now = new Date()) {
     completedToday,
     state,
     progress: total ? { done, total } : null,
+    lastProgressAt: cursor && cursor.savedAt ? new Date(cursor.savedAt).toISOString() : null,
     totals: completedToday ? row.last_totals : null,
     failedSources: completedToday ? (row.last_failed_sources || []) : [],
     completedAt: completedToday ? row.last_completed_at : null,

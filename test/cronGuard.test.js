@@ -25,7 +25,7 @@ test('chainNext: calls the next hop with the secret and the depth header; report
   assert.equal(seen.url, 'https://h.vercel.app/api/cron/daily');
   assert.equal(seen.opts.headers.authorization, 'Bearer s3');
   assert.equal(seen.opts.headers['x-cron-chain'], '2');
-  assert.match(await guard.chainNext(1, { env: { VERCEL_PROJECT_PRODUCTION_URL: 'h', CRON_SECRET: 's' }, fetchImpl: async () => { throw new Error('boom'); } }), /hop_1_failed_boom/);
+  assert.match(await guard.chainNext(1, { env: { VERCEL_PROJECT_PRODUCTION_URL: 'h', CRON_SECRET: 's' }, fetchImpl: async () => { throw new Error('boom'); }, retryDelaysMs: [] }), /hop_1_failed_boom_gave_up/);
   assert.equal(await guard.chainNext(1, { env: {} }), 'no_target');
 });
 

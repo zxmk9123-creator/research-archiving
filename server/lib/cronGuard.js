@@ -19,20 +19,28 @@ function shouldChain(discoveryResult, depth) {
   return Boolean(discoveryResult && typeof discoveryResult === 'object' && discoveryResult.done === false && depth < MAX_CHAIN_DEPTH);
 }
 
-// Calls the next hop. The hop answers 202 at once and keeps working in its own invocation, so this returns in milliseconds.
-async function chainNext(depth, { env = process.env, fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+// Calls the next hop. The hop answers 202 at once and keeps working in its own invocation, so this returns in milliseconds. A hand-off that
+// fails (network error, 5xx/429, a timeout) is retried twice with a short pause: one dropped call used to end the whole chain silently.
+async function chainNext(depth, { env = process.env, fetchImpl = fetch, timeoutMs = 10000, retryDelaysMs = [1500, 4000], sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const url = chainTarget(env);
   if (!url || !env.CRON_SECRET) return 'no_target';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetchImpl(url, { headers: { authorization: `Bearer ${env.CRON_SECRET}`, 'x-cron-chain': String(depth) }, signal: ctrl.signal, redirect: 'manual' });
-    return `hop_${depth}_http_${res.status}`;
-  } catch (err) {
-    return `hop_${depth}_failed_${String(err && err.message).slice(0, 60)}`;
-  } finally {
-    clearTimeout(timer);
+  let last = 'hop_not_called';
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+    if (attempt > 0) await sleep(retryDelaysMs[attempt - 1]);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(url, { headers: { authorization: `Bearer ${env.CRON_SECRET}`, 'x-cron-chain': String(depth) }, signal: ctrl.signal, redirect: 'manual' });
+      last = `hop_${depth}_http_${res.status}`;
+      // 202 = hop accepted; 401/403/3xx will not change on a retry
+      if (res.status === 202 || res.status === 200 || (res.status >= 300 && res.status < 500 && res.status !== 408 && res.status !== 429)) return attempt ? `${last}_attempt${attempt + 1}` : last;
+    } catch (err) {
+      last = `hop_${depth}_failed_${String(err && err.message).slice(0, 60)}`;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  return `${last}_gave_up`;
 }
 
 // null when healthy, otherwise a short incident message. status = getDailyDiscoveryStatus(), brief = { state, completedAt }.

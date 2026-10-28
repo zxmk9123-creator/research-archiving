@@ -64,8 +64,10 @@ test('getDailyDiscoveryStatus: completed / running (lease or recent progress) / 
   assert.equal(leased.state, 'running');
   assert.deepEqual(leased.progress, { done: 30, total: 66 });
 
-  const between = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 10 * 60000 })], KST_0955);
-  assert.equal(between.state, 'running'); // between two slices, saved 10 minutes ago
+  const between = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 3 * 60000 })], KST_0955);
+  assert.equal(between.state, 'running'); // between two slices, saved 3 minutes ago
+  const late = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 10 * 60000 })], KST_0955);
+  assert.equal(late.state, 'stalled'); // no lease and no progress for 10 minutes: nobody is working on it (used to read "running" for 45)
 
   const stuck = await statusFor([cursor({ offset: 30, total: 66, leaseUntil: 0, savedAt: KST_0955.getTime() - 3 * 3600000 })], KST_0955);
   assert.equal(stuck.state, 'stalled');

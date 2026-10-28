@@ -1970,7 +1970,7 @@ async function renderDailyStatusBar() {
     const state = status.completedToday ? 'completed' : (status.state || 'waiting');
     const p = status.progress && status.progress.total ? ` (${status.progress.done}/${status.progress.total})` : '';
     const dotClass = { completed: 'ok', running: 'running', waiting: 'waiting', stalled: 'pending' }[state] || 'pending';
-    const text = { completed: status.brief === 'ready' || !status.brief ? '오늘 기사 수집 완료' : '기사 수집 완료 · 헤드라인 생성 중', running: `기사 수집 진행 중${p}`, waiting: '오늘 기사 수집 대기 중', stalled: `기사 수집 지연${p} — 재시도 대기` }[state] || '오늘 기사 수집 미완료';
+    const text = { completed: status.brief === 'ready' || !status.brief ? '오늘 기사 수집 완료' : '기사 수집 완료 · 헤드라인 생성 중', running: `기사 수집 진행 중${p}`, waiting: '오늘 기사 수집 대기 중', stalled: `기사 수집 지연${p} — 자동 복구 중` }[state] || '오늘 기사 수집 미완료';
     bar.innerHTML = `<span class="daily-status-dot ${dotClass}"></span><span>${text}</span>`;
     bar.hidden = false;
   } catch (err) {

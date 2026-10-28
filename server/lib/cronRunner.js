@@ -5,6 +5,7 @@ const { refreshScopeTerms, maybeRunWeeklyScopeAnalysis } = require('./scopeAnaly
 const { requeueStalledPendingDrafts } = require('./aiDraft');
 const background = require('./background');
 const guard = require('./cronGuard');
+const { recordPipelineEvent } = require('./pipelineTrace');
 
 // "Authorization: Bearer $CRON_SECRET", compared in constant time. No secret configured means nobody is authorized.
 function isCronAuthorized(req, env = process.env) {
@@ -92,6 +93,9 @@ async function runDailyCron(chainDepth) {
   const results = await runSteps(steps, { started, budgetMs: BUDGET_MS, isChain: chainDepth > 0, chainSteps: CHAIN_STEPS });
   // discovery is not finished: call the next hop now instead of waiting for the next external trigger
   if (guard.shouldChain(results.daily_discovery, chainDepth)) results.chained = await guard.chainNext(chainDepth + 1);
+  else if (chainDepth >= guard.MAX_CHAIN_DEPTH && results.daily_discovery && results.daily_discovery.done === false) results.chained = 'depth_limit_reached';
+  // what this call did, kept for the next day (Vercel keeps runtime logs for one hour only)
+  await recordPipelineEvent('cron_call', { depth: chainDepth, discovery: results.daily_discovery && (results.daily_discovery.progress || results.daily_discovery.reason || results.daily_discovery), chained: results.chained || null });
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
   results.background_unfinished = await background.drain(Math.max(5000, 280000 - (Date.now() - started)));
   return { ok: true, elapsedMs: Date.now() - started, chain: chainDepth, results };
