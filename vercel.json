@@ -2,7 +2,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 300,
-      "includeFiles": "{server/**,node_modules/@napi-rs/**}"
+      "includeFiles": "{server/**,node_modules/@napi-rs/**,node_modules/pdf-parse/dist/pdf-parse/cjs/**}"
     }
   },
   "rewrites": [

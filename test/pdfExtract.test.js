@@ -44,3 +44,15 @@ test('fetchPdfBuffer: a non-OK response is a fetch error; OK is read through the
   assert.equal((await fetchPdfBuffer('https://x.example/a.pdf')).toString(), `PDF:${25 * 1024 * 1024}`);
   assert.equal((await fetchPdfBuffer('https://x.example/a.pdf', 1000)).toString(), 'PDF:1000');
 });
+
+test('vercel includeFiles ships the pdf.js worker that pdf-parse loads at runtime', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  const pattern = require('../vercel.json').functions['api/index.js'].includeFiles;
+  const worker = path.join(path.dirname(require.resolve('pdf-parse')), 'pdf.worker.mjs');
+  assert.ok(fs.existsSync(worker), 'worker file exists in the installed pdf-parse');
+  const rel = path.relative(root, worker).split(path.sep).join('/');
+  const dir = rel.slice(0, rel.lastIndexOf('/'));
+  assert.ok(pattern.includes(`${dir}/**`), `includeFiles must cover ${dir}`);
+});

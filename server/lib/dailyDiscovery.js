@@ -286,11 +286,16 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
   // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
   // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
-  const runOne = (idx) => withTimeout(
-    collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx])),
-    SOURCE_TIMEOUT_MS,
-    { sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }
-  );
+  const runOne = async (idx) => {
+    const t0 = Date.now();
+    const r = await withTimeout(
+      collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx])),
+      SOURCE_TIMEOUT_MS,
+      { sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }
+    );
+    if (r.error === 'source_timeout') console.warn(`daily_discovery source_timeout source=${r.sourceId} elapsed_ms=${Date.now() - t0}`);
+    return r;
+  };
   const leaseMs = budgetMs + 60000;
   const step = await advanceDiscovery(saved, srcRows.length, runOne, {
     budgetMs,
