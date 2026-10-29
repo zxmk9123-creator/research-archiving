@@ -1549,3 +1549,22 @@ test('POST /: 식용유지 is matched only when not preceded by 비 (비식용�
     assert.ok(calls.some((c) => c.params && c.params.includes('(^|[^비])식용유지')));
   } finally { restore(); restoreProvider(); }
 });
+
+test('leaked Chinese characters / kana are removed from Korean answers; ones the materials or the question contain are kept', () => {
+  const s = searchRouter.stripStrayScripts;
+  const mats = [{ title: '中粮集团 투자', summary: 'COFCO 第一财经 보도' }];
+  assert.equal(s('정부가 增加를 발표했다 [1]', mats), '정부가 를 발표했다 [1]', 'the leaked word is dropped; nothing is invented in its place');
+  assert.equal(s('수요 증가(增加)가 예상된다', mats), '수요 증가가 예상된다');
+  assert.equal(s('価格が 오른다. 市場', mats), '오른다.', 'kana and kanji runs at the edges leave no stray spaces');
+  assert.equal(s('中粮集团이 투자한다', mats), '中粮集团이 투자한다', 'a proper noun the materials write in Chinese is kept');
+  assert.equal(s('第一财经 보도에 따르면', mats), '第一财经 보도에 따르면');
+  assert.equal(s('韓國 시장은 커졌다', [], '韓國 시장'), '韓國 시장은 커졌다', 'characters the user typed are kept');
+  assert.equal(s('韓國 시장은 커졌다', []), '시장은 커졌다');
+  assert.equal(s('Plain English with 中文 only', []), 'Plain English with 中文 only', 'non-Korean answers are not touched');
+  assert.equal(s('한국어 문장이다.', mats), '한국어 문장이다.');
+  assert.ok(!/[぀-ヿ㐀-鿿]/.test(s('가격이 上昇했다. 수요は 증가', [])));
+});
+
+test('the system prompt tells the model to write Hangul only', () => {
+  assert.match(require('fs').readFileSync(require.resolve('../server/routes/search.js'), 'utf8'), /Hangul only: no 漢字\/kana/);
+});

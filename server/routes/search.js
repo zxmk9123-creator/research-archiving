@@ -600,6 +600,7 @@ Rules:
 - A material's own "인사이트" is interpretation, not a stated fact — present it as such (e.g. "~로 해석됩니다", "~일 가능성이 있습니다"), never as a reported fact, and always alongside the factual sentence/[N] it's based on, never as a freestanding claim. Structure the answer so facts actually confirmed in the materials and what those facts suggest (인사이트) stay visibly distinct. If either side is unclear or unsupported at the question's actual scope, narrow the answer to only what's clearly supported rather than extending it.
 - Be concise and research-oriented — no greetings, no conversational filler, no restating the question.
 - If earlier conversation turns are given, treat them as context for a follow-up question, but still ground every claim only in the materials given now.
+- Hangul only: no 漢字/kana, except a proper noun the materials write that way.
 - Respond in Korean.`;
 
 // Prompt-prep trim: a hard cap per field so one unusually long AI_summary/
@@ -1331,14 +1332,25 @@ async function tryBuildDataset(question, candidates, required, signal, trace = [
 }
 
 // Free-tier models occasionally leak a few characters of another script into Korean prose
-// ("재생 디زل"). Those characters are removed unless the supplied materials contain them.
-const STRAY_SCRIPT_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u0900-\u097F\u0E00-\u0E7F\u0400-\u04FF]+/g;
-function stripStrayScripts(text, candidates) {
+// ("재생 디زل", "정부가 增加를 발표"). Those characters are removed unless the supplied materials (or the question) contain them.
+// Chinese characters (Hanja) and Japanese kana are covered too: a Korean answer is written in Hangul, and a leaked Chinese word cannot be
+// translated reliably in code, so it is dropped (with any parentheses it leaves empty) rather than shown.
+const STRAY_SCRIPT_SRC = '[\\u0590-\\u05FF\\u0600-\\u06FF\\u0750-\\u077F\\u0900-\\u097F\\u0E00-\\u0E7F\\u0400-\\u04FF\\u3040-\\u30FF\\u31F0-\\u31FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uF900-\\uFAFF\\uFF66-\\uFF9F]+';
+function stripStrayScripts(text, candidates, question = '') {
   const t = String(text || '');
-  if (!/[가-힣]/.test(t) || !STRAY_SCRIPT_RE.test(t)) return t;
-  STRAY_SCRIPT_RE.lastIndex = 0;
-  const known = candidates.map(materialText).join(' ');
-  return t.replace(STRAY_SCRIPT_RE, (m) => (known.includes(m) ? m : ''));
+  const re = new RegExp(STRAY_SCRIPT_SRC, 'g');
+  if (!/[가-힣]/.test(t) || !new RegExp(STRAY_SCRIPT_SRC).test(t)) return t;
+  const known = `${candidates.map(materialText).join(' ')} ${question || ''}`;
+  let removed = false;
+  let out = t.replace(re, (m) => {
+    if (known.includes(m)) return m;
+    removed = true;
+    return '';
+  });
+  if (!removed) return t;
+  // tidy what the removal leaves behind: empty brackets, doubled spaces, a space before punctuation
+  out = out.replace(/\(\s*[,、，/·]*\s*\)|（\s*）|\[\s*\](?!\()/g, '').replace(/[ \t]{2,}/g, ' ').replace(/ +([,.;:!?)])/g, '$1').replace(/[ \t]+$/gm, '').replace(/^[ \t]+/, '');
+  return out;
 }
 
 // ANY visual request ("시각화", "도식", "표로", "한눈에", chart words) must end up with a table
@@ -1422,7 +1434,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   if (TRUNCATION_NOTICE_RE.test(rawBody)) {
     rawBody = await completeTruncatedAnswer(rawBody.replace(TRUNCATION_NOTICE_RE, '').trimEnd(), candidates, signal);
   }
-  let modelText = stripStrayScripts(normalizeCitationMarkers(rawBody), candidates);
+  let modelText = stripStrayScripts(normalizeCitationMarkers(rawBody), candidates, question);
   const rosterForScope = await getRoster();
   modelText = canonicalizeProperNouns(modelText, candidates.map(materialText), rosterForScope);
   const scopeNow = subjectScope.forQuestion(question);
