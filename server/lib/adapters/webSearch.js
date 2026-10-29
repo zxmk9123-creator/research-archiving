@@ -25,22 +25,14 @@ function getConfiguredKeys() {
   return require('./envKeys').collectKeys('BRAVE_SEARCH_API_KEY');
 }
 
-// Keys confirmed exhausted (HTTP 402) this process's lifetime. Brave's 402
-// is a monthly billing-cycle limit, not a transient fault, so there is no
-// point re-trying an exhausted key until the next deploy/restart — which
-// clears this Set along with the rest of this module's state.
-const exhaustedKeys = new Set();
-// The last key that actually worked, so the next call starts there instead
-// of re-discovering already-exhausted keys from the front every time.
+// Per-key health (quota 402 / rate 429 / auth 401,403 parks, each with its own recovery time) lives in providerHealth so it is
+// shared across serverless instances instead of being re-discovered on every cold start.
+// The last key that actually worked, so the next call starts there.
 let lastGoodKeyIndex = 0;
 
-// Test-only: both the exhausted-key set and the round-robin position are
-// process-lifetime module state (same convention as freellmapi's
-// wake-detect.ts _resetForTests), so a test that simulates exhaustion must
-// reset them or it leaks into every test that runs after it.
 function _resetKeyStateForTests() {
-  exhaustedKeys.clear();
   lastGoodKeyIndex = 0;
+  require('../providerHealth')._resetForTests();
 }
 
 // options.freshness maps directly to Brave's `freshness` param (e.g. 'pd'
@@ -55,32 +47,48 @@ async function searchWeb(query, options = {}) {
   const freshnessParam = options.freshness ? `&freshness=${encodeURIComponent(options.freshness)}` : '';
   const url = `${BRAVE_SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}&count=${MAX_RESULTS}${freshnessParam}`;
 
-  const availableKeys = keys.filter((k) => !exhaustedKeys.has(k));
-  if (!availableKeys.length) {
-    throw new Error(`search failed: 402 (all ${keys.length} configured Brave Search API key(s) exhausted)`);
+  const health = require('../providerHealth');
+  const ids = keys.map(health.keyId);
+  const available = [];
+  for (let i = 0; i < keys.length; i++) if (!(await health.isParked('brave', ids[i]))) available.push(i);
+  if (!available.length) {
+    const info = ids.map((id) => health.parkedInfo('brave', id)).filter(Boolean);
+    const quotaOnly = info.length && info.every((v) => v.reason === 'quota');
+    throw new Error(quotaOnly || !info.length
+      ? `search failed: 402 (all ${keys.length} configured Brave Search API key(s) exhausted)`
+      : `search failed: all ${keys.length} configured Brave Search API key(s) unavailable (${[...new Set(info.map((v) => v.reason))].join(',')})`);
   }
 
-  let lastStatus;
-  for (let i = 0; i < availableKeys.length; i++) {
-    const apiKey = availableKeys[(lastGoodKeyIndex + i) % availableKeys.length];
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'X-Subscription-Token': apiKey,
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (res.status === 402) {
-      exhaustedKeys.add(apiKey);
-      lastStatus = 402;
+  const failures = [];
+  for (let n = 0; n < available.length; n++) {
+    const idx = available[(Math.max(0, available.indexOf(lastGoodKeyIndex)) + n) % available.length];
+    const apiKey = keys[idx];
+    const kid = ids[idx];
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      health.record('brave', 'server', { kid, note: `network: ${err.message}` });
+      failures.push('network');
       continue;
     }
     if (!res.ok) {
-      const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
-      console.error(`brave search failed: status ${res.status} key=${keys.indexOf(apiKey) + 1}/${keys.length} body=${bodyText.slice(0, 300)}`);
-      throw new Error(`search failed: ${res.status}`);
+      const category = health.classify(res.status);
+      const retryAfter = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
+      health.record('brave', category, { kid, retryAfterMs: retryAfter > 0 ? retryAfter * 1000 : 0, note: String(res.status) });
+      failures.push(res.status);
+      if (category === 'other') {
+        const bodyText = await readResponseText(res, 64 * 1024, 'search API error body').catch(() => '');
+        console.error(`brave search failed: status ${res.status} key=${idx + 1}/${keys.length} body=${bodyText.slice(0, 300)}`);
+        throw new Error(`search failed: ${res.status}`);
+      }
+      continue; // quota/rate/auth/5xx on this key: try the next eligible key
     }
-    lastGoodKeyIndex = keys.indexOf(apiKey);
+    health.record('brave', 'success', { kid });
+    lastGoodKeyIndex = idx;
     const data = JSON.parse(await readResponseText(res, 1024 * 1024, 'search API response'));
 
     const rawResults = (data && data.web && Array.isArray(data.web.results)) ? data.web.results : [];
@@ -89,7 +97,11 @@ async function searchWeb(query, options = {}) {
       .filter((c) => c.title && c.link)
       .slice(0, MAX_RESULTS);
   }
-  throw new Error(`search failed: ${lastStatus} (all configured Brave Search API keys exhausted)`);
+  const last = failures[failures.length - 1];
+  const all402 = failures.every((f) => f === 402);
+  throw new Error(all402
+    ? `search failed: 402 (all ${keys.length} configured Brave Search API key(s) exhausted)`
+    : `search failed: ${last} (${failures.length} Brave key attempt(s) failed: ${failures.join(',')})`);
 }
 
 module.exports = { searchWeb, MAX_RESULTS, _resetKeyStateForTests };

@@ -93,3 +93,33 @@ test('wiring: several Vercel cron kicks in the morning window, the visit hook is
   assert.match(app, /자동 복구 중/);
   assert.ok(!/재시도 대기/.test(app));
 });
+
+test('opsWarnings: repeated source timeouts, provider-wide failure, failing fallback, PDF worker/spike and failed hand-offs are surfaced; healthy state is silent', () => {
+  const { opsWarnings } = require('../server/lib/cronGuard');
+  const day = '2026-10-29';
+  const t = (id, stage) => ({ kind: 'source_timeout', sourceId: id, stage });
+  const events = [t(77, 'search'), t(77, 'candidate_fetch'), t(77, 'candidate_fetch'), t(78, 'ai_draft'), { kind: 'cron_call', chained: 'fetch_gave_up' }];
+  const health = { days: { [day]: { brave: { requests: 9, quota: 9 }, tavily: { requests: 6, rate: 6, fallback_fail: 6 }, pdf: { requests: 6, worker_missing: 3 } } } };
+  const w = opsWarnings(events, health, { day });
+  assert.ok(w.some((x) => /source 77 timed out 3 times \(last stage candidate_fetch\)/.test(x)));
+  assert.ok(!w.some((x) => /source 78/.test(x)), 'a single timeout is not repeated');
+  assert.ok(w.some((x) => /provider brave: 0 of 9/.test(x)));
+  assert.ok(w.some((x) => /provider tavily: 0 of 6/.test(x)));
+  assert.ok(w.some((x) => /fallback failing/.test(x)));
+  assert.ok(w.some((x) => /pdf worker asset missing 3/.test(x)));
+  assert.ok(w.some((x) => /continuation hand-off failed/.test(x)));
+  assert.deepEqual(opsWarnings([], { days: { [day]: { brave: { requests: 9, success: 9 }, pdf: { requests: 8, success: 8 } } } }, { day }), []);
+  const spike = opsWarnings([], { days: { [day]: { pdf: { requests: 10, success: 4, parse_failed: 6 } } } }, { day });
+  assert.ok(spike.some((x) => /pdf parse failure spike: 6 of 10/.test(x)));
+});
+
+test('opsWarnings: missing data is reported as missing (not as a healthy zero); stale trace events and unreadable state are not silently ignored', () => {
+  const { opsWarnings } = require('../server/lib/cronGuard');
+  const day = '2026-10-29';
+  const now = new Date('2026-10-29T03:00:00Z').getTime();
+  assert.deepEqual(opsWarnings([], {}, { day, now, expectMetrics: false }), [], 'nothing expected, nothing said');
+  assert.ok(opsWarnings([], {}, { day, now, expectMetrics: true }).some((x) => /provider metrics missing/.test(x)));
+  assert.ok(opsWarnings([], { days: { '2026-10-28': { brave: { requests: 9, success: 9 } } } }, { day, now, expectMetrics: true }).some((x) => /metrics missing/.test(x)), "yesterday's data does not count as today's");
+  const old = (id) => ({ kind: 'source_timeout', sourceId: id, stage: 'search', at: '2026-10-27T01:00:00Z' });
+  assert.deepEqual(opsWarnings([old(5), old(5), old(5)], { days: { [day]: { brave: { requests: 1, success: 1 } } } }, { day, now }), [], 'timeouts older than 24 h are not "repeated" today');
+});

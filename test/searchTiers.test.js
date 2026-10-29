@@ -98,3 +98,42 @@ test('searchWeb: when every tier fails the thrown error is the first one and nam
     await assert.rejects(() => tiers.searchWeb('q'), (err) => /402 \(brave\)/.test(err.message) && /firecrawl: search failed: 429/.test(err.message) && /serpapi: .*cooling down/.test(err.message));
   } finally { [brave.searchWeb, fc.searchWeb, serp.searchWeb] = saved; }
 });
+
+test('searchTiers: records Tavily fallback success and failure reasons in provider health', async () => {
+  const health = require('../server/lib/providerHealth');
+  const brave = require('../server/lib/adapters/webSearch');
+  const tavily = require('../server/lib/adapters/tavilySearch');
+  const store = { data: null, async read() { return store.data; }, async mutate(fn) { const n = fn(store.data ? JSON.parse(JSON.stringify(store.data)) : {}); if (n !== undefined) store.data = JSON.parse(JSON.stringify(n)); return true; } };
+  const origB = brave.searchWeb; const origT = tavily.searchWeb;
+  const tiers = require('../server/lib/adapters/searchTiers');
+  try {
+    health._setStoreForTests(store);
+    brave.searchWeb = async () => { throw new Error('search failed: 402 (all 3 configured Brave Search API key(s) exhausted)'); };
+    tavily.searchWeb = async () => [{ title: 'a', link: 'https://a.test' }];
+    await tiers.searchWeb('q1');
+    tavily.searchWeb = async () => { throw new Error('tavily search failed: status 429'); };
+    await assert.rejects(() => tiers.searchWeb('q2'));
+    const day = Object.values(store.data.days)[0].tavily;
+    assert.equal(day.fallback_ok, 1);
+    assert.equal(day.fallback_fail, 1);
+    assert.equal(day.rate, 1);
+    assert.match(day.lastError.note, /429/);
+  } finally { brave.searchWeb = origB; tavily.searchWeb = origT; health._resetForTests(); }
+});
+
+test('searchTiers: fallback failures are categorized (402/429/401/5xx/network/config) for the provider metrics', async () => {
+  const health = require('../server/lib/providerHealth');
+  const brave = require('../server/lib/adapters/webSearch');
+  const tavily = require('../server/lib/adapters/tavilySearch');
+  const tiers = require('../server/lib/adapters/searchTiers');
+  const store = { data: null, async read() { return store.data; }, async mutate(fn) { const n = fn(store.data ? JSON.parse(JSON.stringify(store.data)) : {}); if (n !== undefined) store.data = JSON.parse(JSON.stringify(n)); return true; } };
+  const origB = brave.searchWeb; const origT = tavily.searchWeb;
+  const fire = ['search failed: 402', 'search failed: 429', 'search failed: 401', 'search failed: 503', 'The operation was aborted due to timeout', 'no TAVILY_API_KEY(S) configured', 'search failed: all configured Tavily API keys are exhausted or invalid (cooling down)'];
+  try {
+    health._setStoreForTests(store);
+    brave.searchWeb = async () => { throw new Error('search failed: 402 (all 3 configured Brave Search API key(s) exhausted)'); };
+    for (const msg of fire) { tavily.searchWeb = async () => { throw new Error(msg); }; await assert.rejects(() => tiers.searchWeb('q')); }
+    const t = Object.values(store.data.days)[0].tavily;
+    assert.deepEqual([t.quota, t.rate, t.auth, t.server, t.config, t.fallback_fail], [2, 1, 1, 2, 1, 7]);
+  } finally { brave.searchWeb = origB; tavily.searchWeb = origT; health._resetForTests(); }
+});

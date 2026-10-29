@@ -624,3 +624,78 @@ test('collectWebDiscoverySource: a bot-block/CAPTCHA interstitial (HTTP 200, "Cl
     restore();
   }
 }));
+
+test('collectWebDiscoverySource: records stage timing in options.progress and defers remaining candidates once the soft deadline passes', async () => {
+  const pm = mockPool([['SELECT title FROM items', () => ({ rows: [] })], ['SELECT id FROM items WHERE source_url', () => ({ rows: [{ id: 1 }] })]]);
+  const restoreSearch = mockSearchWeb([1, 2, 3, 4].map((n) => ({ title: `T${n}`, link: `https://ex${n}.test/a` })));
+  const restoreMeta = mockExtractMetadata(async () => { throw new Error('fetch failed: 503'); });
+  const progress = {};
+  try {
+    const deadlineAt = Date.now() + 40;
+    const out = await collectWebDiscoverySource(webDiscoverySource(), { progress, deadlineAt, candidates: undefined });
+    assert.equal(out.ok, true);
+    assert.equal(progress.candidates, 4);
+    assert.ok(typeof progress.searchMs === 'number');
+    // all candidates already ingested here, so none reached fetch; now force the deadline into the past
+    const progress2 = {};
+    const out2 = await collectWebDiscoverySource(webDiscoverySource(), { progress: progress2, deadlineAt: Date.now() - 1 });
+    assert.equal(out2.ok, true);
+    assert.equal(progress2.deferred, 4);
+    assert.ok(out2.details.some((d) => d.stage === 'deferred_time_budget' && d.remaining === 4));
+  } finally { restoreMeta(); restoreSearch(); pm.restore(); }
+});
+
+test('collectWebDiscoverySource: per-candidate fetch outcomes are recorded with host, elapsed and failure category', async () => {
+  const pm = mockPool([['SELECT title FROM items', () => ({ rows: [] })], ['SELECT id FROM items WHERE source_url', () => ({ rows: [] })], ['FROM discovery_exclusions', () => ({ rows: [] })]]);
+  const restoreSearch = mockSearchWeb([{ title: 'Blocked page', link: 'https://blocked.test/a' }]);
+  const restoreMeta = mockExtractMetadata(async () => { throw new Error('fetch failed: 403'); });
+  const progress = {};
+  try {
+    const out = await collectWebDiscoverySource(webDiscoverySource(), { progress });
+    assert.equal(out.failed, 1);
+    assert.deepEqual(progress.fetches.map((f) => [f.host, f.outcome]), [['blocked.test', 'blocked_403']]);
+    assert.ok(progress.fetchMs >= 0);
+  } finally { restoreMeta(); restoreSearch(); pm.restore(); }
+});
+
+test('soft deadline: deferred candidates are stored, picked up first by the next run, ingested exactly once, and cleared (repeat runs add nothing)', async () => {
+  const jobs = new Map();
+  const itemUrls = [];
+  const original = pool.query;
+  pool.query = async (text, params) => {
+    if (/^SELECT last_totals FROM scheduler_jobs/.test(text)) return { rows: jobs.has(params[0]) ? [{ last_totals: JSON.parse(JSON.stringify(jobs.get(params[0]))) }] : [] };
+    if (/^INSERT INTO scheduler_jobs/.test(text)) { if (jobs.has(params[0])) return { rows: [] }; jobs.set(params[0], JSON.parse(params[1])); return { rows: [{}] }; }
+    if (/^UPDATE scheduler_jobs/.test(text)) { if (JSON.stringify(jobs.get(params[0])) !== params[2]) return { rows: [] }; jobs.set(params[0], JSON.parse(params[1])); return { rows: [{}] }; }
+    if (text.includes('SELECT id FROM items WHERE source_url')) return { rows: params[0].some((u) => itemUrls.includes(u)) ? [{ id: 1 }] : [] };
+    if (text.includes('INSERT INTO items')) { if (itemUrls.includes(params[1])) { const e = new Error('dup'); e.code = '23505'; throw e; } itemUrls.push(params[1]); return { rows: [{ id: itemUrls.length }] }; }
+    return { rows: [] };
+  };
+  const links = ['https://a.test/palm-a', 'https://b.test/palm-b', 'https://c.test/palm-c'];
+  const found = links.map((l, i) => ({ title: `Palm oil export outlook ${'abc'[i]} for Indonesia and Malaysia`, link: l }));
+  let slowFirst = true;
+  const restoreMeta = mockExtractMetadata(async (url) => {
+    if (slowFirst) await new Promise((r) => setTimeout(r, 70)); // the first candidate eats the whole soft budget
+    return { title: `Palm oil ${url}`, summary: 'Palm oil export outlook for Indonesia and Malaysia', published_at: new Date().toISOString().slice(0, 10), thumbnail_url: null, body_text: null };
+  });
+  const restoreSearch = mockSearchWeb(async () => found);
+  try {
+    await withNoProviders(async () => {
+      const r1 = await collectWebDiscoverySource(webDiscoverySource({ id: 77 }), { deadlineAt: Date.now() + 40 });
+      assert.ok(r1.details.some((d) => d.stage === 'deferred_time_budget'));
+      assert.equal(itemUrls.length, 1, 'only the first candidate fit the budget');
+      assert.deepEqual(jobs.get('discovery_deferred')['77'].candidates.map((c) => c.link), links.slice(1), 'the rest is stored durably');
+
+      slowFirst = false;
+      restoreSearch();
+      const restoreSearch2 = mockSearchWeb(async () => [found[0]]); // the next search no longer returns B and C
+      const r2 = await collectWebDiscoverySource(webDiscoverySource({ id: 77 }), { deadlineAt: Date.now() + 60000 });
+      assert.ok(!r2.details.some((d) => d.stage === 'deferred_time_budget'));
+      assert.deepEqual([...itemUrls].sort(), [...links].sort(), 'B and C were recovered from the stored list');
+      assert.equal(jobs.get('discovery_deferred')['77'], undefined, 'the stored list is cleared once processed');
+
+      await collectWebDiscoverySource(webDiscoverySource({ id: 77 }), { deadlineAt: Date.now() + 60000 });
+      assert.equal(itemUrls.length, 3, 'repeating the run creates no duplicate items (and so no duplicate AI work)');
+      restoreSearch2();
+    });
+  } finally { restoreMeta(); try { restoreSearch(); } catch (e) { /* already restored */ } pool.query = original; }
+});

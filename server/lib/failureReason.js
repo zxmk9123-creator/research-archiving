@@ -13,6 +13,8 @@ function classifyFailure(message) {
   if (/bot-block/i.test(m)) return 'bot_block';
   if (/timeout|timed out|aborted/i.test(m)) return 'timeout';
   if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|certificate|EAI_AGAIN/i.test(m)) return 'network';
+  if (/^PDF worker asset missing/.test(m)) return 'pdf_worker_missing';
+  if (/^PDF invalid/.test(m)) return 'pdf_invalid';
   if (/PDF|no text|scanned/i.test(m)) return 'pdf_unreadable';
   if (/too large|exceeds|bytes/i.test(m)) return 'too_large';
   if (/blocked|private|not allowed|unsafe/i.test(m)) return 'url_blocked';

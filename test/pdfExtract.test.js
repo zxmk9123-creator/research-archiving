@@ -56,3 +56,28 @@ test('vercel includeFiles ships the pdf.js worker that pdf-parse loads at runtim
   const dir = rel.slice(0, rel.lastIndexOf('/'));
   assert.ok(pattern.includes(`${dir}/**`), `includeFiles must cover ${dir}`);
 });
+
+test('describePdfError / extractPdfText: worker, invalid and parse failures are told apart and carry a stable prefix', async () => {
+  const { describePdfError } = require('../server/lib/pdfExtract');
+  const { classifyFailure } = require('../server/lib/failureReason');
+  const cases = [
+    ["Setting up fake worker failed: Cannot find module '/var/task/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs'", /^PDF worker asset missing/, 'pdf_worker_missing'],
+    ['Invalid PDF structure.', /^PDF invalid/, 'pdf_invalid'],
+    ['something odd inside the parser', /^PDF parse failed/, 'pdf_unreadable'],
+  ];
+  for (const [msg, re, reason] of cases) {
+    const e = describePdfError(new Error(msg));
+    assert.match(e.message, re);
+    assert.equal(classifyFailure(e.message), reason);
+  }
+  assert.equal(classifyFailure('PDF text extraction produced no text (likely a scanned/image-only PDF)'), 'pdf_unreadable');
+  assert.equal(classifyFailure('pdf fetch failed: 403'.replace('pdf fetch', 'fetch')), 'blocked_403', 'an access failure is not a parse failure');
+  const mod = require('pdf-parse');
+  const Orig = mod.PDFParse;
+  let destroyedHere = 0;
+  mod.PDFParse = class { async getText() { throw new Error('Setting up fake worker failed: Cannot find module pdf.worker.mjs'); } async destroy() { destroyedHere++; } };
+  try {
+    await assert.rejects(() => extractPdfText(Buffer.from('x')), /^Error: PDF worker asset missing|PDF worker asset missing/);
+    assert.equal(destroyedHere, 1);
+  } finally { mod.PDFParse = Orig; }
+});

@@ -113,6 +113,29 @@ async function attemptAcquisitionFallback(candidate) {
   return null;
 }
 
+const DEFERRED_JOB = 'discovery_deferred';
+const DEFERRED_MAX = 20;
+const DEFERRED_TTL_MS = 3 * 86400000; // a deferred link older than the daily freshness window is not worth fetching
+
+async function loadDeferred(sourceId) {
+  try {
+    const { rows } = await pool.query('SELECT last_totals FROM scheduler_jobs WHERE job_name = $1', [DEFERRED_JOB]);
+    const entry = rows[0] && rows[0].last_totals && rows[0].last_totals[String(sourceId)];
+    return entry && entry.at > Date.now() - DEFERRED_TTL_MS && Array.isArray(entry.candidates) ? entry.candidates : [];
+  } catch (err) { console.error('deferred candidates read failed:', err.message); return []; }
+}
+
+async function saveDeferred(sourceId, list) {
+  const { mutateJobState } = require('./jobState');
+  const now = Date.now();
+  await mutateJobState(DEFERRED_JOB, (doc) => {
+    for (const [id, e] of Object.entries(doc)) if (!e || e.at < now - DEFERRED_TTL_MS) delete doc[id];
+    if (list.length) doc[String(sourceId)] = { at: now, candidates: list.slice(0, DEFERRED_MAX).map((c) => ({ title: c.title, link: c.link })) };
+    else delete doc[String(sourceId)];
+    return doc;
+  });
+}
+
 // searchOptions is an optional pass-through to searchWeb() (e.g.
 // { freshness: 'pw' } for a date-bounded backfill run) — omitted by every
 // existing caller (collector.js's hourly scheduler, dailyDiscovery.js),
@@ -126,8 +149,27 @@ async function attemptAcquisitionFallback(candidate) {
 // everything it was asked to find. Omitted (falsy) by every existing
 // caller, so Daily Discovery's own recency behavior is unchanged.
 async function collectWebDiscoverySource(source, searchOptions = {}) {
+  // searchOptions.progress (optional, caller-owned) is filled with where the time goes — stage, search/fetch/AI milliseconds, per-candidate
+  // fetch outcomes — so a source that is cut off by the caller's timeout can still be diagnosed. searchOptions.deadlineAt (ms epoch) is a
+  // soft stop: remaining candidates are deferred (not remembered, so a later run picks them up) instead of running into the hard timeout.
+  const progress = searchOptions.progress || null;
+  const mark = (stage, extra) => { if (progress) Object.assign(progress, { stage, stageAt: Date.now() }, extra); };
   try {
-    const candidates = searchOptions.candidates || (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
+    const tSearch = Date.now();
+    mark('search');
+    let candidates = searchOptions.candidates || (await webSearchAdapter.searchWeb(source.url, searchOptions)).slice(0, webSearchAdapter.MAX_RESULTS);
+    // Candidates a previous run had to defer (soft deadline) are kept in scheduler_jobs and go first, so a slow source cannot starve them.
+    // Only the soft-deadline (daily) path uses this; every other caller sees the candidate list exactly as before.
+    let hadDeferred = false;
+    if (searchOptions.deadlineAt && !searchOptions.candidates) {
+      const kept = await loadDeferred(source.id);
+      if (kept.length) {
+        hadDeferred = true;
+        const seen = new Set();
+        candidates = [...kept, ...candidates].filter((c) => c && c.link && !seen.has(c.link) && seen.add(c.link)).slice(0, DEFERRED_MAX);
+      }
+    }
+    if (progress) Object.assign(progress, { searchMs: Date.now() - tSearch, candidates: candidates.length, fetchMs: 0, aiMs: 0, fetches: [] });
 
     let filtered = 0;
     let archived = 0;
@@ -145,7 +187,15 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
     );
     const recentTitles = titleRows.map((r) => r.title);
 
-    for (const candidate of candidates) {
+    for (let ci = 0; ci < candidates.length; ci++) {
+      const candidate = candidates[ci];
+      if (searchOptions.deadlineAt && Date.now() > searchOptions.deadlineAt) {
+        details.push({ stage: 'deferred_time_budget', remaining: candidates.length - ci });
+        if (progress) progress.deferred = candidates.length - ci;
+        await saveDeferred(source.id, candidates.slice(ci));
+        hadDeferred = false; // the stored list was just replaced with what is still pending
+        break;
+      }
       if (recentlySeen(candidate.link)) {
         details.push({ title: candidate.title, link: candidate.link, stage: 'recently_seen' });
         continue;
@@ -177,9 +227,19 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       // collectSource()/collectInstitutionSource().
       let meta;
       let fallbackUrl = null;
+      const tFetch = Date.now();
+      mark('candidate_fetch', { index: ci });
+      const noteFetch = (outcome) => {
+        if (!progress) return;
+        const ms = Date.now() - tFetch;
+        progress.fetchMs = (progress.fetchMs || 0) + ms;
+        if ((progress.fetches || []).length < 12) progress.fetches.push({ host: (() => { try { return new URL(candidate.link).hostname; } catch (e) { return '?'; } })(), ms, outcome });
+      };
       try {
         meta = await extractMetadataModule.extractMetadata(candidate.link);
+        noteFetch('ok');
       } catch (err) {
+        noteFetch(classifyFailure(err.message));
         const statusMatch = /fetch failed: (\d+)/.exec(err.message);
         const status = statusMatch ? Number(statusMatch[1]) : null;
         const fallback = status === 403 ? await attemptAcquisitionFallback(candidate) : null;
@@ -266,7 +326,10 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
         details.push({ title: candidate.title, link: candidate.link, itemId, stage: 'acquisition_fallback_used', fallbackUrl });
       }
 
+      const tAi = Date.now();
+      mark('ai_draft', { index: ci });
       const draftResult = await generateAiDraftForItem(itemId, undefined, aiDraftText);
+      if (progress) progress.aiMs = (progress.aiMs || 0) + (Date.now() - tAi);
       if (!draftResult.ok) {
         failed++;
         details.push({ title: candidate.title, link: candidate.link, itemId, stage: 'ai_screening_failed', error: draftResult.error });
@@ -283,6 +346,7 @@ async function collectWebDiscoverySource(source, searchOptions = {}) {
       }
     }
 
+    if (hadDeferred) await saveDeferred(source.id, []); // every kept candidate was processed this time
     await pool.query(
       'UPDATE sources SET last_collected_at = now(), last_error = NULL, last_error_at = NULL WHERE id = $1',
       [source.id]

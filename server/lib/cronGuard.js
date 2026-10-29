@@ -60,4 +60,36 @@ function pipelineIncident(status, brief, { hourKst, now = Date.now() } = {}) {
   return since > BRIEF_GRACE_MS ? `headline not ready ${Math.round(since / 60000)} min after collection (brief ${brief.state})` : null;
 }
 
-module.exports = { MAX_CHAIN_DEPTH, chainTarget, shouldChain, chainNext, pipelineIncident };
+// Non-fatal warnings from durable evidence: events = pipeline_trace events, health = provider_health { days }. Pure, so it is testable.
+// Each is something a person should look at but not a reason to fail the run; the fatal stall/headline incidents stay in pipelineIncident.
+function opsWarnings(allEvents = [], health = {}, { day = new Date().toISOString().slice(0, 10), now = Date.now(), expectMetrics = false } = {}) {
+  const out = [];
+  // only the last 24 h of trace counts (the trace keeps 60 events across days); an event without a time is kept rather than silently dropped
+  const events = allEvents.filter((e) => !e.at || now - new Date(e.at).getTime() < 86400000);
+  const timeouts = {};
+  for (const e of events) if (e.kind === 'source_timeout' && e.sourceId != null) (timeouts[e.sourceId] = timeouts[e.sourceId] || []).push(e);
+  for (const [id, list] of Object.entries(timeouts)) {
+    if (list.length >= 3) out.push(`source ${id} timed out ${list.length} times (last stage ${list[list.length - 1].stage || '?'})`);
+  }
+  const today = ((health.days || {})[day]) || {};
+  // absence of data is not "no failures": when the morning run completed, searches must have been recorded
+  if (expectMetrics && !Object.keys(today).length) out.push('provider metrics missing for today (nothing recorded although collection ran)');
+  for (const name of ['brave', 'tavily', 'firecrawl', 'serpapi']) {
+    const p = today[name];
+    if (p && p.requests >= 5 && !(p.success > 0)) out.push(`search provider ${name}: 0 of ${p.requests} requests succeeded today`);
+  }
+  const t = today.tavily;
+  if (t && t.fallback_fail > 0 && !(t.fallback_ok > 0)) out.push(`search fallback failing: tavily ${t.fallback_fail} failed, 0 answered`);
+  const pdf = today.pdf;
+  if (pdf) {
+    const bad = (pdf.worker_missing || 0) + (pdf.parse_failed || 0) + (pdf.invalid || 0);
+    if (pdf.worker_missing > 0) out.push(`pdf worker asset missing ${pdf.worker_missing} time(s) today (deployment bundle problem)`);
+    else if (pdf.requests >= 5 && bad / pdf.requests >= 0.5) out.push(`pdf parse failure spike: ${bad} of ${pdf.requests} today`);
+  }
+  // a hop that was scheduled but never ran is not a success
+  const chained = events.filter((e) => e.kind === 'cron_call' && e.chained && /gave_up|failed/.test(String(e.chained)));
+  if (chained.length) out.push(`continuation hand-off failed ${chained.length} time(s) (last: ${chained[chained.length - 1].chained})`);
+  return out;
+}
+
+module.exports = { opsWarnings, MAX_CHAIN_DEPTH, chainTarget, shouldChain, chainNext, pipelineIncident };

@@ -13,6 +13,7 @@
 // run.
 const pool = require('../db/pool');
 const { collectWebDiscoverySource } = require('./webDiscoveryIngest');
+const { recordPipelineEvent } = require('./pipelineTrace');
 
 const JOB_NAME = 'daily_discovery';
 
@@ -242,12 +243,32 @@ async function getDailyDiscoveryStatus(now = new Date()) {
 // the single-process run does. Resuming never starts over: the cursor lives in scheduler_jobs (job 'daily_discovery_cursor').
 const CURSOR_JOB = 'daily_discovery_cursor';
 const SOURCE_TIMEOUT_MS = 90000;
+// Soft stop inside a source (before the hard timeout above): remaining candidates are deferred to a later run instead of being cut off.
+const SOURCE_SOFT_BUDGET_MS = 70000;
 // Resolves with `fallback` if `promise` has not settled in `ms` (the timer is cleared otherwise). The slow call itself is not cancelled:
 // it may still finish writing its own rows later (they are deduplicated by URL), but the slice no longer waits for it.
 function withTimeout(promise, ms, fallback) {
   let timer;
   return Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })]).finally(() => clearTimeout(timer));
 }
+// Runs one source under the hard timeout with a soft budget inside it; a timeout leaves durable evidence (pipeline_trace) of where the time went.
+async function runSourceBounded(source, collect, options, { timeoutMs = SOURCE_TIMEOUT_MS, softMs = SOURCE_SOFT_BUDGET_MS, record = recordPipelineEvent } = {}) {
+  const t0 = Date.now();
+  const progress = { stage: 'start' };
+  const r = await withTimeout(
+    collect(source, { ...options, progress, deadlineAt: t0 + softMs }),
+    timeoutMs,
+    { sourceId: source.id, ok: false, error: 'source_timeout' }
+  );
+  if (r.error === 'source_timeout') {
+    const { stage, searchMs, fetchMs, aiMs, candidates, index, fetches } = progress;
+    const evidence = { sourceId: source.id, elapsedMs: Date.now() - t0, stage, stageAgeMs: progress.stageAt ? Date.now() - progress.stageAt : null, searchMs, fetchMs, aiMs, candidates, index, fetches };
+    console.warn(`daily_discovery source_timeout ${JSON.stringify(evidence)}`);
+    await record('source_timeout', evidence);
+  }
+  return r;
+}
+
 const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
 
 // Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
@@ -286,16 +307,7 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
   // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
   // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
-  const runOne = async (idx) => {
-    const t0 = Date.now();
-    const r = await withTimeout(
-      collectWebDiscoverySource(srcRows[idx], dailyDiscoverySearchOptions(srcRows[idx])),
-      SOURCE_TIMEOUT_MS,
-      { sourceId: srcRows[idx].id, ok: false, error: 'source_timeout' }
-    );
-    if (r.error === 'source_timeout') console.warn(`daily_discovery source_timeout source=${r.sourceId} elapsed_ms=${Date.now() - t0}`);
-    return r;
-  };
+  const runOne = (idx) => runSourceBounded(srcRows[idx], collectWebDiscoverySource, dailyDiscoverySearchOptions(srcRows[idx]));
   const leaseMs = budgetMs + 60000;
   const step = await advanceDiscovery(saved, srcRows.length, runOne, {
     budgetMs,
@@ -310,6 +322,7 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
 
 module.exports = {
   withTimeout,
+  runSourceBounded,
   advanceDiscovery,
   runDailyDiscoverySliced,
   kstPartsOf,

@@ -79,3 +79,26 @@ test('getDailyDiscoveryStatus: completed / running (lease or recent progress) / 
   const early = await statusFor([], new Date('2026-10-23T21:00:00Z')); // 06:00 KST
   assert.equal(early.state, 'waiting');
 });
+
+test('runSourceBounded: a source cut off by the hard timeout leaves stage/timing evidence; a fast one leaves none', async () => {
+  const { runSourceBounded } = require('../server/lib/dailyDiscovery');
+  const events = [];
+  const record = async (kind, d) => { events.push([kind, d]); };
+  const slow = async (src, opts) => {
+    opts.progress.stage = 'candidate_fetch'; opts.progress.stageAt = Date.now(); opts.progress.searchMs = 1200; opts.progress.candidates = 10; opts.progress.index = 4;
+    assert.ok(opts.deadlineAt > Date.now(), 'soft deadline is handed to the collector');
+    await new Promise((r) => setTimeout(r, 200));
+    return { sourceId: src.id, ok: true };
+  };
+  const out = await runSourceBounded({ id: 77 }, slow, {}, { timeoutMs: 40, softMs: 30, record });
+  assert.deepEqual([out.ok, out.error], [false, 'source_timeout']);
+  assert.equal(events.length, 1);
+  assert.equal(events[0][0], 'source_timeout');
+  assert.equal(events[0][1].sourceId, 77);
+  assert.equal(events[0][1].stage, 'candidate_fetch');
+  assert.equal(events[0][1].index, 4);
+  assert.equal(events[0][1].searchMs, 1200);
+  const fast = await runSourceBounded({ id: 78 }, async (s) => ({ sourceId: s.id, ok: true }), {}, { timeoutMs: 100, softMs: 50, record });
+  assert.equal(fast.ok, true);
+  assert.equal(events.length, 1);
+});

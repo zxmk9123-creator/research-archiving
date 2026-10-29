@@ -36,19 +36,45 @@ async function pace(name) {
   if (at > now) await new Promise((r) => setTimeout(r, at - now));
 }
 
+// Tiers other than Brave do not record their own health, so it is done here: one outcome per attempt, plus whether a fallback
+// (any tier after the first failure) actually answered. Brave records per key inside its adapter.
+const failureCategory = (err) => {
+  const m = String((err && err.message) || err);
+  const code = /(?:status |: )(\d{3})\b/.exec(m);
+  if (code) return require('../providerHealth').classify(Number(code[1]));
+  if (/no [A-Z_]+\(?S?\)? configured/.test(m)) return 'config';
+  if (/exhausted|cooling down/i.test(m)) return 'quota';
+  if (/fetch failed|timeout|timed out|aborted|ECONN|ENOTFOUND|EAI_AGAIN/i.test(m)) return 'server';
+  return 'other';
+};
+
 async function searchWeb(query, options = {}) {
+  const health = require('../providerHealth');
   let firstError;
   const errors = [];
-  for (const [name, adapter] of TIERS) {
-    try {
-      await pace(name);
-      const results = await adapter.searchWeb(query, options);
-      if (firstError) console.log(`search_tier_fallback tier=${name} query=${query.slice(0, 80)} first_error=${firstError.message}`);
-      return results;
-    } catch (err) {
-      if (!firstError) firstError = err;
-      errors.push(`${name}: ${String(err && err.message).slice(0, 80)}`);
+  try {
+    for (const [name, adapter] of TIERS) {
+      try {
+        await pace(name);
+        const results = await adapter.searchWeb(query, options);
+        if (name !== 'brave') health.record(name, 'success');
+        if (firstError) {
+          health.record(name, 'fallback_ok');
+          console.log(`search_tier_fallback tier=${name} query=${query.slice(0, 80)} first_error=${firstError.message}`);
+        }
+        return results;
+      } catch (err) {
+        if (!firstError) firstError = err;
+        if (name !== 'brave') {
+          const category = failureCategory(err);
+          health.record(name, category, { note: String(err && err.message).slice(0, 100) });
+          if (firstError !== err) health.record(name, 'fallback_fail', { note: `${category}: ${String(err && err.message).slice(0, 80)}` });
+        }
+        errors.push(`${name}: ${String(err && err.message).slice(0, 80)}`);
+      }
     }
+  } finally {
+    await health.flush();
   }
   // the first (Brave) error stays the thrown one; the later tiers' reasons ride along so a failed source shows why they did not answer
   if (errors.length > 1) firstError.message = `${firstError.message} [${errors.slice(1).join('; ')}]`;

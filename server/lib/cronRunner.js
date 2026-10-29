@@ -5,6 +5,7 @@ const { refreshScopeTerms, maybeRunWeeklyScopeAnalysis } = require('./scopeAnaly
 const { requeueStalledPendingDrafts } = require('./aiDraft');
 const background = require('./background');
 const guard = require('./cronGuard');
+const pool = require('../db/pool');
 const { recordPipelineEvent } = require('./pipelineTrace');
 
 // "Authorization: Bearer $CRON_SECRET", compared in constant time. No secret configured means nobody is authorized.
@@ -85,7 +86,15 @@ async function runDailyCron(chainDepth) {
       const hourKst = dailyDiscovery.kstPartsOf(new Date()).hour;
       const incident = guard.pipelineIncident(status, brief, { hourKst });
       if (incident) throw new Error(incident);
-      return { ran: true, reason: `${status.state}/${brief.state}` };
+      let warnings = [];
+      try {
+        const [{ rows: tr }, { rows: ph }] = await Promise.all([
+          pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'pipeline_trace'"),
+          pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'provider_health'"),
+        ]);
+        warnings = guard.opsWarnings((tr[0] && tr[0].last_totals && tr[0].last_totals.events) || [], (ph[0] && ph[0].last_totals) || {}, { expectMetrics: status.completedToday });
+      } catch (err) { console.error('ops warnings failed:', err.message); warnings = [`ops warnings unavailable: ${String(err.message).slice(0, 80)}`]; }
+      return { ran: true, reason: `${status.state}/${brief.state}`, warnings };
     }],
   ];
   // the scope-term cache that feeds the relevance filter is loaded at boot on a long-lived server; a fresh function instance starts empty
@@ -96,6 +105,7 @@ async function runDailyCron(chainDepth) {
   else if (chainDepth >= guard.MAX_CHAIN_DEPTH && results.daily_discovery && results.daily_discovery.done === false) results.chained = 'depth_limit_reached';
   // what this call did, kept for the next day (Vercel keeps runtime logs for one hour only)
   await recordPipelineEvent('cron_call', { depth: chainDepth, discovery: results.daily_discovery && (results.daily_discovery.progress || results.daily_discovery.reason || results.daily_discovery), chained: results.chained || null });
+  await require('./providerHealth').flush(); // PDF / provider counters recorded by the steps above
   // AI drafts / fact and relation extraction started by the steps above run in the background: wait for them before answering
   results.background_unfinished = await background.drain(Math.max(5000, 280000 - (Date.now() - started)));
   return { ok: true, elapsedMs: Date.now() - started, chain: chainDepth, results };
