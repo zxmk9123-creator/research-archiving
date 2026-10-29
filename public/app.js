@@ -3319,6 +3319,13 @@ async function fetchAllDrafts() {
   return all;
 }
 
+// A <select> is as wide as its longest option: SNS-caption titles (hundreds of characters, with line breaks) used to stretch the Review
+// dropdown far past the screen. The label is one short line; only '<' is escaped because stored titles may already hold entities (&#39;).
+const draftOptionText = (title) => {
+  const oneLine = String(title == null ? '' : title).replace(/\s+/g, ' ').trim();
+  return (oneLine.length > 90 ? `${oneLine.slice(0, 90).replace(/&#?\w{0,6}$/, '')}…` : oneLine).replace(/</g, '&lt;');
+};
+
 async function renderReview() {
   const [draftsRaw, sectors, usages, sources] = await Promise.all([
     fetchAllDrafts(), api('/sectors'), api('/usages'), api('/sources'),
@@ -3392,7 +3399,7 @@ async function renderReview() {
             if (d.ai_status !== 'completed') return '✕ ';
             return d.ai_eligible === false ? '⚠ ' : d.ai_eligible === true ? '' : '✕ ';
           };
-          const draftOptionHtml = (d) => `<option value="${d.id}">${draftOptionMark(d)}${d.title}</option>`;
+          const draftOptionHtml = (d) => `<option value="${d.id}">${draftOptionMark(d)}${draftOptionText(d.title)}</option>`;
           const pendingDrafts = drafts.filter(isReviewerPending);
           const completedDrafts = drafts.filter((d) => !isReviewerPending(d));
           if (!drafts.length) return '<option>Draft 없음</option>';

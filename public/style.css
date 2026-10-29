@@ -760,7 +760,7 @@ td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); co
   height: var(--ctrl-md); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--radius-control);
   font-size: 14px; font-weight: 500; background: var(--surface); color: var(--text);
 }
-.review-toolbar select { min-width: 220px; flex: 1 1 220px; }
+.review-toolbar select { min-width: 0; max-width: 100%; flex: 1 1 220px; text-overflow: ellipsis; }
 .review-toolbar .btn { font-weight: 600; }
 
 /* Source strip: editorial metadata line, no card, one divider beneath. */
