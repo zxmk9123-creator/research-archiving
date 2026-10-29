@@ -7,7 +7,7 @@
 const MAX_CHAIN_DEPTH = 15;
 const WATCHDOG_STALL_HOUR_KST = 9;      // started late / no progress by 09:00 KST is an incident
 const BRIEF_GRACE_MS = 30 * 60 * 1000;
-const GENERATION_LEASE_MS = 25 * 60 * 1000; // same lease dailyBrief.js uses to reclaim a stuck generation  // collection done, headline still missing after 30 minutes
+const GENERATION_LEASE_MS = 6 * 60 * 1000; // same lease dailyBrief.js uses to reclaim a stuck generation  // collection done, headline still missing after 30 minutes
 
 // The production host Vercel injects (tracks the project's current primary domain, unlike a hard-coded URL).
 function chainTarget(env = process.env) {
