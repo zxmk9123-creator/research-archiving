@@ -87,14 +87,25 @@ async function runDailyCron(chainDepth) {
       const incident = guard.pipelineIncident(status, brief, { hourKst });
       if (incident) throw new Error(incident);
       let warnings = [];
+      let alerts = { configured: false, sent: 0, failed: 0, skipped: 0 };
       try {
-        const [{ rows: tr }, { rows: ph }] = await Promise.all([
+        const [{ rows: tr }, { rows: ph }, { rows: hb }] = await Promise.all([
           pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'pipeline_trace'"),
           pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'provider_health'"),
+          pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'trigger_heartbeat'"),
         ]);
         warnings = guard.opsWarnings((tr[0] && tr[0].last_totals && tr[0].last_totals.events) || [], (ph[0] && ph[0].last_totals) || {}, { expectMetrics: status.completedToday });
+        // scheduler-trigger health is judged on its own evidence, apart from collection/briefing completion above
+        const incidents = require('./triggerHeartbeat').triggerIncidents((hb[0] && hb[0].last_totals) || null);
+        const { dispatchAlerts, keyOf } = require('./opsAlerts');
+        const day = new Date().toISOString().slice(0, 10);
+        alerts = await dispatchAlerts([
+          ...incidents.filter((i) => i.kind === 'missed').map((i) => ({ key: i.key, text: i.text })),
+          ...warnings.map((w) => ({ key: keyOf(w, day), text: w })),
+        ]);
+        warnings = [...warnings, ...incidents.map((i) => `${i.kind === 'telemetry' ? 'telemetry: ' : ''}${i.text}`)];
       } catch (err) { console.error('ops warnings failed:', err.message); warnings = [`ops warnings unavailable: ${String(err.message).slice(0, 80)}`]; }
-      return { ran: true, reason: `${status.state}/${brief.state}`, warnings };
+      return { ran: true, reason: `${status.state}/${brief.state}`, warnings, alerts };
     }],
   ];
   // the scope-term cache that feeds the relevance filter is loaded at boot on a long-lived server; a fresh function instance starts empty
@@ -117,6 +128,7 @@ function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
   return async (req, res) => {
     if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const chainDepth = Number(req.get('x-cron-chain')) || 0;
+    if (chainDepth === 0) await require('./triggerHeartbeat').recordTrigger(req.get('user-agent') || '', req.get('x-trigger-source') || '').catch(() => {}); // external callers only
     if (chainDepth > 0) {
       track(run(chainDepth).catch((err) => console.error('cron chain hop failed:', err.message)));
       return res.status(202).json({ chained: true, depth: chainDepth });

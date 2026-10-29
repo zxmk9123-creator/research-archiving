@@ -39,7 +39,7 @@ jobs:
           bad=0
           while [ "$SECONDS" -lt "$end" ]; do
             i=$((i + 1))
-            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/daily" || true)
+            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" -H "X-Trigger-Source: github-actions" "$APP_URL/api/cron/daily" || true)
             echo "call $i: HTTP $code"
             cat out.json 2>/dev/null | head -c 3000; echo
             # a 3xx means the domain moved (the old research-archiving.vercel.app now redirects to oilfats-research.vercel.app): curl does not
