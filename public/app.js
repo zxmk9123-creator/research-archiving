@@ -3,8 +3,44 @@
 const TYPE_CLASS = { '뉴스': 'news', '보고서': 'report', '통계': 'stat', '규제': 'reg' };
 const app = document.getElementById('app');
 
+// Short-lived read cache for list-type GETs. Every tab switch used to re-download the same lists (Home alone calls 4 endpoints), so
+// each click waited a full network round trip before anything changed on screen. A hit is served from memory (parsed fresh per call, so
+// callers may mutate it); concurrent identical requests share one fetch; ANY non-GET call clears the cache so a user's own writes are
+// never hidden. Pollers and live status (/items/:id, /sources/daily-discovery-status, /ops, /auth) are not in the allow-list.
+const API_CACHE_TTL_MS = 30000;
+const API_CACHEABLE = /^\/(?:sectors|usages|stats|picks(?:\/ranking)?|sources|headlines\/latest|items)(?:\?|$)/;
+const apiCache = new Map(); // path -> { at, text, hasMore }
+const apiInflight = new Map(); // path -> Promise<{ text, hasMore }>
+
 async function api(path, opts) {
   const { includeMeta = false, ...requestOptions } = opts || {};
+  const method = String(requestOptions.method || 'GET').toUpperCase();
+  const cacheable = method === 'GET' && API_CACHEABLE.test(path);
+  const finish = (text, hasMore) => {
+    if (text === null) return null;
+    const data = JSON.parse(text);
+    return includeMeta ? { data, hasMore } : data;
+  };
+  if (cacheable) {
+    const hit = apiCache.get(path);
+    if (hit && Date.now() - hit.at < API_CACHE_TTL_MS) return finish(hit.text, hit.hasMore);
+    let pending = apiInflight.get(path);
+    if (!pending) {
+      pending = apiRequest(path, requestOptions)
+        .then((r) => { if (r.text !== null) apiCache.set(path, { at: Date.now(), ...r }); return r; })
+        .finally(() => apiInflight.delete(path));
+      apiInflight.set(path, pending);
+    }
+    const r = await pending;
+    return finish(r.text, r.hasMore);
+  }
+  const r = await apiRequest(path, requestOptions);
+  if (method !== 'GET') apiCache.clear();
+  return finish(r.text, r.hasMore);
+}
+
+// One network call: resolves { text, hasMore } (text === null for 204), throws the friendly error message on a non-OK response.
+async function apiRequest(path, requestOptions) {
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...requestOptions,
@@ -22,9 +58,8 @@ async function api(path, opts) {
     } catch (err) { /* not JSON — keep raw text */ }
     throw new Error(message);
   }
-  if (res.status === 204) return null;
-  const data = await res.json();
-  return includeMeta ? { data, hasMore: res.headers.get('X-Has-More') === 'true' } : data;
+  if (res.status === 204) return { text: null, hasMore: false };
+  return { text: await res.text(), hasMore: res.headers.get('X-Has-More') === 'true' };
 }
 
 // AI draft generation can legitimately take well over a minute (FreeLLMAPI's
@@ -4165,7 +4200,24 @@ window.addEventListener('load', () => {
   }
 });
 
+// Immediate feedback for a click whose page needs a network round trip: after 120 ms without a result a thin bar runs along the top
+// (shorter navigations never flash it). Only visual; the route logic below is unchanged.
+function startRouteProgress() {
+  const bar = document.getElementById('route-progress') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'route-progress', hidden: true }));
+  const timer = setTimeout(() => { bar.hidden = false; }, 120);
+  return () => { clearTimeout(timer); bar.hidden = true; };
+}
+
 async function router() {
+  const endProgress = startRouteProgress();
+  try {
+    await routeToPage();
+  } finally {
+    endProgress();
+  }
+}
+
+async function routeToPage() {
   const { path, param, query } = parseHash();
   trackPageview(path, param);
   cancelActiveSpotlightTour();

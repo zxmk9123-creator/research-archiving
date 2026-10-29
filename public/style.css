@@ -1431,3 +1431,10 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .archive-tabs::-webkit-scrollbar { display: none; }
 .archive-tabs .archive-tab { flex: none; white-space: nowrap; }
 @media (max-width: 640px) { .archive-layout > .archive-main { margin-top: 0; } .archive-main > .section-header { justify-content: flex-start; } }
+
+/* Route-change progress bar (shown by startRouteProgress after 120 ms of waiting) */
+#route-progress { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 1000; overflow: hidden; pointer-events: none; background: transparent; }
+#route-progress[hidden] { display: none; }
+#route-progress::before { content: ''; position: absolute; inset: 0; width: 40%; background: var(--action, #3182f6); animation: route-progress-run 1s ease-in-out infinite; }
+@keyframes route-progress-run { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+@media (prefers-reduced-motion: reduce) { #route-progress::before { width: 100%; animation: none; opacity: .6; } }
