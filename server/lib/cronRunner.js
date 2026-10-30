@@ -19,6 +19,8 @@ function isCronAuthorized(req, env = process.env) {
 
 // Steps a chained hop runs. stalled_drafts is cheap and is what recovers the AI draft a killed hop left at 'pending' (the normal call that
 // would run it is budget-skipped while discovery is using the time).
+// A review that starts before this takes ~70-150 s on a slow router; the headline step needs ~130 s after it, inside the ~300 s invocation.
+const AUTOPILOT_CUTOFF_MS = 90000;
 const CHAIN_STEPS = new Set(['daily_discovery', 'stalled_drafts', 'ensure_daily_brief', 'pipeline_watchdog']);
 
 // How one step's return value is reported in the response.
@@ -66,8 +68,10 @@ async function runDailyCron(chainDepth) {
     ['review_autopilot', async () => {
       const autopilot = require('./reviewAutopilot');
       const total = { rounds: 0, archived: 0, published: 0, retry: 0, human: 0 };
-      for (let i = 0; i < 6 && Date.now() - started < Math.min(BUDGET_MS, 170000); i++) {
-        const r = await autopilot.runAutopilot({ aiBudget: 8 });
+      // no new AI review after AUTOPILOT_CUTOFF_MS: the headline step below needs the rest of this invocation
+      const cutoff = started + AUTOPILOT_CUTOFF_MS;
+      for (let i = 0; i < 6 && Date.now() < Math.min(started + BUDGET_MS, cutoff); i++) {
+        const r = await autopilot.runAutopilot({ aiBudget: 8, deadlineAt: cutoff });
         if (!r || r.skipped) break;
         total.rounds++;
         for (const k of ['archived', 'published', 'retry', 'human']) total[k] += r[k] || 0;
@@ -128,12 +132,14 @@ function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
   return async (req, res) => {
     if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const chainDepth = Number(req.get('x-cron-chain')) || 0;
+    // everything this invocation starts (headline generation included) is cut off by the host ~300 s after now
+    const runBounded = (depth) => require('./dailyBrief').runWithDeadline(Date.now() + 285000, () => run(depth));
     if (chainDepth === 0) await require('./triggerHeartbeat').recordTrigger(req.get('user-agent') || '', req.get('x-trigger-source') || '').catch(() => {}); // external callers only
     if (chainDepth > 0) {
-      track(run(chainDepth).catch((err) => console.error('cron chain hop failed:', err.message)));
+      track(runBounded(chainDepth).catch((err) => console.error('cron chain hop failed:', err.message)));
       return res.status(202).json({ chained: true, depth: chainDepth });
     }
-    res.json(await run(0));
+    res.json(await runBounded(0));
   };
 }
 

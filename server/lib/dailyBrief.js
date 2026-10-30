@@ -1,7 +1,14 @@
 const pool = require('../db/pool');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const provider = require('./ai/provider');
 
+// The host ends a function at its time limit no matter what is still running. A caller that knows when its invocation will be cut off
+// runs the generation inside runWithDeadline(); the retry loop then decides from the time REALLY left, not from when it started itself.
+const deadlineStore = new AsyncLocalStorage();
+const runWithDeadline = (deadlineMs, fn) => deadlineStore.run(deadlineMs, fn);
+
 const MAX_EVIDENCE_ITEMS = 24;
+const REPAIR_EVIDENCE_ITEMS = 12;
 // A live generation refreshes updated_at at every attempt (one attempt is bounded by the router's ~135 s cascade plus the retry delay, so
 // well under this), so a row silent for longer than this has lost its worker (the host ended the function): reclaim it quickly.
 const GENERATION_STALE_AFTER_MINUTES = 6;
@@ -174,6 +181,8 @@ const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|st
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
 async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
+  // after an invalid answer the retry gets a shorter input (the freshest items first): less to echo or elide, and the headline only uses 5
+  const evidenceLimit = repairHint ? REPAIR_EVIDENCE_ITEMS : MAX_EVIDENCE_ITEMS;
   // Only consider items collected during this KST day and published in the
   // seven calendar days ending today. Newer publication dates rank first.
   const recentPublishedSince = new Date(`${briefDate}T12:00:00Z`);
@@ -199,7 +208,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
       collectionWindowEnd,
       recentPublishedSince.toISOString().slice(0, 10),
       publicationWindowEnd.toISOString().slice(0, 10),
-      MAX_EVIDENCE_ITEMS,
+      evidenceLimit,
     ]
   );
   const itemIds = items.map((item) => Number(item.id));
@@ -249,8 +258,11 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint ? REPAIR_HINT : ''}`;
 
   const text = await provider.callProvider({ system, user });
-  if (PLACEHOLDER_OUTPUT_RE.test(String(text || ''))) throw new Error('brief_placeholder_output');
-  const raw = parseJsonObject(text);
+  // the start of an unusable answer is kept in the attempt log: without it the cause of a repeated failure cannot be told from the message
+  const withHead = (message) => `${message} | head=${String(text || '').replace(/\s+/g, ' ').slice(0, 120)}`;
+  if (PLACEHOLDER_OUTPUT_RE.test(String(text || ''))) throw new Error(withHead('brief_placeholder_output'));
+  let raw;
+  try { raw = parseJsonObject(text); } catch (err) { throw new Error(withHead(err.message)); }
   const brief = validateBrief(raw, evidence);
   await pool.query(
     `UPDATE daily_briefs
@@ -276,7 +288,9 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
         RETRY_BASE_DELAY_MS * (2 ** Math.min(failureCount - 1, 4))
       );
       // not enough of this invocation is left for another delay + attempt: release the row for the next call rather than be killed mid-sleep
-      const outOfTime = !exhausted && Date.now() - started + delayMs + attemptMs > budgetMs;
+      const deadline = deadlineStore.getStore();
+      const timeLeft = deadline ? deadline - Date.now() : budgetMs - (Date.now() - started);
+      const outOfTime = !exhausted && delayMs + attemptMs > timeLeft;
       const final = exhausted || outOfTime;
       const message = String(err.message || 'generation_failed').slice(0, 480);
       console.error(`daily_brief attempt failed date=${briefDate} retry=${failureCount - 1} exhausted=${exhausted} out_of_time=${outOfTime} delay_ms=${delayMs} error=${message}`);
@@ -379,6 +393,9 @@ const BRIEF_DEADLINE_HOUR_KST = 10;  // a headline exists by now even if collect
 //  - a ready brief is final for the day: one morning collection, one headline (no noon or later refresh).
 async function ensureDailyBrief(now = new Date(), { discoveryDone = false } = {}) {
   const briefDate = kstDate(now);
+  // an attempt started with less time than it needs would be cut off mid-call and leave the row 'generating'; leave the row untouched instead
+  const deadline = deadlineStore.getStore();
+  if (deadline && deadline - Date.now() < TYPICAL_ATTEMPT_MS) return { ran: false, reason: 'insufficient_time' };
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(now)) % 24;
   if (!discoveryDone && hour < BRIEF_DEADLINE_HOUR_KST) return { ran: false, reason: 'collection_running' };
   const { rows } = await pool.query('SELECT status FROM daily_briefs WHERE brief_date = $1', [briefDate]);
@@ -439,4 +456,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { runWithDeadline, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

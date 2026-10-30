@@ -16,9 +16,9 @@ const GOOD = JSON.stringify({
 function harness(outputs) {
   const origQuery = pool.query;
   const origCall = provider.callProvider;
-  const state = { updates: [], attempts: [], prompts: [], ready: false };
+  const state = { updates: [], attempts: [], prompts: [], limits: [], ready: false };
   pool.query = async (text, params) => {
-    if (/FROM items i/.test(text)) return { rows: [item] };
+    if (/FROM items i/.test(text)) { state.limits.push(params[4]); return { rows: [item] }; }
     if (/INSERT INTO daily_brief_attempts/.test(text)) { state.attempts.push(params[3]); return { rows: [] }; }
     if (/SET attempt_count = attempt_count \+ 1/.test(text)) { state.updates.push({ status: params[2] ? 'failed' : 'generating', error: params[1] }); return { rows: [] }; }
     if (/SET status = 'ready'/.test(text)) { state.ready = true; return { rows: [] }; }
@@ -90,5 +90,60 @@ test('reclaim policy: a silent generation is reclaimed after minutes (not 25), a
     assert.match(seen.text, /attempt_count < \$7/);
     assert.equal(seen.params[6], dailyBrief.MAX_AUTO_DAILY_ATTEMPTS);
     assert.equal(seen.params[3], dailyBrief.GENERATION_STALE_AFTER_MINUTES);
+  } finally { pool.query = origQuery; }
+});
+
+test('the retry after an unusable answer uses a shorter input, and the log keeps the start of the bad answer', async () => {
+  const h = harness(['{"lead":"x","developments":[...],"watchpoints":[]}', GOOD]);
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.deepEqual(h.state.limits, [24, 12], 'first try uses the full evidence set, the repair try the freshest 12');
+    assert.match(h.state.attempts[0], /\| head=\{"lead":"x","developments":\[\.\.\.\]/);
+  } finally { h.restore(); }
+});
+
+test('inside an invocation deadline the retry loop uses the time really left, not its own start time', async () => {
+  const h = harness([new Error('invalid_brief_json')]);
+  let slept = 0;
+  try {
+    // generous own budget, but only 30 s of the invocation left: a 60 s attempt cannot fit, so the row is released at once
+    await dailyBrief.runWithDeadline(Date.now() + 30_000, () => dailyBrief.buildDailyBrief(today, { budgetMs: 10 * 60_000, attemptMs: 60_000, sleep: async (ms) => { slept += ms; } }));
+    assert.equal(slept, 0);
+    assert.equal(h.state.updates.length, 1);
+    assert.match(h.state.updates[0].error, /^retry_deferred/);
+    h.state.updates.length = 0;
+    // plenty left: it retries as before
+    await dailyBrief.runWithDeadline(Date.now() + 10 * 60_000, () => dailyBrief.buildDailyBrief(today, { sleep: async () => {} }));
+    assert.equal(h.state.updates.length, 6);
+  } finally { h.restore(); }
+});
+
+test('review autopilot: no new AI review starts after the deadline (the rest stays queued), so later steps such as the headline are reached', async () => {
+  const autopilot = require('../server/lib/reviewAutopilot');
+  const rows = [1, 2, 3, 4].map((id) => ({ id, title: `t${id}`, status: 'Draft', ai_status: 'completed', ai_eligible: true, reviewer_eligible: null }));
+  const origQuery = pool.query;
+  const prevAuto = process.env.AUTO_REVIEW;
+  delete process.env.AUTO_REVIEW; // the test setup switches the routine off
+  pool.query = async (text) => (/FROM items i LEFT JOIN sources/.test(text) ? { rows } : { rows: [] });
+  const seen = [];
+  const review = async (it) => { seen.push(it.id); return { id: it.id, action: 'human' }; };
+  try {
+    const late = await autopilot.runAutopilot({ aiBudget: 8, deadlineAt: Date.now() - 1, review });
+    assert.deepEqual(seen, [], 'past the deadline nothing new starts');
+    assert.equal(late.deferred, 4);
+    const open = await autopilot.runAutopilot({ aiBudget: 3, deadlineAt: Date.now() + 60_000, review });
+    assert.deepEqual(seen, [1, 2, 3], 'before the deadline the normal AI budget applies');
+    assert.equal(open.human, 3);
+  } finally { pool.query = origQuery; if (prevAuto !== undefined) process.env.AUTO_REVIEW = prevAuto; }
+});
+
+test('ensureDailyBrief does not claim or start a generation when too little of the invocation is left', async () => {
+  const origQuery = pool.query;
+  let queried = 0;
+  pool.query = async () => { queried++; return { rows: [] }; };
+  try {
+    const r = await dailyBrief.runWithDeadline(Date.now() + 10_000, () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: true }));
+    assert.deepEqual(r, { ran: false, reason: 'insufficient_time' });
+    assert.equal(queried, 0, 'nothing was claimed in the database');
   } finally { pool.query = origQuery; }
 });

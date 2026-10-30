@@ -165,11 +165,14 @@ async function regenerate(id, fullText) {
 let running = false;
 const state = { lastRun: null, lastResult: null };
 
-async function runAutopilot({ aiBudget = 8, dryRun = false, ids = null } = {}) {
+// deadlineAt (ms epoch, optional): no NEW AI review starts after it. AI reviews run one at a time and a slow router makes each take over a
+// minute, so without this one call could spend its whole invocation here and never reach the steps after it (the daily headline among them).
+// Items left over simply stay in the queue for the next call. `review` is injectable for tests.
+async function runAutopilot({ aiBudget = 8, dryRun = false, ids = null, deadlineAt = null, review = reviewOne } = {}) {
   if (process.env.AUTO_REVIEW === 'off') return { skipped: 'off' };
   if (running) return { skipped: 'already_running' };
   running = true;
-  const out = { archived: 0, published: 0, retry: 0, human: 0, items: [] };
+  const out = { archived: 0, published: 0, retry: 0, human: 0, deferred: 0, items: [] };
   try {
     const names = await getWatchNames().catch(() => []);
     const { rows } = await pool.query(
@@ -182,9 +185,9 @@ async function runAutopilot({ aiBudget = 8, dryRun = false, ids = null } = {}) {
     let ai = 0;
     for (const it of rows) {
       const cheap = isClearReject(it) && !looksValuable(it, names);
-      if (!cheap) { if (ai >= aiBudget) continue; ai++; }
+      if (!cheap) { if (ai >= aiBudget) continue; if (deadlineAt && Date.now() >= deadlineAt) { out.deferred = (out.deferred || 0) + 1; continue; } ai++; }
       try {
-        const r = await reviewOne(it, { dryRun, names });
+        const r = await review(it, { dryRun, names });
         out[r.action] = (out[r.action] || 0) + 1;
         out.items.push(r);
       } catch (err) {
