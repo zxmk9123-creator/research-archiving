@@ -180,3 +180,105 @@ test('only two recovery actions exist and each is a described, already-existing 
   const plan = planRecovery(f, {}, { now: NOW.getTime(), mode: 'recover', recoveryEnabled: true });
   assert.match(plan.actions[0].does, /existing headline guard/);
 });
+
+// ---- review of the deployed implementation: critical-path regressions ----
+
+test('REVIEW: recovery requires an explicit "recover" request AND DOCTOR_RECOVERY=on, read at call time', async () => {
+  const bad = base({ brief: failedBrief('AI provider timeout') });
+  const prev = process.env.DOCTOR_RECOVERY;
+  try {
+    delete process.env.DOCTOR_RECOVERY;
+    let ex = exec();
+    let r = await runDoctor({ now: NOW, clock: () => NOW.getTime() + 60000, mode: 'recover', gather: gatherSeq(bad), executors: ex, store: memStore() });
+    assert.deepEqual([ex.calls.length, r.outcome], [0, 'recovery_not_permitted']);
+    process.env.DOCTOR_RECOVERY = 'on';
+    ex = exec();
+    r = await runDoctor({ now: NOW, clock: () => NOW.getTime() + 60000, mode: 'diagnose', gather: gatherSeq(bad), executors: ex, store: memStore() });
+    assert.deepEqual([ex.calls.length, r.outcome], [0, 'recovery_not_permitted'], 'the flag alone never starts recovery: the request must say recover');
+    process.env.DOCTOR_RECOVERY = 'yes';
+    ex = exec();
+    r = await runDoctor({ now: NOW, clock: () => NOW.getTime() + 60000, mode: 'recover', gather: gatherSeq(bad), executors: ex, store: memStore() });
+    assert.equal(ex.calls.length, 0, 'only the exact value "on" enables it');
+    process.env.DOCTOR_RECOVERY = 'on';
+    ex = exec();
+    await runDoctor({ now: NOW, clock: () => NOW.getTime() + 60000, mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store: memStore() });
+    assert.equal(ex.calls.length, 1);
+  } finally { if (prev === undefined) delete process.env.DOCTOR_RECOVERY; else process.env.DOCTOR_RECOVERY = prev; }
+});
+
+test('REVIEW: two doctors started at the same moment execute the recovery exactly once', async () => {
+  const bad = base({ brief: failedBrief('AI provider timeout') });
+  const ex = exec(); const store = memStore();
+  const results = await Promise.all([1, 2, 3].map(() => run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store })));
+  assert.equal(ex.calls.length, 1);
+  assert.deepEqual(results.map((r) => r.outcome).sort(), ['locked', 'locked', 'unresolved']);
+  assert.equal(store.doc.days['2026-10-30'].rounds, 1);
+});
+
+test('REVIEW: if the lease/limits cannot be stored, NOTHING is executed (an unstored lease protects nothing)', async () => {
+  const bad = base({ brief: failedBrief('AI provider timeout') });
+  const ex = exec();
+  const flaky = { doc: {}, async read() { return {}; }, async mutate() { return false; } };
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad), executors: ex, store: flaky });
+  assert.deepEqual([ex.calls.length, r.outcome, r.humanNeeded], [0, 'state_unavailable', true]);
+});
+
+test('REVIEW: the run stays inside its time budget — a second action is skipped when too little time is left, and executors get a deadline', async () => {
+  const stalled = base({ discovery: { state: 'stalled', completedToday: false, progress: { done: 10, total: 84 }, lastProgressAt: iso('2026-10-30T00:10:00Z') }, brief: failedBrief('AI provider timeout') });
+  let t = NOW.getTime();
+  const deadlines = [];
+  const executors = {
+    kick_pipeline: async ({ deadlineAt }) => { deadlines.push(deadlineAt - t); t += 230000; return { kicked: true }; }, // consumes almost the whole budget
+    retry_headline: async ({ deadlineAt }) => { deadlines.push(deadlineAt); return { ran: true }; },
+  };
+  const r = await runDoctor({ now: NOW, clock: () => t, recoveryEnabled: true, mode: 'recover', gather: gatherSeq(stalled, stalled), executors, store: memStore() });
+  assert.equal(r.actions.length, 2);
+  assert.ok(deadlines[0] <= 200000, 'the first executor was bounded');
+  const skipped = r.actions.find((a) => a.action === 'retry_headline');
+  assert.equal(skipped.error, 'skipped_no_time_left');
+  assert.equal(deadlines.length, 1, 'the second executor never started');
+});
+
+test('REVIEW: the classification looks at the cause, not at the model answer quoted after "| head=" ("network"/"503" inside an answer is not a network failure)', () => {
+  assert.equal(errorKind('brief_placeholder_output | head=Let me think about the network timeout 503 situation'), 'model_output_invalid');
+  assert.equal(errorKind('No AI provider configured'), 'unknown', 'a configuration problem is not a transient one');
+  const ctx = base({ brief: failedBrief('mystery | head=timeout network 503'), attempts: [{ error: 'mystery | head=timeout network 503', created_at: iso('2026-10-30T00:29:00Z') }] });
+  const f = diagnose(evaluateHealth(ctx, NOW.getTime()), ctx, NOW.getTime()).find((x) => x.checkId === 'headline');
+  assert.deepEqual([f.cause, f.classification, f.action], ['unknown_generation_error', 'needs_human', null]);
+});
+
+test('REVIEW: a recovery that could not be applied (kick not needed / headline guard declined) is "not_applied" and a person is told; it is not counted as an unresolved failure', async () => {
+  const stalled = base({ discovery: { state: 'stalled', completedToday: false, progress: { done: 10, total: 84 }, lastProgressAt: iso('2026-10-30T00:10:00Z') }, brief: null });
+  const store = memStore();
+  const ex = { kick_pipeline: async () => ({ kicked: false, reason: 'not_needed' }) };
+  const r = await run({ mode: 'recover', gather: gatherSeq(stalled, stalled), executors: ex, store });
+  assert.deepEqual([r.outcome, r.humanNeeded], ['not_applied', true]);
+  const key = Object.keys(store.doc.days['2026-10-30'].byKey)[0];
+  assert.equal(store.doc.days['2026-10-30'].byKey[key].unresolved, undefined);
+});
+
+test('REVIEW: the headline executor goes through the guard — a READY headline is never reclaimed or overwritten (no INSERT/UPDATE is issued)', async () => {
+  const pool = require('../server/db/pool');
+  const { defaultExecutors } = require('../server/lib/pipelineDoctor');
+  const orig = pool.query;
+  const statements = [];
+  pool.query = async (text) => {
+    statements.push(String(text).trim().split(/\s+/)[0].toUpperCase());
+    if (/FROM daily_briefs WHERE brief_date/.test(text)) return { rows: [{ status: 'ready' }] };
+    return { rows: [] };
+  };
+  try {
+    const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
+    assert.deepEqual(result, { ran: false, reason: 'up_to_date' });
+    assert.ok(!statements.includes('INSERT') && !statements.includes('UPDATE') && !statements.includes('DELETE'), `only reads happened: ${statements}`);
+  } finally { pool.query = orig; }
+});
+
+test('REVIEW: redaction also covers key/value secrets and auth headers, and the stored report holds none of them', async () => {
+  const text = 'x-subscription-token: ABCDEF123456 api_key=abc123456xyz password: hunter22222 Authorization: Bearer abcdefghijkl1234';
+  const out = JSON.stringify(scrub({ t: text }));
+  for (const secret of ['ABCDEF123456', 'abc123456xyz', 'hunter22222', 'abcdefghijkl1234']) assert.ok(!out.includes(secret));
+  const store = memStore();
+  await run({ mode: 'diagnose', gather: gatherSeq(base({ brief: failedBrief(`AI provider timeout ${text}`) })), executors: exec(), store });
+  for (const secret of ['ABCDEF123456', 'abc123456xyz', 'hunter22222', 'abcdefghijkl1234']) assert.ok(!JSON.stringify(store.doc).includes(secret), `${secret} not persisted`);
+});

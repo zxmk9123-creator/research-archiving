@@ -20,6 +20,9 @@ const MAX_ROUNDS_PER_DAY = 3;
 const MAX_ATTEMPTS_PER_KEY = 2;
 const MAX_UNRESOLVED_PER_KEY = 1;     // a recovery that did not fix it is not repeated
 const EXECUTOR_TIMEOUT_MS = 200000;
+const RUN_BUDGET_MS = 250000;        // the whole run (diagnosis, actions, re-check, report) must fit the ~300 s function limit
+const MIN_ACTION_MS = 30000;         // do not start an action with less time than this left
+const RECHECK_RESERVE_MS = 15000;
 const KEEP_REPORTS = 20;
 const KST_MS = 9 * 3600000;
 const kstDay = (ms) => new Date(ms + KST_MS).toISOString().slice(0, 10);
@@ -34,8 +37,11 @@ const finding = (checkId, cause, confidence, classification, evidence, extra = {
   evidence, action: extra.action || null, key: `${checkId}:${cause}`,
 });
 
+// Only the cause part counts: the stored error carries the start of the model's answer after " | head=", which is free text and must not steer
+// the classification ("network" or "503" inside an answer is not a network failure).
 const errorKind = (text) => {
-  const t = String(text || '');
+  const t = String(text || '').replace(/ \| head=[^]*$/, '');
+  if (/No AI provider/i.test(t)) return 'unknown'; // a configuration problem, not a transient one
   if (/brief_placeholder_output|brief_truncated_by_max_tokens|invalid_brief_json|not valid JSON|Unexpected token|incomplete_brief|meta_phrase_in_summary|headline_lead_too_long|unexpected_non_korean_script/.test(t)) return 'model_output_invalid';
   if (/retry_deferred/.test(t)) return 'insufficient_invocation_time';
   if (/timed? ?out|timeout|ECONN|ENOTFOUND|fetch failed|network|\b(429|502|503|504)\b|AI provider/i.test(t)) return 'ai_provider_transient';
@@ -75,7 +81,7 @@ function diagnose(health, ctx, now = Date.now()) {
       if (/automatic limit reached/.test(c.detail)) out.push(finding(c.id, 'attempt_cap_reached', 'confirmed', 'needs_human', ev));
       else if (/stuck: generating/.test(c.detail)) out.push(finding(c.id, 'worker_lost', 'likely', 'auto_recoverable', ev, { action: 'retry_headline' }));
       else if (/failed after/.test(c.detail)) {
-        const kind = errorKind(`${ctx.brief && ctx.brief.error} ${lastErrors[lastErrors.length - 1] || ''}`);
+        const kind = [ctx.brief && ctx.brief.error, lastErrors[lastErrors.length - 1]].map(errorKind).find((k) => k !== 'unknown') || 'unknown';
         if (kind === 'unknown') out.push(finding(c.id, 'unknown_generation_error', 'unknown', 'needs_human', ev));
         else out.push(finding(c.id, kind, kind === 'ai_provider_transient' ? 'likely' : 'confirmed', 'retryable', ev, { action: 'retry_headline' }));
       } else if (/missing/.test(c.detail)) {
@@ -117,7 +123,7 @@ function planRecovery(findings, doc, { now = Date.now(), mode = 'diagnose', reco
   return plan;
 }
 
-const SECRET_RE = /(Bearer\s+[A-Za-z0-9._~+/=-]{8,}|sk-[A-Za-z0-9_-]{10,}|tvly-[A-Za-z0-9_-]{8,}|BSA[A-Za-z0-9_-]{16,}|postgres(?:ql)?:\/\/\S+|[A-Fa-f0-9]{40,})/g;
+const SECRET_RE = /((?:api[_-]?key|token|secret|password|authorization|x-subscription-token)["'\s:=]+[^\s"',;&]{6,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,}|sk-[A-Za-z0-9_-]{10,}|tvly-[A-Za-z0-9_-]{8,}|BSA[A-Za-z0-9_-]{16,}|postgres(?:ql)?:\/\/\S+|[A-Fa-f0-9]{40,})/g;
 const scrub = (value) => JSON.parse(String(JSON.stringify(value)).replace(SECRET_RE, '[redacted]'));
 
 const failing = (h) => h.checks.filter((c) => c.status === 'fail' || c.status === 'warn').map((c) => `${c.id}:${c.status}`);
@@ -149,15 +155,15 @@ async function collectContext(now) {
 }
 
 const defaultExecutors = {
-  async kick_pipeline() {
+  async kick_pipeline() { // takes ({ deadlineAt }) like the other executor; the kick itself is short
     const r = await require('./pipelineGuardian').maybeKickStalledPipeline();
     await new Promise((resolve) => setTimeout(resolve, 15000)); // let the started hop take its lease before the re-check
     return r;
   },
-  async retry_headline() {
+  async retry_headline({ deadlineAt } = {}) {
     const dailyBrief = require('./dailyBrief');
     const status = await require('./dailyDiscovery').getDailyDiscoveryStatus(new Date());
-    const deadline = Date.now() + 230000;
+    const deadline = deadlineAt || Date.now() + 200000;
     const r = await dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: status.completedToday }));
     await require('./background').drain(Math.max(1000, deadline - Date.now() - 5000)); // the generation runs in the background: wait for it
     return r;
@@ -176,6 +182,7 @@ async function runDoctor({
     read: async () => (await require('../db/pool').query("SELECT last_totals FROM scheduler_jobs WHERE job_name = $1", [JOB])).rows[0]?.last_totals || {},
     mutate: (fn) => mutateJobState(JOB, fn),
   };
+  const runEnd = clock() + RUN_BUDGET_MS;
   const day = kstDay(t0);
   const lockId = `${t0}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -201,7 +208,7 @@ async function runDoctor({
   } else {
     // take the lease: one doctor at a time
     let acquired = false;
-    await st.mutate((d) => {
+    const persisted = await st.mutate((d) => {
       acquired = false; // this function may be re-applied on a newer document: decide again every time
       if (d.lock && d.lock.until > t0 && d.lock.id !== lockId) return undefined;
       acquired = true;
@@ -212,16 +219,20 @@ async function runDoctor({
       for (const k of Object.keys(d.days).sort().slice(0, -5)) delete d.days[k];
       return d;
     });
-    if (!acquired) {
+    // the lease and the attempt counters must really be stored before anything is executed: an unstored lease protects nothing
+    if (!persisted) { acquired = false; report.outcome = 'state_unavailable'; report.humanNeeded = true; }
+    else if (!acquired) {
       report.outcome = 'locked';
     } else {
       for (const a of report.plan.actions) {
-        const began = Date.now();
+        const began = clock();
+        const left = runEnd - began - RECHECK_RESERVE_MS;
+        if (left < MIN_ACTION_MS) { report.actions.push({ action: a.action, key: a.key, why: a.why, error: 'skipped_no_time_left', ms: 0 }); continue; }
         try {
-          const result = await withTimeout(executors[a.action](), executorTimeoutMs);
-          report.actions.push({ action: a.action, key: a.key, why: a.why, result, ms: Date.now() - began });
+          const result = await withTimeout(executors[a.action]({ deadlineAt: began + Math.min(executorTimeoutMs, left) }), Math.min(executorTimeoutMs, left));
+          report.actions.push({ action: a.action, key: a.key, why: a.why, result, ms: clock() - began });
         } catch (err) {
-          report.actions.push({ action: a.action, key: a.key, why: a.why, error: String(err && err.message).slice(0, 160), ms: Date.now() - began });
+          report.actions.push({ action: a.action, key: a.key, why: a.why, error: String(err && err.message).slice(0, 160), ms: clock() - began });
         }
       }
       // re-check with fresh data, exactly the same check
@@ -229,9 +240,11 @@ async function runDoctor({
       const afterCtx = await gather(new Date(afterNow));
       const after = evaluateHealth(afterCtx, afterNow);
       report.after = { status: after.status, failing: failing(after), summary: after.summary };
-      report.outcome = judgeOutcome(before, after, report.actions);
+      // an action that threw or timed out may have partly run: it counts as attempted. Only explicit no-ops and never-started actions do not.
+      const applied = report.actions.some((x) => x.error !== 'skipped_no_time_left' && !(x.result && (x.result.kicked === false || x.result.ran === false)));
+      report.outcome = applied ? judgeOutcome(before, after, report.actions) : (after.status === 'ok' ? 'recovered' : 'not_applied');
       report.afterFindings = diagnose(after, afterCtx, afterNow);
-      if (report.outcome === 'unresolved') report.humanNeeded = true;
+      if (report.outcome === 'unresolved' || report.outcome === 'not_applied') report.humanNeeded = true;
       await st.mutate((d) => {
         const dd = ((d.days = d.days || {})[day] = d.days[day] || {});
         for (const a of report.actions) { const k = ((dd.byKey = dd.byKey || {})[a.key] = dd.byKey[a.key] || {}); k.lastResult = report.outcome; if (report.outcome === 'unresolved') k.unresolved = (k.unresolved || 0) + 1; }
@@ -263,4 +276,4 @@ async function runDoctor({
   return safeReport;
 }
 
-module.exports = { ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
+module.exports = { defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
