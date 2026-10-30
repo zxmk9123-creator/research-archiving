@@ -33,15 +33,13 @@ function kstDate(now = new Date()) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-function parseJsonObject(text) {
-  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const start = cleaned.indexOf('{');
-  if (start < 0) throw new Error('invalid_brief_json');
+// Returns the end index of the balanced {...} that starts at `start` (string-aware), or -1.
+function balancedObjectEnd(text, start) {
   let depth = 0;
   let quoted = false;
   let escaped = false;
-  for (let index = start; index < cleaned.length; index += 1) {
-    const character = cleaned[index];
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
     if (quoted) {
       if (escaped) escaped = false;
       else if (character === '\\') escaped = true;
@@ -52,14 +50,38 @@ function parseJsonObject(text) {
     else if (character === '{') depth += 1;
     else if (character === '}') {
       depth -= 1;
-      if (depth === 0) {
-        const parsed = JSON.parse(cleaned.slice(start, index + 1));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid_brief_json');
-        return parsed;
-      }
+      if (depth === 0) return index;
     }
   }
-  throw new Error('invalid_brief_json');
+  return -1;
+}
+
+// Free models sometimes think out loud in the answer ("Let me analyze... the format is {"lead":..., "developments":[...]}") and give the real
+// JSON afterwards. Every top-level {...} in the text is tried; the LAST one that parses and has a "lead" is the answer. Without a "lead"
+// (other callers) the first object that parses is returned, as before. If nothing parses, the first candidate's parse error is thrown.
+function parseJsonObject(text) {
+  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  if (cleaned.indexOf('{') < 0) throw new Error('invalid_brief_json');
+  const parsed = [];
+  let firstError = null;
+  let from = 0;
+  while (from < cleaned.length) {
+    const start = cleaned.indexOf('{', from);
+    if (start < 0) break;
+    const end = balancedObjectEnd(cleaned, start);
+    if (end < 0) break;
+    try {
+      const value = JSON.parse(cleaned.slice(start, end + 1));
+      if (value && typeof value === 'object' && !Array.isArray(value)) parsed.push(value);
+      from = end + 1;
+    } catch (err) {
+      if (!firstError) firstError = err;
+      from = start + 1; // a broken outer object may still hold a valid inner one
+    }
+  }
+  if (!parsed.length) throw firstError || new Error('invalid_brief_json');
+  const withLead = parsed.filter((value) => typeof value.lead === 'string');
+  return withLead.length ? withLead[withLead.length - 1] : parsed[0];
 }
 
 
@@ -260,9 +282,15 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
   const text = await provider.callProvider({ system, user });
   // the start of an unusable answer is kept in the attempt log: without it the cause of a repeated failure cannot be told from the message
   const withHead = (message) => `${message} | head=${String(text || '').replace(/\s+/g, ' ').slice(0, 120)}`;
-  if (PLACEHOLDER_OUTPUT_RE.test(String(text || ''))) throw new Error(withHead('brief_placeholder_output'));
   let raw;
-  try { raw = parseJsonObject(text); } catch (err) { throw new Error(withHead(err.message)); }
+  try {
+    raw = parseJsonObject(text);
+  } catch (err) {
+    // name what went wrong: cut off by the token limit, a format description echoed instead of content, or plain invalid JSON
+    if (/길이 제한으로 인해 중간에 잘렸/.test(String(text || ''))) throw new Error(withHead('brief_truncated_by_max_tokens'));
+    if (PLACEHOLDER_OUTPUT_RE.test(String(text || ''))) throw new Error(withHead('brief_placeholder_output'));
+    throw new Error(withHead(err.message));
+  }
   const brief = validateBrief(raw, evidence);
   await pool.query(
     `UPDATE daily_briefs

@@ -147,3 +147,26 @@ test('ensureDailyBrief does not claim or start a generation when too little of t
     assert.equal(queried, 0, 'nothing was claimed in the database');
   } finally { pool.query = origQuery; }
 });
+
+test('a model that thinks out loud before the real JSON still yields the real JSON (the last object with a lead wins)', async () => {
+  const thinking = `Let me analyze the task carefully. I need to create a Korean daily brief. The format is {"lead":"한 문장","developments":[...],"watchpoints":[...]}.\nNow the final answer:\n${GOOD}`;
+  assert.equal(dailyBrief.parseJsonObject(thinking).lead, '인도네시아가 팜유 수출 부과금을 인상했다');
+  const h = harness([thinking]);
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.equal(h.state.ready, true);
+    assert.equal(h.state.attempts.length, 0, 'no failed attempt was needed');
+  } finally { h.restore(); }
+  assert.equal(JSON.stringify(dailyBrief.parseJsonObject('```json\n{"a":1}\n```')), '{"a":1}', 'objects without a lead behave as before (first object)');
+  assert.throws(() => dailyBrief.parseJsonObject('no json here'), /invalid_brief_json/);
+  assert.throws(() => dailyBrief.parseJsonObject('{"a":[...]}'), /Unexpected token/);
+});
+
+test('failure names its cause: truncated by the token limit vs. format description echoed', async () => {
+  const cut = '{"lead":"x","developments":[{"item_id"\n\n⚠ 답변이 길이 제한으로 인해 중간에 잘렸습니다. 더 좁은 질문으로';
+  const h = harness([cut]);
+  try {
+    await dailyBrief.buildDailyBrief(today, { budgetMs: 60_000, attemptMs: 60_000, sleep: async () => {} });
+    assert.match(h.state.attempts[0], /^brief_truncated_by_max_tokens \| head=/);
+  } finally { h.restore(); }
+});
