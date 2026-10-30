@@ -14,6 +14,7 @@ const BRIEF_MISSING_GRACE_MS = 30 * 60000; // collection done, no headline row f
 const BRIEF_LEASE_MS = 6 * 60000;         // a 'generating' row silent for longer lost its worker (same lease dailyBrief.js reclaims at)
 const BRIEF_DEADLINE_HOUR_KST = 10;       // dailyBrief.js generates by now even if collection is unfinished
 const MAX_AUTO_DAILY_ATTEMPTS = 20;
+const MOST_SOURCES_FAILED = 0.5;          // half or more of the sources failing is an outage, not a quiet day
 
 const kst = (ms) => new Date(ms + KST_MS);
 const minutesOfDayKst = (ms) => kst(ms).getUTCHours() * 60 + kst(ms).getUTCMinutes();
@@ -27,16 +28,25 @@ function discoveryChecks(d, now) {
   if (!d) return [check('discovery', 'unknown', 'no discovery status available')];
   if (d.state === 'completed') {
     out.push(check('discovery_run', 'pass', `completed ${d.completedAt ? new Date(d.completedAt).toISOString() : ''}`.trim()));
-    const t = d.totals || {};
+    if (!d.totals) {
+      out.push(check('discovery_output', 'unknown', 'collection is marked complete but its totals were not recorded (cannot tell a valid zero-item run from a failed one)'));
+      return out;
+    }
+    const t = d.totals;
     const total = d.progress && d.progress.total;
     const failedSources = Array.isArray(d.failedSources) ? d.failedSources.length : Number(t.failedSources) || 0;
-    if (total && failedSources >= total && !(t.discovered > 0)) out.push(check('discovery_output', 'fail', `every source failed (${failedSources}/${total}) and nothing was discovered`));
-    else if (!(t.discovered > 0)) out.push(check('discovery_output', 'pass', `valid zero-item run: ${failedSources}${total ? `/${total}` : ''} sources failed, nothing new was discovered`));
-    else out.push(check('discovery_output', 'pass', `discovered ${t.discovered}, archived ${t.archived || 0}, ${failedSources} source(s) failed`));
+    const discovered = Number(t.discovered) || 0;
+    const mostFailed = total ? failedSources / total >= MOST_SOURCES_FAILED : false;
+    if (mostFailed && !discovered) out.push(check('discovery_output', 'fail', `${failedSources}/${total} sources failed and nothing was discovered`));
+    else if (mostFailed) out.push(check('discovery_output', 'warn', `${failedSources}/${total} sources failed (discovered ${discovered})`));
+    else if (!discovered) out.push(check('discovery_output', 'pass', `valid zero-item run: ${failedSources}${total ? `/${total}` : ''} sources failed, nothing new was discovered`));
+    else out.push(check('discovery_output', 'pass', `discovered ${discovered}, archived ${t.archived || 0}, ${failedSources} source(s) failed`));
     return out;
   }
   if (d.state === 'running') {
-    out.push(check('discovery_run', 'pass', `in progress${d.progress ? ` ${d.progress.done}/${d.progress.total}` : ''}`));
+    const progress = d.progress ? ` ${d.progress.done}/${d.progress.total}` : '';
+    // still collecting after the headline's own generation deadline: working, but far later than the morning target
+    out.push(hour >= BRIEF_DEADLINE_HOUR_KST ? check('discovery_run', 'warn', `still in progress${progress} past ${BRIEF_DEADLINE_HOUR_KST}:00 KST`) : check('discovery_run', 'pass', `in progress${progress}`));
     return out;
   }
   if (d.state === 'stalled') {

@@ -44,3 +44,23 @@ test('the prompt asks for a lead over the most timely items and a summary over a
   assert.match(src, /자료 전체\(최대 5건\)를 빠짐없이 포괄/);
   assert.ok(!/가장 중요한 확인 사실 하나를 중심으로/.test(src), 'the single-fact rule is gone');
 });
+
+test('review fix: a development the model already restated in other words is not appended a second time', () => {
+  const dev = [{ item_id: 1, summary: '세계은행이 2026년 원유 생산 5.2% 감소를 전망' }, { item_id: 2, summary: '말레이시아 팜유 선물이 이번 주 1.5% 하락' }];
+  // shares no token with item 2's summary, but contains its opening verbatim-ish (spacing differs)
+  const text = '세계은행이 2026년 원유 생산 5.2% 감소를 전망했다. 말레이시아 팜유 선물이 이번 주 1.5%하락했다.';
+  const out = ensureSummaryCoversDevelopments(text, [dev[0], { item_id: 2, summary: '말레이시아 팜유 선물이 이번 주 1.5% 하락' }]);
+  assert.equal(out.text.match(/말레이시아 팜유 선물/g).length, 1);
+  assert.equal(out.text.endsWith('하락했다.'), true);
+});
+
+test('review check: output contract unchanged (lead <= 150, summary within 1000, developments/watchpoints shapes) with the coverage fallback active', () => {
+  const ev = (id) => ({ item_id: id, title: `자료 ${id}`, source: 'S', published_at: '2026-10-28T00:00:00.000Z', collected_at: '2026-10-29T16:00:00.000Z', summary: `자료 ${id} 요약이다.`, insight: `자료 ${id} 인사이트이다.` });
+  const long = '가'.repeat(120);
+  const dev = (id) => ({ item_id: id, importance: 5, summary: `${long}${id}번 사건이 발생`, significance: '영향이 이어진다' });
+  const out = validateBrief({ lead: '핵심 변화 정리', market_summary: '요약 한 문장.', developments: [1, 2, 3, 4, 5].map(dev), watchpoints: ['점검'] }, [1, 2, 3, 4, 5].map(ev));
+  assert.ok(out.lead.length <= 150);
+  assert.ok(out.market_summary.length <= 1000);
+  assert.deepEqual(Object.keys(out).sort(), ['developments', 'lead', 'market_summary', 'watchpoints']);
+  assert.ok(out.developments.every((d) => Object.keys(d).sort().join() === 'item_id,significance,summary'));
+});

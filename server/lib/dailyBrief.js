@@ -155,6 +155,9 @@ function ensureSummaryCoversDevelopments(marketSummary, developments) {
     if (![...keys].some((k) => have.has(k))) {
       const sentence = String(d.summary || '').trim().replace(/[.。]+$/u, '');
       if (!sentence) continue;
+      // the model may have said the same thing in other words that share no token: never append what already stands in the text
+      const squash = (t) => String(t).replace(/\s+/gu, '');
+      if (squash(out).includes(squash(sentence).slice(0, 14))) continue;
       out = `${out.replace(/\s+$/u, '')}${/[.!?。]$/u.test(out) ? '' : '.'} ${sentence}.`;
       added.push(d.item_id);
     }

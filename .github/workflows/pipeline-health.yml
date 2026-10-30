@@ -29,7 +29,7 @@ jobs:
           code=$(curl -sS -m 60 -o health.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/health" || true)
           echo "health endpoint: HTTP $code"
           if [ "$code" != "200" ]; then echo "::error::health endpoint answered HTTP $code (the check itself could not run)"; cat health.json 2>/dev/null | head -c 500; exit 1; fi
-          status=$(jq -r '.status' health.json)
+          status=$(jq -er '.status' health.json) || { echo "::error::health endpoint answered 200 but not with a verdict (invalid body)"; head -c 300 health.json; exit 1; }
           { echo "### Pipeline health: $status"; echo; echo '```'; jq -r '.summary' health.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           jq -r '.summary' health.json
           case "$status" in

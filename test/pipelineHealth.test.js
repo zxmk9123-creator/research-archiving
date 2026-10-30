@@ -136,3 +136,18 @@ test('GET /api/cron/health: requires the cron secret, returns the verdict, and a
   const boom = await call(healthHandler({ check: async () => { throw new Error('boom'); } }), 'Bearer test-secret');
   assert.deepEqual([boom.code, boom.body.status], [500, 'unknown']);
 });
+
+test('review fixes: nearly-all-sources-failed is an outage not a quiet day, missing totals are unknown, a run still going after 10:00 KST warns', () => {
+  const mostFailed = evaluateHealth(good({ discovery: completedDiscovery({ discovered: 0, archived: 0, failedSources: 80 }) }), NOW);
+  assert.equal(mostFailed.status, 'failed', '80 of 84 failing with nothing found must not read as a valid zero-item run');
+  const mostFailedSome = evaluateHealth(good({ discovery: completedDiscovery({ discovered: 12, archived: 1, failedSources: 50 }) }), NOW);
+  assert.equal(mostFailedSome.checks.find((c) => c.id === 'discovery_output').status, 'warn');
+  const quiet = evaluateHealth(good({ discovery: completedDiscovery({ discovered: 0, archived: 0, failedSources: 12 }), brief: readyBrief({ item_count: 0 }), evidenceCandidates: 0 }), NOW);
+  assert.equal(quiet.status, 'ok', '12 of 84 failing on a quiet day is still a valid zero-item run');
+  const noTotals = evaluateHealth(good({ discovery: { ...completedDiscovery(), totals: null } }), NOW);
+  assert.equal(noTotals.checks.find((c) => c.id === 'discovery_output').status, 'unknown');
+  const late = evaluateHealth(good({ discovery: { state: 'running', completedToday: false, progress: { done: 60, total: 84 } }, brief: null }), new Date('2026-10-30T01:10:00Z').getTime()); // 10:10 KST
+  assert.equal(late.checks.find((c) => c.id === 'discovery_run').status, 'warn');
+  const onTime = evaluateHealth(good({ discovery: { state: 'running', completedToday: false, progress: { done: 60, total: 84 } }, brief: null }), new Date('2026-10-29T23:30:00Z').getTime()); // 08:30 KST
+  assert.equal(onTime.checks.find((c) => c.id === 'discovery_run').status, 'pass');
+});
