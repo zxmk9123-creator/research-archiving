@@ -43,6 +43,7 @@ app.get('/api/cron/diagnose', async (req, res) => {
 
 app.get('/api/cron/daily', require('./lib/cronRunner').dailyHandler());
 app.get('/api/cron/health', require('./lib/cronRunner').healthHandler());
+app.get('/api/cron/doctor', require('./lib/cronRunner').doctorHandler());
 
 // Self-heal on any visit: whoever opens the site while today's collection is unfinished and nobody is working on it starts the next hop
 // (see lib/pipelineGuardian.js). Throttled per instance and claimed once per 4 minutes across instances; never blocks or fails a request.

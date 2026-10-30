@@ -1,0 +1,40 @@
+name: Pipeline doctor
+
+# Diagnosis and bounded recovery for a WARN/FAIL pipeline verdict. MANUAL ONLY (workflow_dispatch): nothing here runs on a schedule, so no
+# recovery starts without a person choosing to run it.
+#   mode=diagnose (default): read-only analysis and a stored report. Safe to run any time.
+#   mode=recover: the server additionally requires DOCTOR_RECOVERY=on; otherwise it answers "recovery_not_permitted" and executes nothing.
+# The run FAILS when a person is needed (humanNeeded) or a recovery did not resolve the problem, so GitHub sends its failure notification.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'diagnose (read-only) or recover (bounded safe recovery, needs DOCTOR_RECOVERY=on on the server)'
+        type: choice
+        options: [diagnose, recover]
+        default: diagnose
+
+concurrency:
+  group: pipeline-doctor
+  cancel-in-progress: false
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run pipeline doctor
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 290 -o doctor.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/doctor?mode=$MODE" || true)
+          echo "doctor endpoint: HTTP $code"
+          if [ "$code" != "200" ]; then echo "::error::doctor endpoint answered HTTP $code"; head -c 500 doctor.json 2>/dev/null; exit 1; fi
+          outcome=$(jq -er '.outcome' doctor.json) || { echo "::error::doctor answered 200 but not with a report"; head -c 300 doctor.json; exit 1; }
+          { echo "### Pipeline doctor ($MODE): $outcome"; echo; echo '```'; jq -r '.summary' doctor.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.summary' doctor.json
+          if [ "$(jq -r '.humanNeeded' doctor.json)" = "true" ]; then echo "::error::a person is needed ($outcome)"; exit 1; fi
+          exit 0

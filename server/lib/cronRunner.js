@@ -156,4 +156,18 @@ function healthHandler({ check = () => require('./pipelineHealth').runHealthChec
   };
 }
 
-module.exports = { healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
+// GET /api/cron/doctor?mode=diagnose|recover (same bearer-secret auth). Default is diagnose: read-only analysis. mode=recover additionally needs
+// DOCTOR_RECOVERY=on in the environment; without it the answer says recovery is not permitted and nothing is executed.
+function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(opts) } = {}) {
+  return async (req, res) => {
+    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    const mode = String((req.query && req.query.mode) || 'diagnose') === 'recover' ? 'recover' : 'diagnose';
+    try {
+      res.json(await run({ mode }));
+    } catch (err) {
+      res.status(500).json({ outcome: 'error', humanNeeded: true, error: String(err && err.message).slice(0, 160) });
+    }
+  };
+}
+
+module.exports = { doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
