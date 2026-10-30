@@ -24,7 +24,9 @@ function track(promise) {
 async function drain(timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   while (pending.size && Date.now() < deadline) {
-    await Promise.race([Promise.allSettled([...pending]), new Promise((r) => setTimeout(r, Math.max(50, deadline - Date.now())))]);
+    let timer;
+    await Promise.race([Promise.allSettled([...pending]), new Promise((r) => { timer = setTimeout(r, Math.max(50, deadline - Date.now())); })]);
+    clearTimeout(timer); // a finished wait must not leave its timer (up to the whole budget) running
   }
   return pending.size;
 }

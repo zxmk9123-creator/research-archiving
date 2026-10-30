@@ -228,12 +228,12 @@ test('REVIEW: the run stays inside its time budget — a second action is skippe
   let t = NOW.getTime();
   const deadlines = [];
   const executors = {
-    kick_pipeline: async ({ deadlineAt }) => { deadlines.push(deadlineAt - t); t += 230000; return { kicked: true }; }, // consumes almost the whole budget
+    kick_pipeline: async ({ deadlineAt }) => { deadlines.push(deadlineAt - Date.now()); t += 230000; return { kicked: true }; }, // deadlineAt is a wall-clock instant; this action consumes almost the whole budget
     retry_headline: async ({ deadlineAt }) => { deadlines.push(deadlineAt); return { ran: true }; },
   };
   const r = await runDoctor({ now: NOW, clock: () => t, recoveryEnabled: true, mode: 'recover', gather: gatherSeq(stalled, stalled), executors, store: memStore() });
   assert.equal(r.actions.length, 2);
-  assert.ok(deadlines[0] <= 200000, 'the first executor was bounded');
+  assert.ok(deadlines[0] > 0 && deadlines[0] <= 200000, `the first executor was bounded (${deadlines[0]} ms)`);
   const skipped = r.actions.find((a) => a.action === 'retry_headline');
   assert.equal(skipped.error, 'skipped_no_time_left');
   assert.equal(deadlines.length, 1, 'the second executor never started');
@@ -269,7 +269,7 @@ test('REVIEW: the headline executor goes through the guard — a READY headline 
   };
   try {
     const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
-    assert.deepEqual(result, { ran: false, reason: 'up_to_date' });
+    assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0 });
     assert.ok(!statements.includes('INSERT') && !statements.includes('UPDATE') && !statements.includes('DELETE'), `only reads happened: ${statements}`);
   } finally { pool.query = orig; }
 });
@@ -281,4 +281,38 @@ test('REVIEW: redaction also covers key/value secrets and auth headers, and the 
   const store = memStore();
   await run({ mode: 'diagnose', gather: gatherSeq(base({ brief: failedBrief(`AI provider timeout ${text}`) })), executors: exec(), store });
   for (const secret of ['ABCDEF123456', 'abc123456xyz', 'hunter22222', 'abcdefghijkl1234']) assert.ok(!JSON.stringify(store.doc).includes(secret), `${secret} not persisted`);
+});
+
+// ---- defects demonstrated by the integration test (test/doctorRecovery.integration.test.js) ----
+
+test('DEFECT FIX: a headline that is still generating after the recovery is "improving", never "recovered"', () => {
+  const bad = evaluateHealth(base({ brief: failedBrief('AI provider timeout') }), NOW.getTime());
+  const generating = evaluateHealth(base({ brief: { ...readyBrief, status: 'generating', completed_at: null, updated_at: iso(NOW.getTime() - 60000), attempt_count: 4 } }), NOW.getTime());
+  assert.equal(generating.checks.find((c) => c.id === 'headline').status, 'pass');
+  assert.equal(judgeOutcome(bad, generating, [{ action: 'retry_headline', result: { ran: true, stillRunning: 1 } }]), 'improving');
+  const ready = evaluateHealth(base({ brief: { ...readyBrief, attempt_count: 4 } }), NOW.getTime());
+  assert.equal(judgeOutcome(bad, ready, [{ action: 'retry_headline', result: { ran: true, stillRunning: 0 } }]), 'recovered');
+});
+
+test('DEFECT FIX: the kick executor judges the doctor\'s moment (it passes `now` to the guard), not the wall clock', async () => {
+  const guardian = require('../server/lib/pipelineGuardian');
+  const orig = guardian.maybeKickStalledPipeline;
+  let seen;
+  guardian.maybeKickStalledPipeline = async (o) => { seen = o; return { kicked: false, reason: 'not_needed' }; };
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn) => realSetTimeout(fn, 0); // the executor pauses 15 s before its re-check: not needed here
+  try {
+    const at = new Date('2026-10-30T00:10:00Z');
+    await require('../server/lib/pipelineDoctor').defaultExecutors.kick_pipeline({ now: at });
+    assert.equal(seen.now.getTime(), at.getTime());
+  } finally { guardian.maybeKickStalledPipeline = orig; global.setTimeout = realSetTimeout; }
+});
+
+test('DEFECT FIX: background.drain leaves no timer behind when everything finished early', async () => {
+  const bg = require('../server/lib/background');
+  const timers = () => process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length;
+  const before = timers();
+  bg.track(new Promise((resolve) => setTimeout(resolve, 20)));
+  assert.equal(await bg.drain(60000), 0);
+  assert.ok(timers() <= before, `a finished drain must not keep its 60 s timer alive (before ${before}, after ${timers()})`);
 });

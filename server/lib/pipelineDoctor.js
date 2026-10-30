@@ -140,6 +140,8 @@ function judgeOutcome(before, after, ran) {
   const stillRunning = after.checks.some((c) => c.id === 'discovery_run' && c.status === 'pass' && /in progress/.test(c.detail));
   // a restarted collection is only "improving" until it has actually completed
   if (!hasFail && kicked && stillRunning) return 'improving';
+  const generating = after.checks.some((c) => c.id === 'headline' && c.status === 'pass' && /^generating/.test(c.detail));
+  if (!hasFail && generating) return 'improving'; // the new attempt is under way; only a ready headline counts as recovered
   if (after.status === 'ok' || !hasFail) return 'recovered'; // no failure left (informational warnings, e.g. a late headline, may remain)
   const fixed = [...b].filter((x) => x.endsWith(':fail') && !a.includes(x));
   return fixed.length ? 'improving' : 'unresolved';
@@ -155,18 +157,21 @@ async function collectContext(now) {
 }
 
 const defaultExecutors = {
-  async kick_pipeline() { // takes ({ deadlineAt }) like the other executor; the kick itself is short
-    const r = await require('./pipelineGuardian').maybeKickStalledPipeline();
+  // Both executors receive { deadlineAt (wall-clock ms), now (the doctor's own moment) }. The decision to act and the action must be judged at the
+  // SAME moment: a kick diagnosed at 11:59 must not be refused because the window closed at 12:00 while the doctor was running.
+  async kick_pipeline({ now } = {}) {
+    const r = await require('./pipelineGuardian').maybeKickStalledPipeline({ now: now || new Date() });
     await new Promise((resolve) => setTimeout(resolve, 15000)); // let the started hop take its lease before the re-check
     return r;
   },
-  async retry_headline({ deadlineAt } = {}) {
+  async retry_headline({ deadlineAt, now } = {}) {
     const dailyBrief = require('./dailyBrief');
-    const status = await require('./dailyDiscovery').getDailyDiscoveryStatus(new Date());
+    const at = now || new Date();
+    const status = await require('./dailyDiscovery').getDailyDiscoveryStatus(at);
     const deadline = deadlineAt || Date.now() + 200000;
-    const r = await dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: status.completedToday }));
-    await require('./background').drain(Math.max(1000, deadline - Date.now() - 5000)); // the generation runs in the background: wait for it
-    return r;
+    const r = await dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(at, { discoveryDone: status.completedToday }));
+    const stillRunning = await require('./background').drain(Math.max(1000, deadline - Date.now() - 5000)); // the generation runs in the background: wait for it
+    return { ...r, stillRunning }; // > 0: the generation outlived our wait — in progress, not finished
   },
 };
 
@@ -229,7 +234,9 @@ async function runDoctor({
         const left = runEnd - began - RECHECK_RESERVE_MS;
         if (left < MIN_ACTION_MS) { report.actions.push({ action: a.action, key: a.key, why: a.why, error: 'skipped_no_time_left', ms: 0 }); continue; }
         try {
-          const result = await withTimeout(executors[a.action]({ deadlineAt: began + Math.min(executorTimeoutMs, left) }), Math.min(executorTimeoutMs, left));
+          const budget = Math.min(executorTimeoutMs, left);
+          // deadlineAt is a real wall-clock instant (the executors wait on real I/O); the doctor's clock only does the accounting
+          const result = await withTimeout(executors[a.action]({ deadlineAt: Date.now() + budget, now: new Date(began) }), budget);
           report.actions.push({ action: a.action, key: a.key, why: a.why, result, ms: clock() - began });
         } catch (err) {
           report.actions.push({ action: a.action, key: a.key, why: a.why, error: String(err && err.message).slice(0, 160), ms: clock() - began });
@@ -276,4 +283,4 @@ async function runDoctor({
   return safeReport;
 }
 
-module.exports = { defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
+module.exports = { collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };

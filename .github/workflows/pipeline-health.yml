@@ -4,6 +4,11 @@ name: Pipeline health
 # GET /api/cron/health (same CRON_SECRET as scheduled-jobs.yml), prints the verdict to the run summary, and FAILS the run when the verdict is
 # "failed" so GitHub sends its failure notification. It changes nothing: no retry, no regeneration, no deploy. Remediation is separate.
 #
+# When the verdict is WARN or FAILED, the SAME run then makes exactly one diagnose-only call to the Pipeline Doctor (GET /api/cron/doctor?mode=diagnose)
+# and puts its findings in the run summary. PASS and "unknown" do not trigger it. The mode is a literal here (never an input), the response must
+# prove nothing was executed (mode=diagnose, zero actions), and the step fails when a person is needed. Recovery stays off: this workflow cannot
+# request it and the server needs DOCTOR_RECOVERY=on (not set) even for the manual pipeline-doctor workflow.
+#
 # Runs after the 09:00 KST headline target (00:10 UTC) and again at 10:10 KST (01:10 UTC, after the 10:00 KST generation deadline).
 # GitHub may delay or drop scheduled runs: a MISSING run of this workflow is not detected by itself (see docs in the report).
 on:
@@ -18,9 +23,10 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Check pipeline health
+        id: health
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
@@ -32,9 +38,34 @@ jobs:
           status=$(jq -er '.status' health.json) || { echo "::error::health endpoint answered 200 but not with a verdict (invalid body)"; head -c 300 health.json; exit 1; }
           { echo "### Pipeline health: $status"; echo; echo '```'; jq -r '.summary' health.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           jq -r '.summary' health.json
+          # decide BEFORE the final case below (which exits 1 on "failed"): only WARN and FAILED are diagnosed
+          case "$status" in
+            warn|failed) echo "diagnose=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "diagnose=false" >> "$GITHUB_OUTPUT" ;;
+          esac
           case "$status" in
             ok) exit 0 ;;
             warn) echo "::warning::pipeline completed with warnings"; exit 0 ;;
             unknown) echo "::warning::pipeline health could not be fully determined (missing telemetry)"; exit 0 ;;
             *) echo "::error::pipeline health FAILED"; exit 1 ;;
           esac
+
+      - name: Diagnose (read-only, mode=diagnose)
+        if: always() && steps.health.outputs.diagnose == 'true'
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 120 -o doctor.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/doctor?mode=diagnose" || true)
+          echo "doctor endpoint: HTTP $code"
+          if [ "$code" != "200" ]; then echo "::error::doctor endpoint answered HTTP $code"; head -c 300 doctor.json 2>/dev/null; exit 1; fi
+          outcome=$(jq -er '.outcome' doctor.json) || { echo "::error::doctor answered 200 but not with a report (invalid body)"; head -c 300 doctor.json; exit 1; }
+          # the response itself must prove that nothing was executed
+          if [ "$(jq -r '.mode // "missing"' doctor.json)" != "diagnose" ] || [ "$(jq -r '(.actions // ["missing"]) | length' doctor.json)" != "0" ]; then
+            echo "::error::diagnose-only contract violated (mode or actions in the doctor response)"; exit 1
+          fi
+          { echo "### Pipeline doctor (diagnose): $outcome"; echo; echo '```'; jq -r '.summary // "no summary"' doctor.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.summary // "no summary"' doctor.json
+          if [ "$(jq -r '.humanNeeded' doctor.json)" = "true" ]; then echo "::error::a person is needed ($outcome)"; exit 1; fi
+          exit 0
