@@ -269,7 +269,7 @@ test('REVIEW: the headline executor goes through the guard — a READY headline 
   };
   try {
     const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
-    assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0 });
+    assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
     assert.ok(!statements.includes('INSERT') && !statements.includes('UPDATE') && !statements.includes('DELETE'), `only reads happened: ${statements}`);
   } finally { pool.query = orig; }
 });
@@ -491,4 +491,22 @@ test('re-check honesty: an action that did not run (no-op) is not_applied, never
   const bad = failedWith('AI provider returned 503');
   const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: { retry_headline: async () => ({ ran: false, reason: 'not_due' }) }, store: memStore() });
   assert.deepEqual([r.outcome, r.humanNeeded], ['not_applied', true]);
+});
+
+// ---------- bounded cost ----------
+test('cost budget: the Doctor-triggered recovery has explicit, tighter limits than the guard alone (calls) and than the executor timeout (time)', () => {
+  const d = require('../server/lib/pipelineDoctor');
+  assert.equal(d.MAX_MODEL_CALLS_PER_RECOVERY, 2);
+  assert.ok(d.MAX_MODEL_CALLS_PER_RECOVERY < 1 + 5, 'the guard alone allows 1 + MAX_AUTOMATIC_RETRIES = 6');
+  assert.ok(d.RECOVERY_TIME_BUDGET_MS <= 150000 && d.RECOVERY_TIME_BUDGET_MS < 200000);
+});
+
+test('cost budget exhausted: the round is reported unresolved with a person needed — never recovered — and the same problem is not retried', async () => {
+  const bad = failedWith('AI provider returned 503'); const store = memStore();
+  const spent = { retry_headline: async () => ({ ran: true, stillRunning: 0, modelCalls: 2, maxModelCalls: 2, budgetExhausted: true }) };
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: spent, store });
+  assert.deepEqual([r.outcome, r.humanNeeded, r.stillRunning], ['unresolved', true, false]);
+  assert.match(r.summary, /budgetExhausted":true/, 'the report shows that the budget ran out');
+  const again = await runDoctor({ now: new Date(NOW.getTime() + 3600000), clock: () => NOW.getTime() + 3660000, recoveryEnabled: true, mode: 'recover', gather: gatherSeq(bad), executors: spent, store });
+  assert.equal(again.outcome, 'limit_reached');
 });

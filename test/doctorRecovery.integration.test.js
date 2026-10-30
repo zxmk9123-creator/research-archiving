@@ -228,10 +228,10 @@ test('retry_headline UNRECOVERABLE: the model keeps answering with a format desc
     assert.equal(r.findings.find((f) => f.checkId === 'headline').cause, 'model_output_invalid');
     assert.equal(r.outcome, 'unresolved');
     assert.equal(r.humanNeeded, true);
-    assert.ok(llm.calls.n >= 1 && llm.calls.n <= 3, `bounded model calls, got ${llm.calls.n}`);
+    assert.ok(llm.calls.n >= 1 && llm.calls.n <= doctor.MAX_MODEL_CALLS_PER_RECOVERY, `bounded model calls, got ${llm.calls.n}`);
     const row = await briefRow();
     assert.equal(row.status, 'failed', 'the row is released, never left generating');
-    assert.match(row.error, /^retry_deferred: brief_placeholder_output/);
+    assert.match(row.error, /^(call_budget_exhausted|retry_deferred): brief_placeholder_output/);
     const attempts = await attemptRows();
     assert.equal(attempts.length, llm.calls.n, 'every model call has a logged failure');
     const callsBefore = llm.calls.n;
@@ -265,7 +265,7 @@ test('retry_headline SAFETY: the executor never touches a READY headline (row un
   const llm = fakeProvider(() => { throw new Error('must not be called'); });
   try {
     const res = await doctor.defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
-    assert.deepEqual(res, { ran: false, reason: 'up_to_date', stillRunning: 0 });
+    assert.deepEqual(res, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
     assert.deepEqual(await briefRow(), before);
     assert.equal(llm.calls.n, 0);
   } finally { llm.restore(); }
@@ -337,7 +337,7 @@ test('TIME LIMIT (invocation): with too little time left the headline guard decl
   const llm = fakeProvider(() => { throw new Error('must not be called'); });
   try {
     const r = await doctor.runDoctor({ ...base(v), executorTimeoutMs: 40000 }); // deadline = 40 s < the 60 s one attempt needs
-    assert.deepEqual(r.actions[0].result, { ran: false, reason: 'insufficient_time', stillRunning: 0 });
+    assert.deepEqual(r.actions[0].result, { ran: false, reason: 'insufficient_time', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
     assert.equal(r.outcome, 'not_applied');
     assert.equal(r.humanNeeded, true);
     assert.equal(llm.calls.n, 0);
@@ -434,10 +434,14 @@ test('PROVIDER 503 persists: bounded to ONE model call, unresolved + person need
   const llm = fakeProvider(() => httpError('AI provider returned 503'));
   try {
     const first = await doctor.runDoctor(base(v));
-    // ONE doctor attempt = one claim of the existing guard, which itself makes a few bounded model calls (JSON/repair retries) — observed: 6
+    // ONE doctor attempt = one claim of the guard under an explicit budget of MAX_MODEL_CALLS_PER_RECOVERY model calls (the guard alone allows 6)
     const used = llm.calls.n;
-    assert.deepEqual([first.outcome, first.humanNeeded, used >= 1 && used <= 6], ['unresolved', true, true]);
-    assert.notEqual((await briefRow()).status, 'ready', 'no false ready');
+    assert.deepEqual([first.outcome, first.humanNeeded, used], ['unresolved', true, doctor.MAX_MODEL_CALLS_PER_RECOVERY]);
+    assert.deepEqual([first.actions[0].result.modelCalls, first.actions[0].result.budgetExhausted], [used, true], 'the report says how many calls were spent and that the budget ran out');
+    const row = await briefRow();
+    assert.notEqual(row.status, 'ready', 'no false ready');
+    assert.equal(row.status, 'failed');
+    assert.match(row.error, /^call_budget_exhausted: /);
     const later = new Date(v.getTime() + 45 * 60000);
     const second = await doctor.runDoctor({ ...base(later), clock: () => later.getTime() + 30000 });
     assert.deepEqual([llm.calls.n, second.outcome], [used, 'limit_reached'], 'no further model call for a problem the first retry did not fix');
@@ -494,4 +498,31 @@ test('REAL PREFLIGHT: with the real pool the preflight passes; a saturated pool 
     const r = await doctor.runDoctor(base(v));
     assert.deepEqual([r.outcome, r.humanNeeded, llm.calls.n, await doctorDoc().then((d) => d && d.lock)], ['deferred_db_unhealthy', false, 0, undefined]);
   } finally { if (desc) Object.defineProperty(pool, 'waitingCount', desc); else delete pool.waitingCount; llm.restore(); }
+});
+
+test('BUDGET success: one transient 503 then a good answer is recovered inside the budget (2 calls), verified by the re-check, budget not exhausted', opts, async () => {
+  await reset(); const v = at910();
+  const ids = await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  const llm = fakeProvider((m, n) => (n === 1 ? httpError('AI provider returned 503') : goodAnswer(ids)));
+  try {
+    const r = await doctor.runDoctor(base(v));
+    assert.deepEqual([llm.calls.n, r.actions[0].result.modelCalls, r.actions[0].result.budgetExhausted], [2, 2, false]);
+    assert.deepEqual([r.outcome, r.humanNeeded, r.after.status === 'ok' || r.after.status === 'warn'], ['recovered', false, true]);
+    assert.equal((await briefRow()).status, 'ready');
+  } finally { llm.restore(); }
+});
+
+test('BUDGET time: the executor cannot be given more than RECOVERY_TIME_BUDGET_MS — with a tiny deadline the model is never called and nothing is claimed', opts, async () => {
+  await reset(); const v = at910();
+  await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  const before = await briefRow();
+  const llm = fakeProvider(() => httpError('must not be called'));
+  try {
+    const res = await doctor.defaultExecutors.retry_headline({ deadlineAt: Date.now() + 20000, now: v });
+    assert.deepEqual([res.ran, res.reason, llm.calls.n, res.modelCalls], [false, 'insufficient_time', 0, 0]);
+    assert.equal((await briefRow()).attempt_count, before.attempt_count);
+    assert.ok(doctor.RECOVERY_TIME_BUDGET_MS < 200000, 'tighter than the executor timeout');
+  } finally { llm.restore(); }
 });

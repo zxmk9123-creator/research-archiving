@@ -6,6 +6,10 @@ const provider = require('./ai/provider');
 // runs the generation inside runWithDeadline(); the retry loop then decides from the time REALLY left, not from when it started itself.
 const deadlineStore = new AsyncLocalStorage();
 const runWithDeadline = (deadlineMs, fn) => deadlineStore.run(deadlineMs, fn);
+// An optional cap on MODEL CALLS (attempts) for one generation, set by a caller that must stay cheap (the Pipeline Doctor). budget = { max, used }:
+// buildDailyBrief counts every attempt it starts and, once max are spent, releases the row as failed instead of retrying (budget.exhausted = true).
+const callBudgetStore = new AsyncLocalStorage();
+const runWithCallBudget = (budget, fn) => callBudgetStore.run(budget, fn);
 
 const MAX_EVIDENCE_ITEMS = 24;
 const REPAIR_EVIDENCE_ITEMS = 12;
@@ -340,10 +344,12 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
 }
 async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, attemptMs = TYPICAL_ATTEMPT_MS, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   const started = Date.now();
+  const callBudget = callBudgetStore.getStore();
   let failureCount = 0;
   let repairHint = false;
   while (true) {
     try {
+      if (callBudget) callBudget.used += 1;
       await buildDailyBriefAttempt(briefDate, { repairHint });
       return;
     } catch (err) {
@@ -357,7 +363,9 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       const deadline = deadlineStore.getStore();
       const timeLeft = deadline ? deadline - Date.now() : budgetMs - (Date.now() - started);
       const outOfTime = !exhausted && delayMs + attemptMs > timeLeft;
-      const final = exhausted || outOfTime;
+      const budgetSpent = !exhausted && Boolean(callBudget) && callBudget.used >= callBudget.max;
+      if (budgetSpent) callBudget.exhausted = true;
+      const final = exhausted || outOfTime || budgetSpent;
       const message = String(err.message || 'generation_failed').slice(0, 480);
       console.error(`daily_brief attempt failed date=${briefDate} retry=${failureCount - 1} exhausted=${exhausted} out_of_time=${outOfTime} delay_ms=${delayMs} error=${message}`);
       await pool.query(
@@ -371,7 +379,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
                 error = $2, updated_at = now(),
                 completed_at = CASE WHEN $3::boolean THEN now() ELSE completed_at END
           WHERE brief_date = $1 AND status = 'generating'`,
-        [briefDate, outOfTime ? `retry_deferred: ${message}`.slice(0, 500) : message, final]
+        [briefDate, budgetSpent ? `call_budget_exhausted: ${message}`.slice(0, 500) : outOfTime ? `retry_deferred: ${message}`.slice(0, 500) : message, final]
       ).catch((updateErr) => console.error(`daily_brief retry state update failed: ${updateErr.message}`));
       if (final) return;
       repairHint = repairHint || /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message);
@@ -522,4 +530,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, runWithCallBudget, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

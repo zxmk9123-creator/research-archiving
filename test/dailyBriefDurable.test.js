@@ -170,3 +170,51 @@ test('failure names its cause: truncated by the token limit vs. format descripti
     assert.match(h.state.attempts[0], /^brief_truncated_by_max_tokens \| head=/);
   } finally { h.restore(); }
 });
+
+// ---------- bounded cost: a caller-supplied model-call budget (Pipeline Doctor recovery) ----------
+
+test('call budget: without a budget the guard makes its full 6 attempts (unchanged); with max=2 it makes exactly 2, then releases the row as failed with a visible reason', async () => {
+  const unbudgeted = harness([new Error('AI provider returned 503')]);
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.equal(unbudgeted.state.prompts.length, 6, 'existing behaviour: 1 + MAX_AUTOMATIC_RETRIES');
+  } finally { unbudgeted.restore(); }
+
+  const h = harness([new Error('AI provider returned 503')]);
+  const budget = { max: 2, used: 0, exhausted: false };
+  let slept = 0;
+  try {
+    await dailyBrief.runWithCallBudget(budget, () => dailyBrief.buildDailyBrief(today, { sleep: async (ms) => { slept += ms; } }));
+    assert.equal(h.state.prompts.length, 2, 'two model calls, no more');
+    assert.deepEqual([budget.used, budget.exhausted], [2, true]);
+    assert.equal(slept, 5000, 'slept only between the two attempts');
+    const last = h.state.updates[h.state.updates.length - 1];
+    assert.equal(last.status, 'failed', 'released for a person/next cycle, not left generating');
+    assert.match(last.error, /^call_budget_exhausted: AI provider returned 503/);
+    assert.equal(h.state.ready, false, 'no false ready');
+  } finally { h.restore(); }
+});
+
+test('call budget: success within the budget is untouched — a transient failure then a good answer uses 2 calls, is ready, and the budget is not exhausted', async () => {
+  const h = harness([new Error('AI provider returned 503'), GOOD]);
+  const budget = { max: 2, used: 0, exhausted: false };
+  try {
+    await dailyBrief.runWithCallBudget(budget, () => dailyBrief.buildDailyBrief(today, { sleep: async () => {} }));
+    assert.deepEqual([h.state.ready, budget.used, budget.exhausted, h.state.prompts.length], [true, 2, false, 2]);
+  } finally { h.restore(); }
+  const first = harness([GOOD]); const b1 = { max: 2, used: 0, exhausted: false };
+  try {
+    await dailyBrief.runWithCallBudget(b1, () => dailyBrief.buildDailyBrief(today, { sleep: async () => {} }));
+    assert.deepEqual([first.state.ready, b1.used], [true, 1]);
+  } finally { first.restore(); }
+});
+
+test('call budget: the time limit still wins when it is tighter — out of time stops at ONE call with retry_deferred, budget not blamed', async () => {
+  const h = harness([new Error('invalid_brief_json')]);
+  const budget = { max: 5, used: 0, exhausted: false };
+  try {
+    await dailyBrief.runWithCallBudget(budget, () => dailyBrief.buildDailyBrief(today, { budgetMs: 60_000, attemptMs: 60_000, sleep: async () => {} }));
+    assert.deepEqual([budget.used, budget.exhausted, h.state.prompts.length], [1, false, 1]);
+    assert.match(h.state.updates[0].error, /^retry_deferred:/);
+  } finally { h.restore(); }
+});

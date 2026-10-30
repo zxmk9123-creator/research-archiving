@@ -22,6 +22,8 @@ const COOLDOWN_BY_CAUSE = { db_pool_contention: 3 * COOLDOWN_MS }; // give a sat
 const MAX_UNRESOLVED_PER_KEY = 1;     // a recovery that did not fix it is not repeated
 const EXECUTOR_TIMEOUT_MS = 200000;
 const RUN_BUDGET_MS = 250000;        // the whole run (diagnosis, actions, re-check, report) must fit the ~300 s function limit
+const MAX_MODEL_CALLS_PER_RECOVERY = 2;   // one Doctor-triggered headline recovery may start at most this many model calls (the guard alone allows 6)
+const RECOVERY_TIME_BUDGET_MS = 150000;   // and may use at most this much time, whatever the executor timeout allows
 const MIN_ACTION_MS = 30000;         // do not start an action with less time than this left
 const RECHECK_RESERVE_MS = 15000;
 const KEEP_REPORTS = 20;
@@ -189,10 +191,12 @@ const defaultExecutors = {
     const dailyBrief = require('./dailyBrief');
     const at = now || new Date();
     const status = await require('./dailyDiscovery').getDailyDiscoveryStatus(at);
-    const deadline = deadlineAt || Date.now() + 200000;
-    const r = await dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(at, { discoveryDone: status.completedToday }));
+    const deadline = Math.min(deadlineAt || Infinity, Date.now() + RECOVERY_TIME_BUDGET_MS);
+    const budget = { max: MAX_MODEL_CALLS_PER_RECOVERY, used: 0, exhausted: false };
+    // both limits travel with the generation (async context), including its background retries: it cannot outlive or outspend them
+    const r = await dailyBrief.runWithCallBudget(budget, () => dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(at, { discoveryDone: status.completedToday })));
     const stillRunning = await require('./background').drain(Math.max(1000, deadline - Date.now() - 5000)); // the generation runs in the background: wait for it
-    return { ...r, stillRunning }; // > 0: the generation outlived our wait — in progress, not finished
+    return { ...r, stillRunning, modelCalls: budget.used, maxModelCalls: budget.max, budgetExhausted: budget.exhausted }; // stillRunning > 0: in progress, not finished
   },
 };
 
@@ -315,4 +319,4 @@ async function runDoctor({
   return safeReport;
 }
 
-module.exports = { dbPreflight, collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
+module.exports = { MAX_MODEL_CALLS_PER_RECOVERY, RECOVERY_TIME_BUDGET_MS, dbPreflight, collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
