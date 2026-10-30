@@ -1,0 +1,40 @@
+name: Pipeline health
+
+# M1 monitoring: a read-only check that today's publishing pipeline ran and the headline reached a terminal state. It calls
+# GET /api/cron/health (same CRON_SECRET as scheduled-jobs.yml), prints the verdict to the run summary, and FAILS the run when the verdict is
+# "failed" so GitHub sends its failure notification. It changes nothing: no retry, no regeneration, no deploy. Remediation is separate.
+#
+# Runs after the 09:00 KST headline target (00:10 UTC) and again at 10:10 KST (01:10 UTC, after the 10:00 KST generation deadline).
+# GitHub may delay or drop scheduled runs: a MISSING run of this workflow is not detected by itself (see docs in the report).
+on:
+  schedule:
+    - cron: '10 0,1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check pipeline health
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 60 -o health.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/health" || true)
+          echo "health endpoint: HTTP $code"
+          if [ "$code" != "200" ]; then echo "::error::health endpoint answered HTTP $code (the check itself could not run)"; cat health.json 2>/dev/null | head -c 500; exit 1; fi
+          status=$(jq -r '.status' health.json)
+          { echo "### Pipeline health: $status"; echo; echo '```'; jq -r '.summary' health.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.summary' health.json
+          case "$status" in
+            ok) exit 0 ;;
+            warn) echo "::warning::pipeline completed with warnings"; exit 0 ;;
+            unknown) echo "::warning::pipeline health could not be fully determined (missing telemetry)"; exit 0 ;;
+            *) echo "::error::pipeline health FAILED"; exit 1 ;;
+          esac

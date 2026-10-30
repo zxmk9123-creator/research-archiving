@@ -134,6 +134,34 @@ function compactSentence(text, max) {
   return `${(at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[\s,;:·-]+$/u, '')}…`;
 }
 
+// The summary must cover every selected development, not only the first. A development counts as covered when the summary shares a
+// distinctive token with it (a number, a Latin name, or the first three letters of a Hangul word, which survives particles like 이/은/를).
+// Whatever the model left out is appended from that development's own (already validated, compressed) summary, so the guarantee holds
+// without another model call.
+const COVERAGE_STOPWORDS = new Set(['가격', '시장', '전망', '증가', '감소', '상승', '하락', '발표', '공급', '수요', '생산', '투자', '기업', '정부', '글로벌', '이번', '올해', '대한', '통해', '위해', '있는', '따른']);
+function coverageKeys(text) {
+  const keys = new Set();
+  for (const m of String(text || '').match(/[A-Za-z][A-Za-z0-9&-]{2,}|\d[\d,.]*%?|[가-힣]{3,}/gu) || []) {
+    if (/^[가-힣]/u.test(m)) { const k = m.slice(0, 3); if (!COVERAGE_STOPWORDS.has(k)) keys.add(k); } else keys.add(m.toLowerCase());
+  }
+  return keys;
+}
+function ensureSummaryCoversDevelopments(marketSummary, developments) {
+  const have = coverageKeys(marketSummary);
+  let out = String(marketSummary || '').trim();
+  const added = [];
+  for (const d of developments) {
+    const keys = coverageKeys(d.summary);
+    if (![...keys].some((k) => have.has(k))) {
+      const sentence = String(d.summary || '').trim().replace(/[.。]+$/u, '');
+      if (!sentence) continue;
+      out = `${out.replace(/\s+$/u, '')}${/[.!?。]$/u.test(out) ? '' : '.'} ${sentence}.`;
+      added.push(d.item_id);
+    }
+  }
+  return { text: out, added };
+}
+
 function validateBrief(raw, evidence) {
   const evidenceById = new Map(evidence.map((item) => [Number(item.item_id), item]));
   const developments = Array.isArray(raw.developments) ? raw.developments : [];
@@ -177,8 +205,9 @@ function validateBrief(raw, evidence) {
   const watchpoints = (Array.isArray(raw.watchpoints) ? raw.watchpoints : [])
     .map((value) => String(value || '').trim()).filter(Boolean).slice(0, 4).map((value) => value.slice(0, 250));
   const lead = String(raw.lead || '').trim().replace(/[.。]+$/u, '');
-  const marketSummary = String(raw.market_summary || '').trim();
-  if (!lead || !marketSummary) throw new Error('incomplete_brief');
+  const rawSummary = String(raw.market_summary || '').trim();
+  if (!lead || !rawSummary) throw new Error('incomplete_brief');
+  const { text: marketSummary } = ensureSummaryCoversDevelopments(rawSummary, normalizedDevelopments);
   if (/\d+\s*건\s*중|수집된\s*(?:\S+\s*){0,3}자료|[두세네다]\s*갈래|다음과 같|살펴보면|확인됐다\.?$/u.test(`${lead} ${marketSummary}`)) throw new Error('meta_phrase_in_summary');
   const allEvidenceText = evidence.map((item) => [item.title, item.summary, item.insight].filter(Boolean).join(' ')).join(' ');
   assertSupportedCertainty(`${lead} ${marketSummary}`, allEvidenceText);
@@ -193,11 +222,33 @@ function validateBrief(raw, evidence) {
   }
   return {
     lead: lead.slice(0, 500).replace(/[.。]+$/u, ''),
-    market_summary: marketSummary.slice(0, 800),
+    market_summary: marketSummary.slice(0, 1000),
     developments: normalizedDevelopments,
     watchpoints,
   };
-}// The model sometimes answers with the format description instead of content (`"item_id":int`, `"developments":[...]`). That is not
+}// Which items may feed the headline: Published, collected during this KST day, published in the seven calendar days ending today.
+// Shared with the health check so "is there anything to write a headline from?" is answered by the same rule that generation uses.
+const EVIDENCE_WHERE = `i.status = 'Published'
+        AND i.collected_at >= $1::timestamptz AND i.collected_at <= $2::timestamptz
+        AND i.published_at >= $3::date AND i.published_at < $4::date`;
+function evidenceWindow(briefDate) {
+  const recentPublishedSince = new Date(`${briefDate}T12:00:00Z`);
+  recentPublishedSince.setUTCDate(recentPublishedSince.getUTCDate() - 6);
+  const publicationWindowEnd = new Date(`${briefDate}T12:00:00Z`);
+  publicationWindowEnd.setUTCDate(publicationWindowEnd.getUTCDate() + 1);
+  return [
+    new Date(`${briefDate}T00:00:00+09:00`),
+    new Date(`${briefDate}T23:59:59.999+09:00`),
+    recentPublishedSince.toISOString().slice(0, 10),
+    publicationWindowEnd.toISOString().slice(0, 10),
+  ];
+}
+async function countEvidenceCandidates(briefDate) {
+  const { rows } = await pool.query(`SELECT count(*)::int AS n FROM items i WHERE ${EVIDENCE_WHERE}`, evidenceWindow(briefDate));
+  return rows[0] ? rows[0].n : 0;
+}
+
+// The model sometimes answers with the format description instead of content (`"item_id":int`, `"developments":[...]`). That is not
 // parseable JSON and, unlike a random glitch, repeats on an identical prompt — so it is recognised and the next attempt says why.
 const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b/;
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
@@ -205,14 +256,6 @@ const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같�
 async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
   // after an invalid answer the retry gets a shorter input (the freshest items first): less to echo or elide, and the headline only uses 5
   const evidenceLimit = repairHint ? REPAIR_EVIDENCE_ITEMS : MAX_EVIDENCE_ITEMS;
-  // Only consider items collected during this KST day and published in the
-  // seven calendar days ending today. Newer publication dates rank first.
-  const recentPublishedSince = new Date(`${briefDate}T12:00:00Z`);
-  recentPublishedSince.setUTCDate(recentPublishedSince.getUTCDate() - 6);
-  const collectionWindowStart = new Date(`${briefDate}T00:00:00+09:00`);
-  const collectionWindowEnd = new Date(`${briefDate}T23:59:59.999+09:00`);
-  const publicationWindowEnd = new Date(`${briefDate}T12:00:00Z`);
-  publicationWindowEnd.setUTCDate(publicationWindowEnd.getUTCDate() + 1);
   const { rows: items } = await pool.query(
     `SELECT i.id, i.title, i.source_url, i.published_at, i.collected_at,
             COALESCE(i.summary, i.ai_summary, '') AS summary,
@@ -220,18 +263,10 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
             s.name AS source_name
        FROM items i
        LEFT JOIN sources s ON s.id = i.source_id
-      WHERE i.status = 'Published'
-        AND i.collected_at >= $1::timestamptz AND i.collected_at <= $2::timestamptz
-        AND i.published_at >= $3::date AND i.published_at < $4::date
+      WHERE ${EVIDENCE_WHERE}
       ORDER BY i.published_at DESC, i.collected_at DESC, i.id DESC
       LIMIT $5`,
-    [
-      collectionWindowStart,
-      collectionWindowEnd,
-      recentPublishedSince.toISOString().slice(0, 10),
-      publicationWindowEnd.toISOString().slice(0, 10),
-      evidenceLimit,
-    ]
+    [...evidenceWindow(briefDate), evidenceLimit]
   );
   const itemIds = items.map((item) => Number(item.id));
   if (!items.length) {
@@ -268,13 +303,13 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
     '사실의 확정 수준은 원문과 동일하게 유지한다. selected/선정은 계약 체결이 아니고, proposed/제안은 확정이 아니며, negotiating/in talks/협상 중은 체결이 아니다. planned/targeting/예정은 착공·생산·가동이 시작됐다는 뜻이 아니다. 원문에 서명·체결·최종 승인·실제 착공/가동이 명시되지 않으면 그런 완료형 표현을 쓰지 말고 선정·협상 중·제안·계획·목표 등 원문의 상태를 그대로 표시한다.',
     '서로 다른 기사의 내용을 합쳐 하나의 사실처럼 쓰지 않는다. 날짜가 오래되거나 불명확하면 단정하지 않는다.',
     '입력 자료는 모두 오늘 수집되었고 최근 7일(오늘 포함) 내 발행된 자료다. 발행일이 가장 최근인 자료부터 우선 검토하고, 결과도 발행일 최신순으로 정렬한다.',
-    'lead는 150자 이내의 짧은 헤드라인 한 문장으로 쓴다. 가장 중요한 확인 사실 하나를 중심으로 쓰고, 직접 관련이 없는 자료를 쉼표로 나열하지 않는다. 사건·수치·정책·계약 등 관찰된 변화만 쓰며 “~한 하루”, 과장·비유·관용구, 평가성 결론은 금지한다. 중국어·일본어·태국어 문자를 섞지 말고, lead 끝에 온점을 붙이지 않는다.',
+    'lead는 150자 이내의 헤드라인 한 문장으로 쓴다. 가장 시의성 높은(발행일이 최근이고 중요도가 높은) 자료 1~3건의 핵심 변화를 담되, 한 건으로 제한하지 않는다. 서로 직접 관련이 없는 자료는 억지로 잇지 말고 "·"나 "한편"으로 구분해 짧게 쓴다. 사건·수치·정책·계약 등 관찰된 변화만 쓰며 “~한 하루”, 과장·비유·관용구, 평가성 결론은 금지한다. 중국어·일본어·태국어 문자를 섞지 말고, lead 끝에 온점을 붙이지 않는다.',
     '가격·수급·생산·투자·정책·규제·확정 계약 등 실질적 변화를 보인 자료만 주목 후보로 삼는다. 일반 동향, 단순 행사 공지, 반복 보도, 광고성 시장규모 페이지, 영향이 불명확한 자료는 제외한다.',
     '각 후보의 중요도를 1~5 정수로 평가한다. developments는 주목할 자료 5개를 목표로 한다: 중요도 4 이상을 먼저 고르고, 5개에 못 미치면 중요도 3 자료로 채운다. 같은 사건을 다룬 자료는 하나만 고른다. 입력 자료가 5개 미만이거나 나머지가 모두 중요도 2 이하일 때만 5개 미만으로 출력하고, 무관한 자료로 억지로 채우지 않는다.',
     '각 development는 압축해서 쓴다: summary는 "누가/무엇이 + 핵심 수치"를 담은 한 문장(90자 안팎, 130자 이내), significance는 "그래서 어떤 영향인가"를 한 문장(60자 안팎, 90자 이내)이다. 배경 설명·부연·같은 말 반복 없이 수치, 주체, 영향만 쓴다. 한국어로 쓰고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
     'JSON 객체만 출력한다. 모든 값은 입력 자료로 채운 실제 내용이어야 하며 `...`·`[...]`·`int` 같은 자리표시자나 생략 표기는 금지다. 형식 예시(내용은 예시를 쓰지 말고 입력 자료로 작성): {"lead":"A사가 B 공장 증설 투자를 확정했다","market_summary":"증설 소식으로 원료 수급이 빠듯해졌다. 가격 상승 압력이 커진다.","developments":[{"item_id":101,"importance":4,"summary":"A사가 연 10만 톤 규모 증설을 발표","significance":"원료 수요 확대로 가격 변동성이 커진다"}],"watchpoints":["증설 일정 확정 여부"]}',
-    '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 가장 시의적인 현상부터 사실과 영향을 이어서 쓴다.',
-    'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead와 market_summary는 앞쪽 자료를 중심으로 쓴다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
+    '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 developments에 담은 자료 전체(최대 5건)를 빠짐없이 포괄한다: 자료마다 핵심 변화와 영향을 한 문장씩, 가장 시의적인 현상부터 순서대로 쓰고, 1위 자료 하나로 채우지 않는다.',
+    'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead는 앞쪽 자료를 중심으로 쓰고 market_summary는 developments 전체를 아우른다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint ? REPAIR_HINT : ''}`;
@@ -484,4 +519,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { runWithDeadline, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

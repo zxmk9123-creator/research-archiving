@@ -143,4 +143,17 @@ function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
   };
 }
 
-module.exports = { isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
+// GET /api/cron/health: read-only diagnosis of today's pipeline (same bearer-secret auth as the cron). Always answers 200 with the verdict in
+// the body, so a caller (the pipeline-health workflow) decides what to do with it; it changes nothing.
+function healthHandler({ check = () => require('./pipelineHealth').runHealthCheck() } = {}) {
+  return async (req, res) => {
+    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    try {
+      res.json(await check());
+    } catch (err) {
+      res.status(500).json({ status: 'unknown', error: String(err && err.message).slice(0, 160) });
+    }
+  };
+}
+
+module.exports = { healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
