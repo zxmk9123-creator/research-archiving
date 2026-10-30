@@ -251,3 +251,23 @@ test('budget cannot be bypassed by a nested/second build under the same budget: 
     assert.match(h.state.updates[h.state.updates.length - 1].error, /call_budget_exhausted: no_model_call_left/);
   } finally { h.restore(); }
 });
+
+test('time budget: the abandoned model call is ABORTED at the provider (signal), not just ignored; unbudgeted callers get no signal', async () => {
+  const h = harness([GOOD]);
+  const seen = [];
+  provider.callProvider = async (m, opts) => {
+    seen.push(opts && opts.signal);
+    if (!opts || !opts.signal) return GOOD;
+    await new Promise((resolve, reject) => { opts.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }); });
+  };
+  const budget = { max: 3, used: 0, exhausted: false };
+  try {
+    await dailyBrief.runWithCallBudget(budget, () => dailyBrief.runWithDeadline(Date.now() + 200, () => dailyBrief.buildDailyBrief(today, { attemptMs: 10, sleep: async () => {} })));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].aborted, true, 'the in-flight call was aborted when the budget ended');
+    assert.equal(budget.timedOut, true);
+    seen.length = 0;
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.deepEqual(seen, [undefined], 'without a budget nothing changes: no signal is passed');
+  } finally { h.restore(); }
+});

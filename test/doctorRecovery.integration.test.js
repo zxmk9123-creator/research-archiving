@@ -526,3 +526,28 @@ test('BUDGET time: the executor cannot be given more than RECOVERY_TIME_BUDGET_M
     assert.ok(doctor.RECOVERY_TIME_BUDGET_MS < 200000, 'tighter than the executor timeout');
   } finally { llm.restore(); }
 });
+
+test('SHARED DAILY CAP: the Doctor\'s headline claim and the pipeline\'s own completion-path generation (the one a kick_pipeline restart leads to) draw on ONE daily attempt counter — at the cap neither can start a model call', opts, async () => {
+  await reset(); const v = at910();
+  const ids = await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: dailyBrief.MAX_AUTO_DAILY_ATTEMPTS - 1, error: 'AI provider returned 503' });
+  const llm = fakeProvider(() => goodAnswer(ids));
+  try {
+    // one attempt left: the Doctor takes it (attempt_count -> cap) and the headline is generated
+    const r = await doctor.runDoctor(base(v));
+    assert.equal(llm.calls.n, 1);
+    assert.equal((await briefRow()).attempt_count, dailyBrief.MAX_AUTO_DAILY_ATTEMPTS);
+    assert.equal(r.outcome, 'recovered');
+    // the completion path (what a restarted collection triggers) is now refused on the same counter, even for a failed row
+    await q("UPDATE daily_briefs SET status = 'failed' WHERE brief_date = $1::date", [todayKst()]);
+    const q2 = await dailyBrief.queueDailyBriefGeneration(v);
+    assert.equal(q2.started, false, JSON.stringify(q2));
+    assert.equal(llm.calls.n, 1, 'no model call from the completion path at the cap');
+    // and the Doctor, in turn, reports the cap and asks for a person instead of calling the model
+    const later = new Date(v.getTime() + 45 * 60000);
+    const r2 = await doctor.runDoctor({ ...base(later), clock: () => later.getTime() + 30000 });
+    assert.equal(llm.calls.n, 1);
+    assert.equal(r2.findings.find((f) => f.checkId === 'headline').cause, 'attempt_cap_reached');
+    assert.equal(r2.humanNeeded, true);
+  } finally { llm.restore(); }
+});

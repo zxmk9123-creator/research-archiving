@@ -321,7 +321,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
   ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint ? REPAIR_HINT : ''}`;
 
-  const text = await provider.callProvider({ system, user });
+  const text = await provider.callProvider({ system, user }, cancelled && cancelled.signal ? { signal: cancelled.signal } : undefined);
   // the start of an unusable answer is kept in the attempt log: without it the cause of a repeated failure cannot be told from the message
   const withHead = (message) => `${message} | head=${String(text || '').replace(/\s+/g, ' ').slice(0, 120)}`;
   let raw;
@@ -354,7 +354,8 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
         if (callBudget.used >= callBudget.max) throw new Error('no_model_call_left'); // a nested/second build under the same budget cannot start another call
         callBudget.used += 1;
       }
-      const cancelled = { v: false };
+      const abort = new AbortController();
+      const cancelled = { v: false, signal: callBudget ? abort.signal : undefined }; // only a budgeted caller can cancel
       const attempt = buildDailyBriefAttempt(briefDate, { repairHint, cancelled });
       const deadline0 = deadlineStore.getStore();
       if (callBudget && deadline0) {
@@ -362,7 +363,11 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
         attempt.catch(() => {});
         let timer;
         try {
-          await Promise.race([attempt, new Promise((_, reject) => { timer = setTimeout(() => { cancelled.v = true; callBudget.timedOut = true; reject(new Error('attempt_exceeded_time_budget')); }, Math.max(0, deadline0 - Date.now())); })]);
+          await Promise.race([attempt, new Promise((_, reject) => { timer = setTimeout(() => {
+            cancelled.v = true; callBudget.timedOut = true;
+            abort.abort(); // also stop the provider-side wait, not just ours
+            reject(new Error('attempt_exceeded_time_budget'));
+          }, Math.max(0, deadline0 - Date.now())); })]);
         } finally { clearTimeout(timer); }
       } else await attempt;
       return;

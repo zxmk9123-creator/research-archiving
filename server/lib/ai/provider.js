@@ -191,8 +191,8 @@ async function callFreeLLMAPI({ system, user }, { signal, lane } = {}) {
   return appendTruncationNoticeIfNeeded(text, choice && choice.finish_reason);
 }
 
-async function callProvider(promptMessages) {
-  return callFreeLLMAPI(promptMessages);
+async function callProvider(promptMessages, { signal } = {}) {
+  return callFreeLLMAPI(promptMessages, signal ? { signal } : undefined);
 }
 
 // --- Streaming path (AI Research Search's perceived-latency fix) ---
