@@ -151,3 +151,39 @@ test('review fixes: nearly-all-sources-failed is an outage not a quiet day, miss
   const onTime = evaluateHealth(good({ discovery: { state: 'running', completedToday: false, progress: { done: 60, total: 84 } }, brief: null }), new Date('2026-10-29T23:30:00Z').getTime()); // 08:30 KST
   assert.equal(onTime.checks.find((c) => c.id === 'discovery_run').status, 'pass');
 });
+
+test('no trigger incident -> one PASS row that shows its evidence (latest call and today\'s count per trigger); incidents still produce their own rows', () => {
+  const ok = evaluateHealth(good({
+    heartbeat: {
+      since: '2026-10-29T06:58:22.739Z',
+      last: { github: '2026-10-30T00:57:40.775Z', vercel: '2026-10-30T00:57:24.157Z' },
+      days: { '2026-10-30': { github: { n: 13, first: '2026-10-29T20:14:06.892Z', last: '2026-10-30T00:57:40.775Z' }, vercel: { n: 3, first: '2026-10-29T22:07:04.640Z', last: '2026-10-30T00:57:24.157Z' } } },
+    },
+  }), NOW);
+  const rows = ok.checks.filter((c) => c.id.startsWith('trigger'));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'trigger');
+  assert.equal(rows[0].status, 'pass');
+  assert.match(rows[0].detail, /github last 2026-10-30T00:57:40\.775Z \(13 call\(s\) today\)/);
+  assert.match(rows[0].detail, /vercel last 2026-10-30T00:57:24\.157Z \(3 call\(s\) today\)/);
+  assert.equal(ok.status, 'ok', 'a PASS row does not change the verdict');
+  assert.match(ok.summary, /\[PASS\] trigger: scheduler triggers on time/);
+
+  // a trigger with no recorded call is stated as such (no invented time)
+  const githubOnly = evaluateHealth(good({
+    heartbeat: { since: '2026-10-29T00:00:00Z', last: { github: '2026-10-30T00:30:00.000Z' }, days: { '2026-10-30': { github: { n: 2, first: '2026-10-29T22:10:00Z', last: '2026-10-30T00:30:00.000Z' } } } },
+  }), NOW);
+  assert.match(githubOnly.checks.find((c) => c.id === 'trigger').detail, /vercel no call recorded/);
+
+  // incidents are unchanged: a missed GitHub trigger still warns and there is no PASS row beside it
+  const missed = evaluateHealth(good({
+    heartbeat: { since: '2026-10-28T00:00:00Z', last: { vercel: '2026-10-30T00:30:00.000Z' }, days: { '2026-10-30': { vercel: { n: 3, first: '2026-10-29T22:00:00Z', last: '2026-10-30T00:30:00.000Z' } } } },
+  }), NOW);
+  assert.equal(missed.status, 'warn');
+  assert.ok(missed.checks.some((c) => c.id === 'trigger_missed'));
+  assert.ok(!missed.checks.some((c) => c.id === 'trigger'));
+
+  // not read at all -> still no trigger row; unreadable/absent doc -> still unknown
+  assert.equal(evaluateHealth(good({ heartbeat: undefined }), NOW).checks.some((c) => c.id.startsWith('trigger')), false);
+  assert.deepEqual(evaluateHealth(good({ heartbeat: null }), NOW).checks.filter((c) => c.id.startsWith('trigger')).map((c) => [c.id, c.status]), [['trigger_telemetry', 'unknown']]);
+});

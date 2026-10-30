@@ -97,9 +97,20 @@ function headlineCheck(input, discovery, now) {
   return check('headline', 'warn', `unexpected headline status "${brief.status}"`);
 }
 
+// One row per trigger verdict. With incidents: one row each (missed = warn, telemetry gaps = unknown). With none: a single PASS row that shows
+// the evidence it rests on (latest call and today's count per trigger), so a healthy trigger is visible instead of silent.
 function triggerCheck(input, now) {
   if (input.heartbeat === undefined) return [];
-  return triggerIncidents(input.heartbeat, { now }).map((i) => check(`trigger_${i.kind}`, i.kind === 'missed' ? 'warn' : 'unknown', i.text));
+  const incidents = triggerIncidents(input.heartbeat, { now });
+  if (incidents.length) return incidents.map((i) => check(`trigger_${i.kind}`, i.kind === 'missed' ? 'warn' : 'unknown', i.text));
+  const hb = input.heartbeat || {};
+  const today = ((hb.days || {})[kst(now).toISOString().slice(0, 10)]) || {};
+  const parts = ['github', 'vercel'].map((name) => {
+    const last = hb.last && hb.last[name];
+    const n = today[name] && today[name].n;
+    return last ? `${name} last ${last} (${n || 0} call(s) today)` : `${name} no call recorded`;
+  });
+  return [check('trigger', 'pass', `scheduler triggers on time: ${parts.join('; ')}`)];
 }
 
 function recoveryCheck(input, now) {
