@@ -410,3 +410,88 @@ test('REPORT ACCURACY: the stored report matches what actually happened (actions
 });
 
 test.after(async () => { if (pool) { try { await reset(); } catch (_) { /* best effort */ } await pool.end(); } });
+
+// ===================== hardening: provider/HTTP failures, pool contention, preflight, honest outcomes (real DB, real executors) =====================
+
+const httpError = (msg) => { throw new Error(msg); };
+
+test('PROVIDER 503 then healthy: the real retry regenerates once and the DB agrees with a recovered report', opts, async () => {
+  await reset(); const v = at910();
+  const ids = await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  const llm = fakeProvider(() => goodAnswer(ids));
+  try {
+    const r = await doctor.runDoctor(base(v));
+    assert.deepEqual([r.findings.find((f) => f.checkId === 'headline').cause, llm.calls.n, r.outcome, r.humanNeeded], ['ai_provider_transient', 1, 'recovered', false]);
+    assert.equal((await briefRow()).status, 'ready');
+  } finally { llm.restore(); }
+});
+
+test('PROVIDER 503 persists: bounded to ONE model call, unresolved + person needed, and the next run (past cooldown) makes no further call', opts, async () => {
+  await reset(); const v = at910();
+  await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  const llm = fakeProvider(() => httpError('AI provider returned 503'));
+  try {
+    const first = await doctor.runDoctor(base(v));
+    // ONE doctor attempt = one claim of the existing guard, which itself makes a few bounded model calls (JSON/repair retries) — observed: 6
+    const used = llm.calls.n;
+    assert.deepEqual([first.outcome, first.humanNeeded, used >= 1 && used <= 6], ['unresolved', true, true]);
+    assert.notEqual((await briefRow()).status, 'ready', 'no false ready');
+    const later = new Date(v.getTime() + 45 * 60000);
+    const second = await doctor.runDoctor({ ...base(later), clock: () => later.getTime() + 30000 });
+    assert.deepEqual([llm.calls.n, second.outcome], [used, 'limit_reached'], 'no further model call for a problem the first retry did not fix');
+    assert.equal((await doctorDoc()).days[todayKst()].rounds, 1);
+  } finally { llm.restore(); }
+});
+
+test('PROVIDER 401 (rejected key): the model is never called, nothing is claimed or counted, a person is told', opts, async () => {
+  await reset(); const v = at910();
+  await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 401 Unauthorized' });
+  const before = await briefRow();
+  const llm = fakeProvider(() => httpError('must not be called'));
+  try {
+    const r = await doctor.runDoctor(base(v));
+    assert.deepEqual([r.outcome, r.humanNeeded, llm.calls.n, r.actions], ['needs_human', true, 0, []]);
+    assert.equal((await briefRow()).attempt_count, before.attempt_count);
+    assert.equal((await doctorDoc()).days, undefined, 'no round or attempt was consumed');
+  } finally { llm.restore(); }
+});
+
+test('DB POOL CONTENTION: inside the 30 min contention cooldown nothing runs; after it the retry runs once; a deferred round (preflight) costs nothing', opts, async () => {
+  await reset(); const v = at910();
+  await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'timeout exceeded when trying to connect' });
+  await q(`INSERT INTO scheduler_jobs (job_name, last_run_date, last_totals) VALUES ('ops_doctor', $1::date, $2::jsonb)`,
+    [todayKst(), JSON.stringify({ days: { [todayKst()]: { rounds: 1, byKey: { 'headline:db_pool_contention': { count: 1, lastAt: v.getTime() - 15 * 60000 } } } } })]);
+  const llm = fakeProvider(() => goodAnswer([1, 2, 3]));
+  try {
+    const inside = await doctor.runDoctor(base(v));
+    assert.deepEqual([llm.calls.n, inside.plan.skipped.map((s) => s.reason)], [0, ['cooldown']]);
+    const later = new Date(v.getTime() + 20 * 60000); // 35 min after the first attempt
+    const deferred = await doctor.runDoctor({ ...base(later), clock: () => later.getTime() + 30000, preflight: async () => ({ ok: false, reason: 'pool_saturated' }) });
+    assert.deepEqual([deferred.outcome, llm.calls.n, (await doctorDoc()).days[todayKst()].rounds], ['deferred_db_unhealthy', 0, 1]);
+    assert.equal((await doctorDoc()).days[todayKst()].byKey['headline:db_pool_contention'].count, 1, 'the deferred round counted no attempt');
+    const ids = (await q('SELECT id FROM items ORDER BY id')).map((r) => r.id);
+    llm.restore(); const llm2 = fakeProvider(() => goodAnswer(ids));
+    try {
+      const ran = await doctor.runDoctor({ ...base(later), clock: () => later.getTime() + 30000 });
+      assert.deepEqual([llm2.calls.n, ran.outcome], [1, 'recovered']);
+    } finally { llm2.restore(); }
+  } finally { llm.restore(); }
+});
+
+test('REAL PREFLIGHT: with the real pool the preflight passes; a saturated pool defers the round with the real executors untouched', opts, async () => {
+  await reset(); const v = at910();
+  await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider timeout' });
+  assert.deepEqual(await doctor.dbPreflight(), { ok: true });
+  const llm = fakeProvider(() => httpError('must not be called'));
+  const desc = Object.getOwnPropertyDescriptor(pool, 'waitingCount');
+  try {
+    Object.defineProperty(pool, 'waitingCount', { value: 3, configurable: true });
+    const r = await doctor.runDoctor(base(v));
+    assert.deepEqual([r.outcome, r.humanNeeded, llm.calls.n, await doctorDoc().then((d) => d && d.lock)], ['deferred_db_unhealthy', false, 0, undefined]);
+  } finally { if (desc) Object.defineProperty(pool, 'waitingCount', desc); else delete pool.waitingCount; llm.restore(); }
+});

@@ -316,3 +316,179 @@ test('DEFECT FIX: background.drain leaves no timer behind when everything finish
   assert.equal(await bg.drain(60000), 0);
   assert.ok(timers() <= before, `a finished drain must not keep its 60 s timer alive (before ${before}, after ${timers()})`);
 });
+
+// ---------- autonomy policy boundaries: real provider/HTTP failures, database contention, honest still-running reports ----------
+const failedWith = (err) => base({ brief: failedBrief(err), attempts: [{ error: err, created_at: iso('2026-10-30T00:29:00Z') }] });
+const headlineFinding = (ctx) => diagnose(evaluateHealth(ctx, NOW.getTime()), ctx, NOW.getTime()).find((f) => f.checkId === 'headline');
+
+test('policy: real provider/HTTP failures — transient ones are retryable, key/quota ones are never retried and need a person', () => {
+  for (const e of ['AI provider returned 500', 'upstream 503 Service Unavailable', 'HTTP 429 rate limit', 'ETIMEDOUT', 'socket hang up', 'error code: 522', 'The model is overloaded']) {
+    assert.equal(errorKind(e), 'ai_provider_transient', e);
+    const f = headlineFinding(failedWith(e));
+    assert.deepEqual([f.classification, f.action], ['retryable', 'retry_headline'], e);
+  }
+  for (const e of ['AI provider returned 401 Unauthorized', 'HTTP 402 insufficient_quota', 'You exceeded your current quota', 'Invalid API key']) {
+    assert.equal(errorKind(e), 'provider_unavailable', e);
+    const f = headlineFinding(failedWith(e));
+    assert.deepEqual([f.cause, f.classification, f.action, f.humanUrgency], ['provider_unavailable', 'needs_human', null, 'now'], e);
+  }
+  assert.equal(errorKind('brief_placeholder_output | head=the 401 and 503 numbers'), 'model_output_invalid', 'the model\'s own text never steers the classification');
+});
+
+test('policy: database pool contention is its own cause with a LONGER cooldown than other retries', () => {
+  const e = 'timeout exceeded when trying to connect';
+  assert.equal(errorKind(e), 'db_pool_contention');
+  assert.equal(errorKind('sorry, too many clients already'), 'db_pool_contention');
+  const f = headlineFinding(failedWith(e));
+  assert.deepEqual([f.cause, f.classification, f.action], ['db_pool_contention', 'retryable', 'retry_headline']);
+  const at = NOW.getTime();
+  const plan = (key, minutes) => planRecovery([f.key === key ? f : f], { days: { '2026-10-30': { byKey: { [key]: { count: 1, lastAt: at - minutes * 60000 } } } } }, { now: at, mode: 'recover', recoveryEnabled: true });
+  assert.equal(plan(f.key, 15).actions.length, 0, '15 min is past the normal cooldown but not the contention one');
+  assert.equal(plan(f.key, 15).skipped[0].reason, 'cooldown');
+  assert.equal(plan(f.key, 31).actions.length, 1, 'after 30 min it may try again');
+  const other = headlineFinding(failedWith('AI provider timeout'));
+  assert.equal(planRecovery([other], { days: { '2026-10-30': { byKey: { [other.key]: { count: 1, lastAt: at - 15 * 60000 } } } } }, { now: at, mode: 'recover', recoveryEnabled: true }).actions.length, 1, 'ordinary causes keep the 10 min cooldown');
+});
+
+test('preflight: an unhealthy database defers the round BEFORE the lease — nothing executed, nothing counted, no human paged', async () => {
+  const bad = failedWith('AI provider timeout'); const ex = exec(); const store = memStore();
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store, preflight: async () => ({ ok: false, reason: 'pool_saturated' }) });
+  assert.equal(r.outcome, 'deferred_db_unhealthy');
+  assert.deepEqual([ex.calls, r.actions, r.humanNeeded], [[], [], false]);
+  assert.equal(store.doc.days, undefined, 'no round or attempt was counted');
+  assert.equal(store.doc.lock, undefined, 'no lease was taken');
+  assert.match(r.summary, /deferred: database not ready \(pool_saturated\)/);
+  const thrown = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store: memStore(), preflight: async () => { throw new Error('boom'); } });
+  assert.equal(thrown.outcome, 'deferred_db_unhealthy', 'a failing preflight is treated as unhealthy, never as "go"');
+  const ok = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store: memStore(), preflight: async () => ({ ok: true }) });
+  assert.deepEqual(ex.calls, ['retry_headline'], 'a healthy database proceeds as before');
+  assert.notEqual(ok.outcome, 'deferred_db_unhealthy');
+});
+
+test('preflight: dbPreflight itself reports a saturated or failing pool as not ok and a working one as ok', async () => {
+  const pool = require('../server/db/pool'); const { dbPreflight } = require('../server/lib/pipelineDoctor');
+  const orig = { query: pool.query, wc: Object.getOwnPropertyDescriptor(pool, 'waitingCount') };
+  try {
+    Object.defineProperty(pool, 'waitingCount', { value: 2, configurable: true });
+    assert.deepEqual(await dbPreflight(), { ok: false, reason: 'pool_saturated' });
+    Object.defineProperty(pool, 'waitingCount', { value: 0, configurable: true });
+    pool.query = async () => { throw new Error('connection terminated'); };
+    assert.match((await dbPreflight()).reason, /db_unhealthy: connection terminated/);
+    pool.query = async () => ({ rows: [{}] });
+    assert.deepEqual(await dbPreflight(), { ok: true });
+  } finally { pool.query = orig.query; if (orig.wc) Object.defineProperty(pool, 'waitingCount', orig.wc); else delete pool.waitingCount; }
+});
+
+test('escalation: when the automatic limits are used up while the pipeline still FAILS, a person is needed; a mere warning is not escalated', async () => {
+  const bad = failedWith('AI provider timeout'); const ex = exec();
+  const used = { days: { '2026-10-30': { rounds: MAX_ROUNDS_PER_DAY } } };
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad), executors: ex, store: memStore(used) });
+  assert.deepEqual([r.outcome, r.humanNeeded, ex.calls], ['limit_reached', true, []]);
+  const warnOnly = base({ discovery: { ...doneDiscovery, failedSources: [1] , totals: { discovered: 100, archived: 11, failedSources: 1 } }, trace: [{ at: iso('2026-10-30T00:00:00Z'), kind: 'cron_call', chained: 'hop_1_http_508_gave_up' }] });
+  const w = await run({ mode: 'recover', gather: gatherSeq(warnOnly), executors: ex, store: memStore(used) });
+  assert.equal(w.humanNeeded, false);
+});
+
+test('reporting: a recovery that left work running is "improving" with stillRunning=true and an explicit not-yet-fixed line; a finished one is not', async () => {
+  const bad = failedWith('AI provider timeout');
+  const generating = base({ brief: { status: 'generating', attempt_count: 4, error: null, updated_at: iso('2026-10-30T00:40:30Z'), completed_at: null, item_count: 0 } });
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad, generating), executors: { retry_headline: async () => ({ ran: true, stillRunning: 1 }) }, store: memStore() });
+  assert.deepEqual([r.outcome, r.stillRunning, r.humanNeeded], ['improving', true, false]);
+  assert.match(r.summary, /still running.*NOT yet confirmed fixed/);
+  const done = await run({ mode: 'recover', gather: gatherSeq(bad, base({ brief: { ...readyBrief, attempt_count: 4, completed_at: iso('2026-10-30T00:41:00Z') } })), executors: exec(), store: memStore() });
+  assert.deepEqual([done.outcome, done.stillRunning], ['recovered', false]);
+});
+
+test('boundaries: diagnose mode and DOCTOR_RECOVERY off still execute nothing, whatever the new causes', async () => {
+  for (const e of ['timeout exceeded when trying to connect', 'AI provider returned 503']) {
+    const bad = failedWith(e);
+    for (const opts of [{ mode: 'diagnose', recoveryEnabled: true }, { mode: 'recover', recoveryEnabled: false }]) {
+      const ex = exec();
+      const r = await run({ gather: gatherSeq(bad), executors: ex, store: memStore(), ...opts });
+      assert.deepEqual([ex.calls, r.actions, r.outcome], [[], [], 'recovery_not_permitted']);
+    }
+  }
+});
+
+// ---------- "improving" is never "recovered" ----------
+const hc = (...c) => ({ status: c.some((x) => x[1] === 'fail') ? 'failed' : c.some((x) => x[1] === 'warn') ? 'warn' : 'ok', checks: c.map(([id, status, detail]) => ({ id, status, detail: detail || '' })) });
+
+test('judgeOutcome: a failed check that is only DOWNGRADED (fail -> warn) or still running is improving; only fail -> PASS is recovered', () => {
+  assert.equal(judgeOutcome(hc(['discovery_run', 'fail']), hc(['discovery_run', 'warn', 'still in progress 54/84 past 10:00 KST']), [{ action: 'kick_pipeline', result: { kicked: true } }]), 'improving');
+  assert.equal(judgeOutcome(hc(['headline', 'fail']), hc(['headline', 'warn', 'ready with 7 item(s) but 60 min after the 09:00 KST target']), []), 'recovered', 'finished but late is done');
+  assert.equal(judgeOutcome(hc(['headline', 'fail']), hc(['headline', 'pass', 'generating (attempt 4)']), []), 'improving');
+  assert.equal(judgeOutcome(hc(['headline', 'fail']), hc(['headline', 'pass', 'ready with 7 item(s)']), []), 'recovered');
+  assert.equal(judgeOutcome(hc(['headline', 'fail']), hc(['headline', 'pass', 'ready'], ['recovery', 'warn']), []), 'recovered', 'an unrelated informational warning does not block a real fix');
+});
+
+test('improving is only ever confirmed by a LATER health run: while the work is still running the next run neither acts nor claims recovery; a later run reports only what it sees (healthy only on a real PASS)', async () => {
+  const bad = failedWith('AI provider returned 503');
+  const generating = base({ brief: { status: 'generating', attempt_count: 4, error: null, updated_at: iso('2026-10-30T00:40:30Z'), completed_at: null, item_count: 0 } });
+  const store = memStore(); const ex = exec();
+  const first = await run({ mode: 'recover', gather: gatherSeq(bad, generating), executors: ex, store });
+  assert.deepEqual([first.outcome, first.stillRunning], ['improving', true]);
+  const stillGenerating = await run({ mode: 'recover', gather: gatherSeq(generating), executors: ex, store });
+  assert.equal(stillGenerating.outcome, 'in_progress', 'a PASS that only says "generating" is not a confirmation');
+  assert.deepEqual(ex.calls, ['retry_headline'], 'no second action while the first is running');
+  const ready = base({ brief: { ...readyBrief, attempt_count: 4, completed_at: iso('2026-10-30T00:41:00Z') } });
+  const later = await run({ mode: 'recover', gather: gatherSeq(ready), executors: ex, store });
+  // 09:41 KST completion is after the 09:00 target: the later run sees only that permanent warning — it never claims "recovered" or "improving"
+  assert.deepEqual([later.outcome, later.humanNeeded], ['review_only', false]);
+  const onTime = await run({ mode: 'recover', gather: gatherSeq(base()), executors: ex, store });
+  assert.equal(onTime.outcome, 'healthy', 'a later health run that really PASSES reports healthy');
+  assert.deepEqual(ex.calls, ['retry_headline']);
+});
+
+// ---------- recovery decision + execution through runDoctor (the real planner, lease, limits, re-check) for each failure class ----------
+test('provider/HTTP transient (503) and DB contention: planned, executed once, re-checked; a persisting failure is unresolved, escalated and NOT retried on the next run', async () => {
+  for (const err of ['AI provider returned 503', 'HTTP 429 rate limit', 'timeout exceeded when trying to connect']) {
+    const bad = failedWith(err); const store = memStore(); const ex = exec();
+    const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store });
+    assert.deepEqual([ex.calls, r.outcome, r.humanNeeded], [['retry_headline'], 'unresolved', true], err);
+    const again = await runDoctor({ now: new Date(NOW.getTime() + 3600000), clock: () => NOW.getTime() + 3660000, recoveryEnabled: true, mode: 'recover', gather: gatherSeq(bad), executors: ex, store });
+    assert.deepEqual([ex.calls.length, again.outcome], [1, 'limit_reached'], `${err}: no retry of a problem the first retry did not fix`);
+  }
+});
+
+test('provider key/quota failure (401/402): nothing is executed, a person is needed, and no round or attempt is consumed', async () => {
+  for (const err of ['AI provider returned 401 Unauthorized', 'HTTP 402 insufficient_quota']) {
+    const store = memStore(); const ex = exec();
+    const r = await run({ mode: 'recover', gather: gatherSeq(failedWith(err)), executors: ex, store });
+    assert.deepEqual([ex.calls, r.outcome, r.humanNeeded, store.doc.days], [[], 'needs_human', true, undefined], err);
+  }
+});
+
+test('cooldown through runDoctor: a transient failure inside its cooldown is not retried (contention waits 30 min), and afterwards it is', async () => {
+  const bad = failedWith('timeout exceeded when trying to connect'); const key = 'headline:db_pool_contention';
+  const doc = (agoMin) => ({ days: { '2026-10-30': { rounds: 1, byKey: { [key]: { count: 1, lastAt: NOW.getTime() - agoMin * 60000 } } } } });
+  const ex = exec();
+  const inside = await run({ mode: 'recover', gather: gatherSeq(bad), executors: ex, store: memStore(doc(15)) });
+  assert.deepEqual([ex.calls, inside.plan.skipped.map((s) => s.reason)], [[], ['cooldown']]);
+  assert.ok(!['recovered', 'improving'].includes(inside.outcome));
+  const after = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store: memStore(doc(31)) });
+  assert.deepEqual(ex.calls, ['retry_headline']);
+  assert.ok(after.actions.length === 1);
+});
+
+test('attempt limits through runDoctor: the per-problem cap and the daily round cap stop execution and escalate while it still FAILS', async () => {
+  const bad = failedWith('AI provider returned 503'); const ex = exec();
+  const capped = await run({ mode: 'recover', gather: gatherSeq(bad), executors: ex, store: memStore({ days: { '2026-10-30': { rounds: 1, byKey: { 'headline:ai_provider_transient': { count: 2, lastAt: NOW.getTime() - 3 * 3600000 } } } } }) });
+  assert.deepEqual([ex.calls, capped.outcome, capped.humanNeeded], [[], 'limit_reached', true]);
+});
+
+test('concurrent doctors: two runs that diagnosed the same failure at once execute exactly one recovery; the other reports locked and claims nothing', async () => {
+  const bad = failedWith('AI provider returned 503'); const store = memStore(); const ex = exec();
+  const mk = () => run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: ex, store });
+  const [a, b] = await Promise.all([mk(), mk()]);
+  assert.deepEqual(ex.calls, ['retry_headline']);
+  const locked = [a, b].find((r) => r.outcome === 'locked');
+  assert.ok(locked, 'one run lost the lease');
+  assert.deepEqual([locked.actions, locked.after, locked.stillRunning || false], [[], null, false]);
+  assert.equal(store.doc.days['2026-10-30'].rounds, 1);
+});
+
+test('re-check honesty: an action that did not run (no-op) is not_applied, never recovered, while the failure is still there', async () => {
+  const bad = failedWith('AI provider returned 503');
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: { retry_headline: async () => ({ ran: false, reason: 'not_due' }) }, store: memStore() });
+  assert.deepEqual([r.outcome, r.humanNeeded], ['not_applied', true]);
+});

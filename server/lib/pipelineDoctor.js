@@ -18,6 +18,7 @@ const LOCK_MS = 8 * 60000;
 const COOLDOWN_MS = 10 * 60000;
 const MAX_ROUNDS_PER_DAY = 3;
 const MAX_ATTEMPTS_PER_KEY = 2;
+const COOLDOWN_BY_CAUSE = { db_pool_contention: 3 * COOLDOWN_MS }; // give a saturated database time to drain before asking it for more
 const MAX_UNRESOLVED_PER_KEY = 1;     // a recovery that did not fix it is not repeated
 const EXECUTOR_TIMEOUT_MS = 200000;
 const RUN_BUDGET_MS = 250000;        // the whole run (diagnosis, actions, re-check, report) must fit the ~300 s function limit
@@ -44,7 +45,11 @@ const errorKind = (text) => {
   if (/No AI provider/i.test(t)) return 'unknown'; // a configuration problem, not a transient one
   if (/brief_placeholder_output|brief_truncated_by_max_tokens|invalid_brief_json|not valid JSON|Unexpected token|incomplete_brief|meta_phrase_in_summary|headline_lead_too_long|unexpected_non_korean_script/.test(t)) return 'model_output_invalid';
   if (/retry_deferred/.test(t)) return 'insufficient_invocation_time';
-  if (/timed? ?out|timeout|ECONN|ENOTFOUND|fetch failed|network|\b(429|502|503|504)\b|AI provider/i.test(t)) return 'ai_provider_transient';
+  // our own database being saturated is not the model's fault, and retrying into it makes it worse: its own cause, its own (longer) cooldown
+  if (/timeout exceeded when trying to connect|too many clients|remaining connection slots|connection terminated|pool is (?:full|exhausted)/i.test(t)) return 'db_pool_contention';
+  // a rejected key / exhausted quota does not heal by retrying; every retry would only burn another key
+  if (/\b(401|402|403)\b|insufficient_quota|exceeded your current quota|invalid api key|unauthorized|forbidden/i.test(t)) return 'provider_unavailable';
+  if (/timed? ?out|timeout|ECONN|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|overloaded|rate.?limit|\b(429|500|502|503|504|520|521|522|523|524)\b|AI provider/i.test(t)) return 'ai_provider_transient';
   return 'unknown';
 };
 
@@ -83,7 +88,8 @@ function diagnose(health, ctx, now = Date.now()) {
       else if (/failed after/.test(c.detail)) {
         const kind = [ctx.brief && ctx.brief.error, lastErrors[lastErrors.length - 1]].map(errorKind).find((k) => k !== 'unknown') || 'unknown';
         if (kind === 'unknown') out.push(finding(c.id, 'unknown_generation_error', 'unknown', 'needs_human', ev));
-        else out.push(finding(c.id, kind, kind === 'ai_provider_transient' ? 'likely' : 'confirmed', 'retryable', ev, { action: 'retry_headline' }));
+        else if (kind === 'provider_unavailable') out.push(finding(c.id, kind, 'likely', 'needs_human', ev)); // key/quota problem: a person must fix it
+        else out.push(finding(c.id, kind, kind === 'ai_provider_transient' || kind === 'db_pool_contention' ? 'likely' : 'confirmed', 'retryable', ev, { action: 'retry_headline' }));
       } else if (/missing/.test(c.detail)) {
         if (ctx.discovery && ctx.discovery.completedToday) out.push(finding(c.id, 'generation_not_started', 'likely', 'retryable', ev, { action: 'retry_headline' }));
         else out.push(finding(c.id, 'headline_missing_before_collection_done', 'unknown', 'needs_human', ev));
@@ -116,7 +122,7 @@ function planRecovery(findings, doc, { now = Date.now(), mode = 'diagnose', reco
     const st = byKey[f.key] || {};
     if ((st.unresolved || 0) >= MAX_UNRESOLVED_PER_KEY) plan.skipped.push({ key: f.key, reason: 'recovery_already_failed_for_this_problem' });
     else if ((st.count || 0) >= MAX_ATTEMPTS_PER_KEY) plan.skipped.push({ key: f.key, reason: 'attempt_limit_for_this_problem' });
-    else if (st.lastAt && now - st.lastAt < COOLDOWN_MS) plan.skipped.push({ key: f.key, reason: 'cooldown' });
+    else if (st.lastAt && now - st.lastAt < (COOLDOWN_BY_CAUSE[f.cause] || COOLDOWN_MS)) plan.skipped.push({ key: f.key, reason: 'cooldown' });
     else if (seenActions.has(f.action)) plan.skipped.push({ key: f.key, reason: 'same_action_already_planned' });
     else { seenActions.add(f.action); plan.actions.push({ action: f.action, key: f.key, why: f.cause, does: ACTIONS[f.action] }); }
   }
@@ -142,6 +148,10 @@ function judgeOutcome(before, after, ran) {
   if (!hasFail && kicked && stillRunning) return 'improving';
   const generating = after.checks.some((c) => c.id === 'headline' && c.status === 'pass' && /^generating/.test(c.detail));
   if (!hasFail && generating) return 'improving'; // the new attempt is under way; only a ready headline counts as recovered
+  // a check that FAILED before and is only downgraded while its work is still running (fail -> warn "still in progress past 10:00") is progress, not a fix.
+  // A finished-but-late result ("ready, 60 min after the target") is done: that warning is permanent information, not pending work
+  const failedIds = before.checks.filter((c) => c.status === 'fail').map((c) => c.id);
+  if (!hasFail && after.checks.some((c) => failedIds.includes(c.id) && c.status !== 'pass' && /in progress|generating|still running/i.test(c.detail))) return 'improving';
   if (after.status === 'ok' || !hasFail) return 'recovered'; // no failure left (informational warnings, e.g. a late headline, may remain)
   const fixed = [...b].filter((x) => x.endsWith(':fail') && !a.includes(x));
   return fixed.length ? 'improving' : 'unresolved';
@@ -154,6 +164,17 @@ async function collectContext(now) {
   input.attempts = await safe(async () => (await pool.query("SELECT error, created_at FROM daily_brief_attempts WHERE brief_date = $1 ORDER BY created_at DESC LIMIT 5", [require('./dailyBrief').kstDate(now)])).rows.reverse(), []);
   input.providers = await safe(async () => { const r = (await pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'provider_health'")).rows[0]; return r ? r.last_totals : null; }, null);
   return input;
+}
+
+// Runs before the lease is taken (so a refused round costs no attempt): is our own database in a state to take more work?
+async function dbPreflight() {
+  const pool = require('../db/pool');
+  if (pool.waitingCount > 0) return { ok: false, reason: 'pool_saturated' };
+  let t;
+  try {
+    await Promise.race([pool.query('SELECT 1'), new Promise((_, rej) => { t = setTimeout(() => rej(new Error('slow')), 5000); })]);
+    return { ok: true };
+  } catch (err) { return { ok: false, reason: `db_unhealthy: ${String(err && err.message).slice(0, 80)}` }; } finally { clearTimeout(t); }
 }
 
 const defaultExecutors = {
@@ -178,7 +199,7 @@ const defaultExecutors = {
 // The orchestrator. Everything external is injectable so each situation can be tested without a database or network.
 async function runDoctor({
   mode = 'diagnose', recoveryEnabled = process.env.DOCTOR_RECOVERY === 'on', now = new Date(),
-  gather = collectContext, executors = defaultExecutors, store = null, executorTimeoutMs = EXECUTOR_TIMEOUT_MS, clock = () => Date.now(),
+  gather = collectContext, executors = defaultExecutors, store = null, preflight = store ? async () => ({ ok: true }) : dbPreflight, executorTimeoutMs = EXECUTOR_TIMEOUT_MS, clock = () => Date.now(),
 } = {}) {
   const startedAt = new Date().toISOString();
   const t0 = now.getTime();
@@ -203,13 +224,20 @@ async function runDoctor({
   report.plan = planRecovery(report.findings, doc, { now: t0, mode, recoveryEnabled });
 
   if (before.status === 'ok' || (before.status === 'unknown' && !report.findings.length)) {
-    report.outcome = before.status === 'ok' ? 'healthy' : 'no_action';
+    // a PASS that only says "generating"/"in progress" is work under way, not a confirmed healthy pipeline
+    const underway = before.checks.some((c) => c.status === 'pass' && /^generating|in progress/.test(c.detail));
+    report.outcome = before.status === 'ok' ? (underway ? 'in_progress' : 'healthy') : 'no_action';
   } else if (!report.plan.actions.length) {
     const reasons = report.plan.skipped.map((s) => s.reason);
     report.outcome = reasons.includes('daily_round_limit') || reasons.some((r) => /already_failed|attempt_limit/.test(r)) ? 'limit_reached'
       : reasons.some((r) => /recovery_disabled|diagnose_mode/.test(r)) ? 'recovery_not_permitted'
       : report.humanNeeded ? 'needs_human'
       : report.findings.some((f) => f.classification === 'needs_human') ? 'review_only' : 'no_action';
+    // the automatic way out is used up (or was tried and failed) while the pipeline is still failing: a person has to take over
+    if (report.outcome === 'limit_reached' && report.before.failing.some((x) => x.endsWith(':fail'))) report.humanNeeded = true;
+  } else if (!(report.preflight = await preflight().catch((err) => ({ ok: false, reason: String(err && err.message).slice(0, 80) }))).ok) {
+    // nothing was claimed or counted: the next round simply tries again once the database has recovered
+    report.outcome = 'deferred_db_unhealthy';
   } else {
     // take the lease: one doctor at a time
     let acquired = false;
@@ -251,6 +279,8 @@ async function runDoctor({
       const applied = report.actions.some((x) => x.error !== 'skipped_no_time_left' && !(x.result && (x.result.kicked === false || x.result.ran === false)));
       report.outcome = applied ? judgeOutcome(before, after, report.actions) : (after.status === 'ok' ? 'recovered' : 'not_applied');
       report.afterFindings = diagnose(after, afterCtx, afterNow);
+      // "improving" means the work is still under way: it is not a success yet and the next health run has to confirm it
+      report.stillRunning = report.outcome === 'improving';
       if (report.outcome === 'unresolved' || report.outcome === 'not_applied') report.humanNeeded = true;
       await st.mutate((d) => {
         const dd = ((d.days = d.days || {})[day] = d.days[day] || {});
@@ -268,6 +298,8 @@ async function runDoctor({
     ...report.plan.skipped.map((s) => `- not run: ${s.key} (${s.reason})`),
     ...report.actions.map((a) => `- ran ${a.action}: ${a.error ? `error ${a.error}` : JSON.stringify(a.result)}`),
   ];
+  if (report.stillRunning) lines.push('- still running or only partly fixed: NOT yet confirmed fixed (only the next health run reporting PASS decides)');
+  if (report.preflight && !report.preflight.ok) lines.push(`- deferred: database not ready (${report.preflight.reason}); nothing was started or counted`);
   if (report.after) lines.push(`after: ${report.after.status} [${report.after.failing.join(', ') || 'none'}]`);
   report.summary = lines.join('\n');
   report.finishedAt = new Date().toISOString();
@@ -283,4 +315,4 @@ async function runDoctor({
   return safeReport;
 }
 
-module.exports = { collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
+module.exports = { dbPreflight, collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
