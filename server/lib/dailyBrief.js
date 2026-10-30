@@ -260,7 +260,7 @@ async function countEvidenceCandidates(briefDate) {
 const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b/;
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
-async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
+async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null } = {}) {
   // after an invalid answer the retry gets a shorter input (the freshest items first): less to echo or elide, and the headline only uses 5
   const evidenceLimit = repairHint ? REPAIR_EVIDENCE_ITEMS : MAX_EVIDENCE_ITEMS;
   const { rows: items } = await pool.query(
@@ -334,6 +334,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false } = {}) {
     throw new Error(withHead(err.message));
   }
   const brief = validateBrief(raw, evidence);
+  if (cancelled && cancelled.v) throw new Error('attempt_exceeded_time_budget'); // abandoned at its deadline: a late answer must not publish
   await pool.query(
     `UPDATE daily_briefs
         SET status = 'ready', brief = $2, item_count = $3, source_item_ids = $4,
@@ -349,8 +350,21 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
   let repairHint = false;
   while (true) {
     try {
-      if (callBudget) callBudget.used += 1;
-      await buildDailyBriefAttempt(briefDate, { repairHint });
+      if (callBudget) {
+        if (callBudget.used >= callBudget.max) throw new Error('no_model_call_left'); // a nested/second build under the same budget cannot start another call
+        callBudget.used += 1;
+      }
+      const cancelled = { v: false };
+      const attempt = buildDailyBriefAttempt(briefDate, { repairHint, cancelled });
+      const deadline0 = deadlineStore.getStore();
+      if (callBudget && deadline0) {
+        // a budgeted caller's time limit holds IN FLIGHT too: one model call can take 150 s, so waiting for it would silently overrun the budget
+        attempt.catch(() => {});
+        let timer;
+        try {
+          await Promise.race([attempt, new Promise((_, reject) => { timer = setTimeout(() => { cancelled.v = true; callBudget.timedOut = true; reject(new Error('attempt_exceeded_time_budget')); }, Math.max(0, deadline0 - Date.now())); })]);
+        } finally { clearTimeout(timer); }
+      } else await attempt;
       return;
     } catch (err) {
       failureCount += 1;

@@ -196,7 +196,7 @@ const defaultExecutors = {
     // both limits travel with the generation (async context), including its background retries: it cannot outlive or outspend them
     const r = await dailyBrief.runWithCallBudget(budget, () => dailyBrief.runWithDeadline(deadline, () => dailyBrief.ensureDailyBrief(at, { discoveryDone: status.completedToday })));
     const stillRunning = await require('./background').drain(Math.max(1000, deadline - Date.now() - 5000)); // the generation runs in the background: wait for it
-    return { ...r, stillRunning, modelCalls: budget.used, maxModelCalls: budget.max, budgetExhausted: budget.exhausted }; // stillRunning > 0: in progress, not finished
+    return { ...r, stillRunning, modelCalls: budget.used, maxModelCalls: budget.max, budgetExhausted: budget.exhausted, timeBudgetExceeded: Boolean(budget.timedOut) }; // stillRunning > 0: in progress, not finished
   },
 };
 

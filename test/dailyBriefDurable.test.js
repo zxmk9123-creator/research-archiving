@@ -218,3 +218,36 @@ test('call budget: the time limit still wins when it is tighter — out of time 
     assert.match(h.state.updates[0].error, /^retry_deferred:/);
   } finally { h.restore(); }
 });
+
+test('time budget is enforced IN FLIGHT: a budgeted attempt that outlives the deadline is abandoned (row released as failed), cannot publish later, and no further call starts', async () => {
+  const h = harness([GOOD]);
+  const slow = async () => { h.state.prompts.push('x'); await new Promise((r) => setTimeout(r, 700)); return GOOD; };
+  provider.callProvider = slow;
+  const budget = { max: 5, used: 0, exhausted: false };
+  const t0 = Date.now();
+  try {
+    await dailyBrief.runWithCallBudget(budget, () => dailyBrief.runWithDeadline(Date.now() + 250, () => dailyBrief.buildDailyBrief(today, { attemptMs: 10, sleep: async () => {} })));
+    assert.ok(Date.now() - t0 < 600, `returned at the deadline, not after the slow call (${Date.now() - t0} ms)`);
+    assert.equal(h.state.prompts.length, 1, 'no second call after the deadline');
+    const last = h.state.updates[h.state.updates.length - 1];
+    assert.equal(last.status, 'failed');
+    assert.match(last.error, /attempt_exceeded_time_budget/);
+    assert.equal(budget.timedOut, true);
+    await new Promise((r) => setTimeout(r, 700)); // the abandoned call finishes now
+    assert.equal(h.state.ready, false, 'a late answer must not publish after the budget ended');
+  } finally { h.restore(); }
+});
+
+test('budget cannot be bypassed by a nested/second build under the same budget: once spent, no further model call starts', async () => {
+  const h = harness([new Error('AI provider returned 503')]);
+  const budget = { max: 2, used: 0, exhausted: false };
+  try {
+    await dailyBrief.runWithCallBudget(budget, async () => {
+      await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+      await dailyBrief.buildDailyBrief(today, { sleep: async () => {} }); // e.g. a second claim inside the same recovery
+    });
+    assert.equal(h.state.prompts.length, 2, 'two calls in total across both builds');
+    assert.equal(budget.used, 2);
+    assert.match(h.state.updates[h.state.updates.length - 1].error, /call_budget_exhausted: no_model_call_left/);
+  } finally { h.restore(); }
+});

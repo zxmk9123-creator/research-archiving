@@ -265,7 +265,7 @@ test('retry_headline SAFETY: the executor never touches a READY headline (row un
   const llm = fakeProvider(() => { throw new Error('must not be called'); });
   try {
     const res = await doctor.defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
-    assert.deepEqual(res, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
+    assert.deepEqual(res, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: false });
     assert.deepEqual(await briefRow(), before);
     assert.equal(llm.calls.n, 0);
   } finally { llm.restore(); }
@@ -337,7 +337,7 @@ test('TIME LIMIT (invocation): with too little time left the headline guard decl
   const llm = fakeProvider(() => { throw new Error('must not be called'); });
   try {
     const r = await doctor.runDoctor({ ...base(v), executorTimeoutMs: 40000 }); // deadline = 40 s < the 60 s one attempt needs
-    assert.deepEqual(r.actions[0].result, { ran: false, reason: 'insufficient_time', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
+    assert.deepEqual(r.actions[0].result, { ran: false, reason: 'insufficient_time', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: false });
     assert.equal(r.outcome, 'not_applied');
     assert.equal(r.humanNeeded, true);
     assert.equal(llm.calls.n, 0);

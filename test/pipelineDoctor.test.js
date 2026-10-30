@@ -269,7 +269,7 @@ test('REVIEW: the headline executor goes through the guard — a READY headline 
   };
   try {
     const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
-    assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false });
+    assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: false });
     assert.ok(!statements.includes('INSERT') && !statements.includes('UPDATE') && !statements.includes('DELETE'), `only reads happened: ${statements}`);
   } finally { pool.query = orig; }
 });
@@ -509,4 +509,15 @@ test('cost budget exhausted: the round is reported unresolved with a person need
   assert.match(r.summary, /budgetExhausted":true/, 'the report shows that the budget ran out');
   const again = await runDoctor({ now: new Date(NOW.getTime() + 3600000), clock: () => NOW.getTime() + 3660000, recoveryEnabled: true, mode: 'recover', gather: gatherSeq(bad), executors: spent, store });
   assert.equal(again.outcome, 'limit_reached');
+});
+
+test('no recovery claim without post-action confirmation: an executor that says success while the re-check still FAILS is unresolved; one that left work running is improving', async () => {
+  const bad = failedWith('AI provider returned 503');
+  const claimsSuccess = { retry_headline: async () => ({ ran: true, stillRunning: 0, modelCalls: 1, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: false }) };
+  const r = await run({ mode: 'recover', gather: gatherSeq(bad, bad), executors: claimsSuccess, store: memStore() });
+  assert.deepEqual([r.outcome, r.humanNeeded], ['unresolved', true]);
+  const generating = base({ brief: { status: 'generating', attempt_count: 4, error: null, updated_at: iso('2026-10-30T00:40:30Z'), completed_at: null, item_count: 0 } });
+  const timedOut = { retry_headline: async () => ({ ran: true, stillRunning: 1, modelCalls: 1, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: true }) };
+  const i = await run({ mode: 'recover', gather: gatherSeq(bad, generating), executors: timedOut, store: memStore() });
+  assert.deepEqual([i.outcome, i.stillRunning], ['improving', true]);
 });
