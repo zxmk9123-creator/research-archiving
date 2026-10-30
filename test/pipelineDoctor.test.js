@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY } = require('../server/lib/pipelineDoctor');
+const { runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, checkApproval, armApproval } = require('../server/lib/pipelineDoctor');
 const { evaluateHealth } = require('../server/lib/pipelineHealth');
 
 const NOW = new Date('2026-10-30T00:40:00Z'); // 09:40 KST
@@ -520,4 +520,53 @@ test('no recovery claim without post-action confirmation: an executor that says 
   const timedOut = { retry_headline: async () => ({ ran: true, stillRunning: 1, modelCalls: 1, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: true }) };
   const i = await run({ mode: 'recover', gather: gatherSeq(bad, generating), executors: timedOut, store: memStore() });
   assert.deepEqual([i.outcome, i.stillRunning], ['improving', true]);
+});
+
+// ---------- one-run approval: pure gate + atomicity on the in-memory store ----------
+const KEY = 'headline:ai_provider_transient';
+const approvalAt = (over = {}) => ({ id: 'a1', action: 'retry_headline', key: KEY, createdAt: NOW.getTime() - 60000, expiresAt: NOW.getTime() + 14 * 60000, status: 'pending', ...over });
+const headlineFindings = () => diagnose(evaluateHealth(failedWith('AI provider returned 503'), NOW.getTime()), failedWith('AI provider returned 503'), NOW.getTime());
+
+test('checkApproval fails closed on every malformed, used, expired, mismatching or ambiguous case', () => {
+  const f = headlineFindings(); const t = NOW.getTime();
+  assert.equal(checkApproval(f, { approval: approvalAt() }, t).ok, true);
+  const bad = [
+    [undefined, 'no_approval'], [approvalAt({ status: 'consumed' }), 'already_used'], [approvalAt({ status: 'revoked' }), 'already_used'],
+    [approvalAt({ action: 'kick_pipeline' }), 'wrong_action'], [approvalAt({ id: undefined }), 'malformed'], [approvalAt({ key: '' }), 'malformed'],
+    [approvalAt({ expiresAt: 'soon' }), 'malformed'], [approvalAt({ expiresAt: t }), 'expired'], [approvalAt({ expiresAt: t - 1 }), 'expired'],
+    [approvalAt({ expiresAt: t + 3600000 }), 'ttl_invalid'], [approvalAt({ createdAt: t + 600000, expiresAt: t + 900000 }), 'created_in_the_future'],
+    [approvalAt({ key: 'headline:model_output_invalid' }), 'finding_does_not_match_approval'],
+  ];
+  for (const [a, reason] of bad) assert.equal(checkApproval(f, { approval: a }, t).reason, reason, JSON.stringify(a));
+  assert.equal(checkApproval([], { approval: approvalAt() }, t).reason, 'ambiguous_eligibility', 'no eligible finding');
+  assert.equal(checkApproval([...f, ...f.map((x) => ({ ...x, key: 'x:y' }))], { approval: approvalAt() }, t).reason, 'ambiguous_eligibility', 'two eligible findings');
+  assert.equal(checkApproval([{ ...f[0], action: 'kick_pipeline', key: 'discovery_run:continuation_lost' }], { approval: approvalAt({ key: 'discovery_run:continuation_lost' }) }, t).reason, 'wrong_action');
+});
+
+test('approval through runDoctor (env flag OFF): executes once and is consumed; replay and concurrent runs cannot execute twice; a rejected approval is never consumed', async () => {
+  const bad = failedWith('AI provider returned 503'); const ex = exec();
+  const store = memStore({ approval: approvalAt() });
+  const results = await Promise.all([1, 2, 3].map(() => run({ mode: 'recover', recoveryEnabled: false, gather: gatherSeq(bad, bad), executors: ex, store })));
+  assert.deepEqual(ex.calls, ['retry_headline'], 'exactly one execution');
+  assert.equal(results.filter((r) => r.actions.length === 1).length, 1);
+  assert.equal(store.doc.approval.status, 'consumed');
+  const again = await run({ mode: 'recover', recoveryEnabled: false, gather: gatherSeq(bad, bad), executors: ex, store });
+  assert.deepEqual([ex.calls.length, again.approval.reason], [1, 'already_used']);
+  const expired = memStore({ approval: approvalAt({ expiresAt: NOW.getTime() - 1 }) });
+  const r = await run({ mode: 'recover', recoveryEnabled: false, gather: gatherSeq(bad), executors: ex, store: expired });
+  assert.deepEqual([ex.calls.length, r.outcome, expired.doc.approval.status], [1, 'recovery_not_permitted', 'pending']);
+  // the cooldown / earlier-failure limits still apply: an approval cannot override them
+  const limited = memStore({ approval: approvalAt(), days: { '2026-10-30': { rounds: 1, byKey: { [KEY]: { count: 1, unresolved: 1, lastAt: NOW.getTime() - 3600000 } } } } });
+  const l = await run({ mode: 'recover', recoveryEnabled: false, gather: gatherSeq(bad), executors: ex, store: limited });
+  assert.deepEqual([ex.calls.length, l.approval.reason, limited.doc.approval.status], [1, 'plan_is_not_exactly_the_approved_action', 'pending']);
+});
+
+test('armApproval: headline findings only, one pending at a time, TTL within bounds', async () => {
+  const store = memStore();
+  assert.equal((await armApproval(store, { key: 'discovery_run:continuation_lost' })).reason, 'only_headline_findings_can_be_approved');
+  assert.equal((await armApproval(store, { key: KEY, ttlMs: 3600000 })).reason, 'ttl_out_of_range');
+  const a = await armApproval(store, { key: KEY, now: NOW.getTime(), by: 'me' });
+  assert.deepEqual([a.armed, a.approval.expiresAt - a.approval.createdAt, store.doc.approval.status], [true, 15 * 60000, 'pending']);
+  assert.equal((await armApproval(store, { key: KEY, now: NOW.getTime() + 1000 })).reason, 'another_approval_still_pending');
+  assert.equal((await armApproval(store, { key: KEY, now: NOW.getTime() + 16 * 60000 })).armed, true, 'an expired one may be replaced');
 });

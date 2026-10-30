@@ -27,6 +27,11 @@ const RECOVERY_TIME_BUDGET_MS = 150000;   // and may use at most this much time,
 const MIN_ACTION_MS = 30000;         // do not start an action with less time than this left
 const RECHECK_RESERVE_MS = 15000;
 const KEEP_REPORTS = 20;
+// One-run approval (an alternative to DOCTOR_RECOVERY=on for a SUPERVISED trial): stored in the ops_doctor document, bound to ONE finding key, valid
+// ~15 min, consumed atomically with the lease. It can only ever permit a single retry_headline.
+const APPROVAL_TTL_MS = 15 * 60000;
+const MAX_APPROVAL_MS = 20 * 60000;   // a stored approval claiming a longer life is treated as tampered
+const APPROVAL_ACTION = 'retry_headline';
 const KST_MS = 9 * 3600000;
 const kstDay = (ms) => new Date(ms + KST_MS).toISOString().slice(0, 10);
 
@@ -107,6 +112,42 @@ function diagnose(health, ctx, now = Date.now()) {
     }
   }
   return out;
+}
+
+// Pure. May the stored one-run approval permit THIS round? Fail closed: any doubt (missing/odd fields, used, expired, ambiguity, wrong action or key) = no.
+function checkApproval(findings, doc, now) {
+  const a = doc && doc.approval;
+  const no = (reason) => ({ ok: false, reason });
+  if (!a || typeof a !== 'object') return no('no_approval');
+  if (a.status !== 'pending') return no('already_used');
+  if (a.action !== APPROVAL_ACTION) return no('wrong_action');
+  if (!a.id || !a.key || !Number.isFinite(a.createdAt) || !Number.isFinite(a.expiresAt)) return no('malformed');
+  if (a.expiresAt - a.createdAt > MAX_APPROVAL_MS || a.expiresAt <= a.createdAt) return no('ttl_invalid');
+  if (a.createdAt > now + 60000) return no('created_in_the_future');
+  if (a.expiresAt <= now) return no('expired');
+  const candidates = findings.filter((f) => f.action && (f.classification === 'retryable' || f.classification === 'auto_recoverable'));
+  if (candidates.length !== 1) return no('ambiguous_eligibility');
+  if (candidates[0].action !== APPROVAL_ACTION) return no('wrong_action');
+  if (candidates[0].key !== a.key) return no('finding_does_not_match_approval');
+  return { ok: true, approval: a };
+}
+
+// Arms ONE approval for the finding `key` (e.g. 'headline:ai_provider_transient'). Refuses while another approval is still pending and unexpired.
+async function armApproval(store, { key, now = Date.now(), by = 'unknown', ttlMs = APPROVAL_TTL_MS } = {}) {
+  if (!/^headline:[a-z_]+$/.test(String(key || ''))) return { armed: false, reason: 'only_headline_findings_can_be_approved' };
+  if (!(ttlMs > 0 && ttlMs <= MAX_APPROVAL_MS)) return { armed: false, reason: 'ttl_out_of_range' };
+  const approval = { id: `${now}-${Math.random().toString(36).slice(2, 8)}`, action: APPROVAL_ACTION, key, createdAt: now, expiresAt: now + ttlMs, by: String(by).slice(0, 60), status: 'pending' };
+  let reason = null;
+  const ok = await store.mutate((d) => {
+    reason = null;
+    if (d.approval && d.approval.status === 'pending' && d.approval.expiresAt > now) { reason = 'another_approval_still_pending'; return undefined; }
+    d.approval = approval;
+    return d;
+  });
+  return ok && !reason ? { armed: true, approval } : { armed: false, reason: reason || 'state_unavailable' };
+}
+async function revokeApproval(store, { now = Date.now() } = {}) {
+  return store.mutate((d) => { if (!d.approval || d.approval.status !== 'pending') return undefined; d.approval.status = 'revoked'; d.approval.revokedAt = now; return d; });
 }
 
 // Pure. Decides what may run NOW. doc = the stored ops_doctor state.
@@ -225,7 +266,22 @@ async function runDoctor({
 
   let doc = {};
   try { doc = await st.read(); } catch (err) { console.error('doctor state read failed:', err.message); }
-  report.plan = planRecovery(report.findings, doc, { now: t0, mode, recoveryEnabled });
+  // recovery is permitted by the env flag (unchanged) OR by a valid one-run approval that matches this round exactly
+  let useApproval = null;
+  if (mode === 'recover' && !recoveryEnabled) {
+    const chk = checkApproval(report.findings, doc, t0);
+    report.approval = chk.ok ? { id: chk.approval.id, key: chk.approval.key, status: 'valid_not_yet_claimed' } : { status: 'rejected', reason: chk.reason };
+    if (chk.ok) useApproval = chk.approval;
+  }
+  report.plan = planRecovery(report.findings, doc, { now: t0, mode, recoveryEnabled: recoveryEnabled || Boolean(useApproval) });
+  if (useApproval) {
+    const only = report.plan.actions.length === 1 && report.plan.actions[0].action === APPROVAL_ACTION && report.plan.actions[0].key === useApproval.key;
+    if (!only) { // limits (cooldown, cap, earlier failure) or anything else changed the plan: the approval permits nothing
+      report.approval = { status: 'rejected', reason: 'plan_is_not_exactly_the_approved_action' };
+      report.plan = planRecovery(report.findings, doc, { now: t0, mode, recoveryEnabled: false });
+      useApproval = null;
+    }
+  }
 
   if (before.status === 'ok' || (before.status === 'unknown' && !report.findings.length)) {
     // a PASS that only says "generating"/"in progress" is work under way, not a confirmed healthy pipeline
@@ -245,9 +301,16 @@ async function runDoctor({
   } else {
     // take the lease: one doctor at a time
     let acquired = false;
+    let approvalLost = false;
     const persisted = await st.mutate((d) => {
       acquired = false; // this function may be re-applied on a newer document: decide again every time
+      approvalLost = false;
       if (d.lock && d.lock.until > t0 && d.lock.id !== lockId) return undefined;
+      if (useApproval) { // claim = consume, in the SAME atomic write as the lease and the counters: single use, race-free
+        const cur = d.approval;
+        if (!cur || cur.id !== useApproval.id || cur.status !== 'pending' || cur.expiresAt <= t0) { approvalLost = true; return undefined; }
+        d.approval = { ...cur, status: 'consumed', consumedAt: t0, consumedBy: lockId };
+      }
       acquired = true;
       d.lock = { id: lockId, until: t0 + LOCK_MS };
       const dd = (d.days = d.days || {})[day] || (d.days[day] = {});
@@ -258,9 +321,11 @@ async function runDoctor({
     });
     // the lease and the attempt counters must really be stored before anything is executed: an unstored lease protects nothing
     if (!persisted) { acquired = false; report.outcome = 'state_unavailable'; report.humanNeeded = true; }
+    else if (approvalLost) { report.outcome = 'approval_rejected'; report.approval = { status: 'rejected', reason: 'used_or_expired_before_claim' }; }
     else if (!acquired) {
       report.outcome = 'locked';
     } else {
+      if (useApproval) report.approval = { id: useApproval.id, key: useApproval.key, status: 'consumed' };
       for (const a of report.plan.actions) {
         const began = clock();
         const left = runEnd - began - RECHECK_RESERVE_MS;
@@ -300,6 +365,8 @@ async function runDoctor({
     `before: ${report.before.status} [${report.before.failing.join(', ') || 'none'}]`,
     ...report.findings.map((f) => `- ${f.checkId} → ${f.cause} (${f.confidence}) = ${f.classification}${f.humanUrgency !== 'none' ? `/${f.humanUrgency}` : ''}${f.action ? `, action ${f.action}` : ''}\n    ${f.evidence.join('\n    ')}`),
     ...report.plan.skipped.map((s) => `- not run: ${s.key} (${s.reason})`),
+    ...(report.approval && report.approval.status === 'rejected' && report.approval.reason !== 'no_approval' ? [`- approval rejected: ${report.approval.reason}`] : []),
+    ...(report.approval && report.approval.status === 'consumed' ? [`- one-run approval ${report.approval.id} consumed for ${report.approval.key}`] : []),
     ...report.actions.map((a) => `- ran ${a.action}: ${a.error ? `error ${a.error}` : JSON.stringify(a.result)}`),
   ];
   if (report.stillRunning) lines.push('- still running or only partly fixed: NOT yet confirmed fixed (only the next health run reporting PASS decides)');
@@ -311,7 +378,7 @@ async function runDoctor({
   const safeReport = scrub(report);
   try {
     await st.mutate((d) => {
-      d.reports = [...(d.reports || []), { at: safeReport.finishedAt, mode, outcome: safeReport.outcome, humanNeeded: safeReport.humanNeeded, before: safeReport.before.failing, after: safeReport.after && safeReport.after.failing, findings: safeReport.findings.map((f) => ({ key: f.key, classification: f.classification, confidence: f.confidence })), actions: safeReport.actions.map((a) => ({ action: a.action, error: a.error || null })) }].slice(-KEEP_REPORTS);
+      d.reports = [...(d.reports || []), { at: safeReport.finishedAt, mode, outcome: safeReport.outcome, humanNeeded: safeReport.humanNeeded, approval: safeReport.approval ? safeReport.approval.status : undefined, before: safeReport.before.failing, after: safeReport.after && safeReport.after.failing, findings: safeReport.findings.map((f) => ({ key: f.key, classification: f.classification, confidence: f.confidence })), actions: safeReport.actions.map((a) => ({ action: a.action, error: a.error || null })) }].slice(-KEEP_REPORTS);
       if (d.lock && d.lock.id === lockId) d.lock = { id: null, until: 0 };
       return d;
     });
@@ -319,4 +386,4 @@ async function runDoctor({
   return safeReport;
 }
 
-module.exports = { MAX_MODEL_CALLS_PER_RECOVERY, RECOVERY_TIME_BUDGET_MS, dbPreflight, collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };
+module.exports = { checkApproval, armApproval, revokeApproval, APPROVAL_TTL_MS, MAX_MODEL_CALLS_PER_RECOVERY, RECOVERY_TIME_BUDGET_MS, dbPreflight, collectContext, defaultExecutors, ACTIONS, runDoctor, diagnose, planRecovery, judgeOutcome, scrub, errorKind, MAX_ROUNDS_PER_DAY, MAX_ATTEMPTS_PER_KEY, COOLDOWN_MS };

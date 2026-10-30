@@ -551,3 +551,258 @@ test('SHARED DAILY CAP: the Doctor\'s headline claim and the pipeline\'s own com
     assert.equal(r2.humanNeeded, true);
   } finally { llm.restore(); }
 });
+
+// ===================== scripts/doctor-trial.js (backup / restore / trial-day check) — same file so the suites never share the database concurrently =====================
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const trial = URL_ ? require('../scripts/doctor-trial') : null;
+const seedDoctor = (totals) => q(`INSERT INTO scheduler_jobs (job_name, last_run_date, last_totals) VALUES ('ops_doctor', $1::date, $2::jsonb)`, [todayKst(), JSON.stringify(totals)]);
+
+test('TRIAL SCRIPT backup -> damage -> restore: dry run changes nothing; --apply puts back EXACTLY the two rows (jsonb-identical) and leaves everything else alone', opts, async () => {
+  await reset(); const v = at910();
+  await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  await seedDoctor({ days: { [todayKst()]: { rounds: 0 } }, reports: [{ at: 'x', mode: 'diagnose' }] });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trial-')), 'b.json');
+  const saved = await trial.backup(pool, { date: todayKst(), file });
+  assert.equal(fs.statSync(file).mode & 0o077, 0, 'backup file is private');
+  // what a recovery could do
+  await q("UPDATE daily_briefs SET status = 'ready', attempt_count = 7, error = NULL, brief = '{\"lead\":\"x\"}'::jsonb, item_count = 5 WHERE brief_date = $1::date", [todayKst()]);
+  await q("UPDATE scheduler_jobs SET last_totals = '{\"days\":{},\"reports\":[1,2,3]}'::jsonb WHERE job_name = 'ops_doctor'");
+  const discoveryBefore = await q("SELECT to_jsonb(t) AS r FROM scheduler_jobs t WHERE job_name = 'daily_discovery'");
+  const attemptsBefore = await q('SELECT count(*)::int AS n FROM daily_brief_attempts');
+  const dry = await trial.restore(pool, saved);
+  assert.deepEqual(dry, { daily_briefs: 'differs from backup (dry run)', ops_doctor: 'differs from backup (dry run)' });
+  assert.equal((await q('SELECT status FROM daily_briefs'))[0].status, 'ready', 'dry run wrote nothing');
+  const done = await trial.restore(pool, JSON.parse(fs.readFileSync(file, 'utf8')), { apply: true });
+  assert.deepEqual(done, { daily_briefs: 'restored', ops_doctor: 'restored' });
+  const again = await trial.restore(pool, saved);
+  assert.deepEqual(again, { daily_briefs: 'identical to backup', ops_doctor: 'identical to backup' });
+  const b = (await q('SELECT status, attempt_count, error, item_count FROM daily_briefs'))[0];
+  assert.deepEqual([b.status, b.attempt_count, b.error, b.item_count], ['failed', 3, 'AI provider returned 503', 0]);
+  assert.deepEqual(await q("SELECT to_jsonb(t) AS r FROM scheduler_jobs t WHERE job_name = 'daily_discovery'"), discoveryBefore, 'other rows untouched');
+  assert.deepEqual(await q('SELECT count(*)::int AS n FROM daily_brief_attempts'), attemptsBefore);
+});
+
+test('TRIAL SCRIPT restore never invents or deletes: a row that did not exist at backup time is left for a human', opts, async () => {
+  await reset();
+  const saved = await trial.backup(pool, { date: todayKst() });
+  assert.deepEqual([saved.rows.daily_briefs, saved.rows.ops_doctor], [null, null]);
+  await seedBrief(at910(), { status: 'failed', attempts: 1 });
+  const r = await trial.restore(pool, saved, { apply: true });
+  assert.match(r.daily_briefs, /no row existed at backup time/);
+  assert.equal((await q('SELECT count(*)::int AS n FROM daily_briefs'))[0].n, 1, 'nothing was deleted');
+});
+
+test('TRIAL SCRIPT check: GO only when exactly one retry_headline finding, attempts left, planner would run it, and a fresh backup exists; each missing item flips it to NO-GO', opts, async () => {
+  await reset(); const v = at910();
+  await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error: 'AI provider returned 503' });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trial-')), 'b.json');
+  const noBackup = await trial.check(pool, { now: v, date: todayKst(), backupFile: path.join(os.tmpdir(), 'does-not-exist.json') });
+  assert.equal(noBackup.go, false);
+  assert.deepEqual(noBackup.checks.filter((c) => !c.ok).map((c) => c.name.slice(0, 20)), ['a backup of ' + todayKst()].map((s) => s.slice(0, 20)));
+  await trial.backup(pool, { date: todayKst(), file });
+  const go = await trial.check(pool, { now: v, date: todayKst(), backupFile: file });
+  assert.equal(go.go, true, JSON.stringify(go.checks.filter((c) => !c.ok)));
+  assert.deepEqual(go.eligible.map((e) => e.action), ['retry_headline']);
+  assert.ok(go.manual.length === 2);
+  // not enough attempts left today
+  await q('UPDATE daily_briefs SET attempt_count = $1 WHERE brief_date = $2::date', [dailyBrief.MAX_AUTO_DAILY_ATTEMPTS - 2, todayKst()]);
+  const low = await trial.check(pool, { now: v, date: todayKst(), backupFile: file });
+  assert.deepEqual([low.go, low.checks.find((c) => /attempts left/.test(c.name)).ok], [false, false]);
+  // a problem the Doctor already failed to fix today is not a trial candidate
+  await q('UPDATE daily_briefs SET attempt_count = 3 WHERE brief_date = $1::date', [todayKst()]);
+  await seedDoctor({ days: { [todayKst()]: { rounds: 1, byKey: { 'headline:ai_provider_transient': { count: 1, unresolved: 1, lastAt: v.getTime() - 3600000 } } } } });
+  const failedBefore = await trial.check(pool, { now: v, date: todayKst(), backupFile: file });
+  assert.equal(failedBefore.go, false);
+  assert.equal(failedBefore.checks.find((c) => /planner would run/.test(c.name)).ok, false);
+});
+
+test('TRIAL SCRIPT check: a healthy/ready pipeline (what today looks like) is NO-GO — no eligible finding', opts, async () => {
+  await reset(); const v = at910();
+  await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'ready', attempts: 1, items: 3, brief: { lead: 'x', market_summary: 'y', developments: [], watchpoints: [] } });
+  const r = await trial.check(pool, { now: v, date: todayKst(), backupFile: '/nonexistent' });
+  assert.equal(r.go, false);
+  assert.equal(r.checks.find((c) => /exactly one/.test(c.name)).ok, false);
+});
+
+// ===================== one-run approval (DOCTOR_RECOVERY stays OFF in every one of these) =====================
+const approvalStore = { mutate: (fn) => require('../server/lib/jobState').mutateJobState('ops_doctor', fn) };
+const KEY = 'headline:ai_provider_transient';
+const noEnv = (v, extra = {}) => ({ ...base(v), recoveryEnabled: false, ...extra }); // the env flag is off: only an approval can permit recovery
+const approvalRow = async () => (await doctorDoc())?.approval || null;
+async function arm(v, over = {}) {
+  const r = await doctor.armApproval(approvalStore, { key: KEY, now: v.getTime() - 60000, by: 'test', ...over });
+  assert.equal(r.armed, true, JSON.stringify(r));
+  return r.approval;
+}
+async function failedHeadlineDay(v, error = 'AI provider returned 503') {
+  await reset();
+  const ids = await seedItems(3); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'failed', attempts: 3, error });
+  return ids;
+}
+
+test('APPROVAL happy path: with the env flag OFF, one valid approval permits exactly one retry_headline (budgeted, verified), and is consumed', opts, async () => {
+  const v = at910(); const ids = await failedHeadlineDay(v);
+  const a = await arm(v);
+  assert.equal(a.expiresAt - a.createdAt, 15 * 60000);
+  const llm = fakeProvider(() => goodAnswer(ids));
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([r.recoveryEnabled, r.actions.map((x) => x.action), llm.calls.n, r.outcome, r.humanNeeded], [false, ['retry_headline'], 1, 'recovered', false]);
+    assert.equal(r.actions[0].result.maxModelCalls, doctor.MAX_MODEL_CALLS_PER_RECOVERY, 'the cost budget still applies');
+    assert.equal(r.approval.status, 'consumed');
+    assert.match(r.summary, /one-run approval .* consumed/);
+    const ap = await approvalRow();
+    assert.deepEqual([ap.status, ap.id, typeof ap.consumedAt, Boolean(ap.consumedBy)], ['consumed', a.id, 'number', true]);
+    assert.equal((await briefRow()).status, 'ready');
+    assert.equal((await doctorDoc()).days[todayKst()].rounds, 1);
+  } finally { llm.restore(); }
+});
+
+test('APPROVAL replay: a consumed approval cannot authorise a second run — even when the headline fails again', opts, async () => {
+  const v = at910(); const ids = await failedHeadlineDay(v);
+  await arm(v);
+  const llm = fakeProvider(() => goodAnswer(ids));
+  try {
+    await doctor.runDoctor(noEnv(v));
+    await q("UPDATE daily_briefs SET status = 'failed', error = 'AI provider returned 503' WHERE brief_date = $1::date", [todayKst()]);
+    const later = new Date(v.getTime() + 45 * 60000);
+    const r = await doctor.runDoctor(noEnv(later, { clock: () => later.getTime() + 30000 }));
+    assert.deepEqual([r.actions, llm.calls.n, r.outcome, r.approval.reason], [[], 1, 'recovery_not_permitted', 'already_used']);
+  } finally { llm.restore(); }
+});
+
+test('APPROVAL expiry: an approval older than its ~15 min life permits nothing, and a stored life longer than 20 min is treated as tampered', opts, async () => {
+  const v = at910(); await failedHeadlineDay(v);
+  await arm(v, { now: v.getTime() - 16 * 60000 }); // expired a minute ago
+  const llm = fakeProvider(() => httpError('must not be called'));
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([r.actions, llm.calls.n, r.approval.reason], [[], 0, 'expired']);
+    assert.equal((await approvalRow()).status, 'pending', 'a rejected approval is not consumed');
+    await q(`UPDATE scheduler_jobs SET last_totals = jsonb_set(last_totals, '{approval,expiresAt}', to_jsonb($1::bigint)) WHERE job_name = 'ops_doctor'`, [v.getTime() + 3 * 3600000]);
+    const t = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([t.actions, llm.calls.n, t.approval.reason], [[], 0, 'ttl_invalid']);
+  } finally { llm.restore(); }
+});
+
+test('APPROVAL wrong action / wrong key / ambiguity: kick_pipeline is never permitted, a mismatching key is rejected, and two eligible findings reject everything', opts, async () => {
+  const v = at910();
+  await reset(); await seedCursorStalled(v); // a stalled collection: the only eligible finding is kick_pipeline
+  await arm(v);
+  const net = fakeFetch({ status: 202 });
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([net.calls.length, r.actions, r.approval.reason], [0, [], 'wrong_action']);
+    assert.equal((await approvalRow()).status, 'pending');
+  } finally { net.restore(); }
+  assert.equal((await doctor.armApproval(approvalStore, { key: 'discovery_run:continuation_lost', now: v.getTime() })).reason, 'only_headline_findings_can_be_approved');
+  assert.equal((await doctor.armApproval(approvalStore, { key: 'kick_pipeline', now: v.getTime() })).reason, 'only_headline_findings_can_be_approved');
+  // an approval whose stored action was edited to kick_pipeline is rejected as well
+  await q(`UPDATE scheduler_jobs SET last_totals = jsonb_set(last_totals, '{approval,action}', '"kick_pipeline"') WHERE job_name = 'ops_doctor'`);
+  const k = await doctor.runDoctor(noEnv(v));
+  assert.equal(k.approval.reason, 'wrong_action');
+
+  const w = at910(); await failedHeadlineDay(w, 'brief_placeholder_output | head=x'); // cause model_output_invalid, approval is for ai_provider_transient
+  await arm(w);
+  const llm = fakeProvider(() => httpError('must not be called'));
+  const net2 = fakeFetch({ status: 202 });
+  try {
+    const m = await doctor.runDoctor(noEnv(w));
+    assert.deepEqual([m.actions, llm.calls.n, m.approval.reason], [[], 0, 'finding_does_not_match_approval']);
+    // ambiguity: a failed headline AND a stalled collection are both eligible -> neither runs
+    await seedCursorStalled(w);
+    await q("UPDATE scheduler_jobs SET last_completed_at = NULL, last_totals = '{}'::jsonb WHERE job_name = 'daily_discovery'");
+    await q("UPDATE daily_briefs SET error = 'AI provider returned 503'");
+    const amb = await doctor.runDoctor(noEnv(w));
+    assert.deepEqual([amb.actions, llm.calls.n, net2.calls.length], [[], 0, 0]);
+    assert.ok(['ambiguous_eligibility', 'finding_does_not_match_approval', 'wrong_action'].includes(amb.approval.reason), amb.approval.reason);
+  } finally { llm.restore(); net2.restore(); }
+});
+
+test('APPROVAL concurrency: three doctors that all see a valid approval -> exactly one consumes it and executes; the others execute nothing', opts, async () => {
+  const v = at910(); const ids = await failedHeadlineDay(v);
+  const a = await arm(v);
+  const llm = fakeProvider(async () => { await new Promise((r) => setTimeout(r, 300)); return goodAnswer(ids); });
+  let arrived = 0; let open; const gate = new Promise((res) => { open = res; });
+  try {
+    const mk = () => { let used = false; return doctor.runDoctor({ ...noEnv(v), gather: async (now) => { const ctx = await doctor.collectContext(now); if (!used) { used = true; arrived++; if (arrived === 3) open(); await gate; } return ctx; } }); };
+    const results = await Promise.all([mk(), mk(), mk()]);
+    assert.equal(results.filter((r) => r.actions.length).length, 1);
+    assert.equal(results.filter((r) => r.outcome === 'recovered').length, 1);
+    assert.ok(results.every((r) => ['recovered', 'locked', 'approval_rejected'].includes(r.outcome)), results.map((r) => r.outcome).join());
+    assert.equal(llm.calls.n, 1, 'one model call in total');
+    assert.equal((await briefRow()).attempt_count, 4, 'one claim in total');
+    const ap = await approvalRow();
+    assert.deepEqual([ap.status, ap.id], ['consumed', a.id]);
+    assert.equal((await doctorDoc()).days[todayKst()].rounds, 1);
+  } finally { llm.restore(); }
+});
+
+test('APPROVAL failure during claim: when the consuming write cannot be stored, nothing is executed and the approval is NOT consumed (fail closed, no half state)', opts, async () => {
+  const v = at910(); await failedHeadlineDay(v);
+  await arm(v);
+  await q(`CREATE OR REPLACE FUNCTION fail_doctor_writes_fn() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'simulated storage failure'; END $$ LANGUAGE plpgsql`);
+  await q(`CREATE TRIGGER fail_doctor_writes BEFORE UPDATE ON scheduler_jobs FOR EACH ROW WHEN (NEW.job_name = 'ops_doctor') EXECUTE FUNCTION fail_doctor_writes_fn()`);
+  const llm = fakeProvider(() => httpError('must not be called'));
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([r.outcome, r.humanNeeded, llm.calls.n, r.actions], ['state_unavailable', true, 0, []]);
+    assert.equal((await briefRow()).attempt_count, 3, 'headline untouched');
+  } finally { llm.restore(); await q('DROP TRIGGER IF EXISTS fail_doctor_writes ON scheduler_jobs'); }
+  assert.equal((await approvalRow()).status, 'pending', 'still pending: the write that would consume it never happened');
+});
+
+test('APPROVAL failure after consumption: a failed/unresolved recovery keeps the approval consumed (no replay), is unresolved and escalated — never recovered without verification', opts, async () => {
+  const v = at910(); await failedHeadlineDay(v);
+  await arm(v);
+  const llm = fakeProvider(() => httpError('AI provider returned 503'));
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([r.outcome, r.humanNeeded, llm.calls.n <= doctor.MAX_MODEL_CALLS_PER_RECOVERY], ['unresolved', true, true]);
+    assert.equal((await approvalRow()).status, 'consumed');
+    const later = new Date(v.getTime() + 45 * 60000);
+    const again = await doctor.runDoctor(noEnv(later, { clock: () => later.getTime() + 30000 }));
+    assert.deepEqual([again.actions, again.approval.reason], [[], 'already_used']);
+  } finally { llm.restore(); }
+}, { ...opts, timeout: 120000 });
+
+test('APPROVAL arm/revoke: only one pending approval at a time; revoke makes it unusable; env-flag behaviour is unchanged by an unused approval', opts, async () => {
+  const v = at910(); await failedHeadlineDay(v);
+  await arm(v);
+  const second = await doctor.armApproval(approvalStore, { key: KEY, now: v.getTime() });
+  assert.deepEqual([second.armed, second.reason], [false, 'another_approval_still_pending']);
+  await doctor.revokeApproval(approvalStore, { now: v.getTime() });
+  const llm = fakeProvider(() => httpError('must not be called'));
+  try {
+    const r = await doctor.runDoctor(noEnv(v));
+    assert.deepEqual([r.actions, llm.calls.n, r.approval.reason], [[], 0, 'already_used']);
+    // diagnose mode never looks at approvals at all
+    await arm(v);
+    const d = await doctor.runDoctor({ ...base(v), mode: 'diagnose', recoveryEnabled: false });
+    assert.deepEqual([d.actions, d.approval, (await approvalRow()).status], [[], undefined, 'pending']);
+  } finally { llm.restore(); }
+});
+
+test('APPROVAL via the trial script: arm refuses unless check is GO and the key is the single eligible finding; a GO arm stores one headline-bound approval', opts, async () => {
+  const v = at910();
+  await reset(); await seedDiscoveryCompleted(v);
+  await seedBrief(v, { status: 'ready', attempts: 1, items: 3, brief: { lead: 'x', market_summary: 'y', developments: [], watchpoints: [] } });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trial-')), 'b.json');
+  await trial.backup(pool, { date: todayKst(), file });
+  const healthy = await trial.arm(pool, { key: KEY, backupFile: file, date: todayKst(), by: 't', now: v, store: approvalStore });
+  assert.deepEqual([healthy.armed, healthy.reason], [false, 'check_is_no_go']);
+  assert.equal(await approvalRow(), null, 'nothing stored');
+  await q("UPDATE daily_briefs SET status = 'failed', error = 'AI provider returned 503', attempt_count = 3 WHERE brief_date = $1::date", [todayKst()]);
+  await trial.backup(pool, { date: todayKst(), file });
+  const wrong = await trial.arm(pool, { key: 'headline:model_output_invalid', backupFile: file, date: todayKst(), by: 't', now: v, store: approvalStore });
+  assert.deepEqual([wrong.armed, wrong.reason], [false, 'key_is_not_the_single_eligible_finding']);
+  const ok = await trial.arm(pool, { key: KEY, backupFile: file, date: todayKst(), by: 'tester', now: v, store: approvalStore });
+  assert.equal(ok.armed, true, JSON.stringify(ok));
+  assert.deepEqual([(await approvalRow()).key, (await approvalRow()).action, (await approvalRow()).status, (await trial.status(pool)).approval.by], [KEY, 'retry_headline', 'pending', 'tester']);
+});
