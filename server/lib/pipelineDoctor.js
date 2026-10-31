@@ -105,6 +105,8 @@ function diagnose(health, ctx, now = Date.now()) {
       else out.push(finding(c.id, 'unrecognised_headline_state', 'unknown', 'needs_human', ev));
     } else if (c.id === 'trigger_missed') {
       out.push(finding(c.id, 'scheduler_trigger_missed', 'confirmed', 'needs_human', ev, { humanUrgency: 'review' }));
+    } else if (c.id === 'ai_router') {
+      out.push(finding(c.id, 'ai_router_degraded', 'likely', 'needs_human', ev, { humanUrgency: c.status === 'fail' ? 'now' : 'review' }));
     } else if (c.id === 'recovery') {
       out.push(finding(c.id, 'recoveries_occurred', 'confirmed', 'needs_human', ev, { humanUrgency: 'review' }));
     } else {

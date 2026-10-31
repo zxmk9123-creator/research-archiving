@@ -51,3 +51,16 @@ test('handler: 401 without secret, 200 verdict, 500 on error', async () => {
   assert.equal((await call(aiProbeHandler({ check: async () => ({ status: 'pass' }) }), 'Bearer s')).body.status, 'pass');
   assert.equal((await call(aiProbeHandler({ check: async () => { throw new Error('x'); } }), 'Bearer s')).code, 500);
 });
+
+test('merged into evaluateHealth and Doctor diagnose', () => {
+  const { evaluateHealth } = require('../server/lib/pipelineHealth');
+  const { diagnose } = require('../server/lib/pipelineDoctor');
+  const without = evaluateHealth({}, NOW);
+  assert.ok(!without.checks.some((c) => c.id === 'ai_router'));
+  const bad = evaluateHealth({ aiRouter: { searches: { ...base, success: 2, providerError: 8, failureTypes: { rate_limited: 8 } } } }, NOW);
+  const c = bad.checks.find((x) => x.id === 'ai_router');
+  assert.equal(c.status, 'fail');
+  assert.equal(bad.status, 'failed');
+  const f = diagnose(bad, {}, NOW).find((x) => x.key === 'ai_router:ai_router_degraded');
+  assert.ok(f); assert.equal(f.classification, 'needs_human'); assert.ok(!f.action);
+});
