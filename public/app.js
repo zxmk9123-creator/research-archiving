@@ -1587,16 +1587,34 @@ function stopAiSearchStatus(moduleEl) {
 // Pulled out of the form's submit handler so a failed turn can retry
 // itself in place — same turn element, same question — without the user
 // having to retype it into the input box.
+// 👍/👎 sit to the LEFT of the copy button (like a chat transcript). Without a request id (an answer served by a path that sent none) only
+// the copy button is shown. Votes go to /api/search/feedback; see the delegated handler below.
+const AI_FEEDBACK_REASONS = [['inaccurate', '부정확'], ['irrelevant', '질문과 무관'], ['too_long', '너무 김'], ['too_short', '너무 짧음'], ['no_sources', '출처 부족'], ['other', '기타']];
+const AI_THUMB_UP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>';
+const AI_THUMB_DOWN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>';
+function aiAnswerActionsHtml(copyBtnHtml, question, sources, requestId) {
+  if (!requestId) return copyBtnHtml;
+  const reasons = AI_FEEDBACK_REASONS.map(([k, label]) => `<button type="button" class="ai-fb-reason" data-reason="${k}">${label}</button>`).join('');
+  return `<div class="ai-feedback" data-request-id="${escapeHtml(requestId)}" data-question="${escapeHtml(String(question || '').slice(0, 1000))}" data-sources="${Array.isArray(sources) ? sources.length : 0}" data-followup="${aiSearchHistory.length > 2 ? 1 : 0}">
+    <div class="ai-answer-actions">
+      <button type="button" class="ai-fb-btn ai-fb-up" aria-pressed="false" title="좋은 답변" aria-label="좋은 답변">${AI_THUMB_UP}</button>
+      <button type="button" class="ai-fb-btn ai-fb-down" aria-pressed="false" title="아쉬운 답변" aria-label="아쉬운 답변">${AI_THUMB_DOWN}</button>
+      ${copyBtnHtml}
+    </div>
+    <div class="ai-fb-reasons" hidden><span class="ai-fb-ask">아쉬운 점이 있나요?</span>${reasons}</div>
+  </div>`;
+}
+
 // Records a successful turn and flips the module into its "answered"
 // state — shared by both the non-streaming JSON branch (insufficient-
 // evidence, or a client too old/odd to get a stream) and the streaming
 // branch's `done` event, so the two paths never duplicate this bookkeeping.
-function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources) {
+function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources, requestId) {
   aiSearchHistory.push({ role: 'user', content: question });
   aiSearchHistory.push({ role: 'assistant', content: answer });
   bodyEl.innerHTML = `
     ${renderAnswerHtml(answer, sources)}
-    <button type="button" class="ai-copy-btn" title="답변 복사" aria-label="답변 복사" data-answer="${escapeHtml(String(answer || '').replace(/```chart[\s\S]*?```/g, '').trim())}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    ${aiAnswerActionsHtml(`<button type="button" class="ai-copy-btn" title="답변 복사" aria-label="답변 복사" data-answer="${escapeHtml(String(answer || '').replace(/```chart[\s\S]*?```/g, '').trim())}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`, question, sources, requestId)}
     ${aiEvidenceHtml(sources)}
     ${aiSearchSourcesHtml(sources)}
   `;
@@ -1691,7 +1709,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
         return;
       }
       if (body.context) aiSearchContext = body.context;
-      finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources);
+      finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources, res.headers.get('x-request-id'));
       return;
     }
 
@@ -1737,7 +1755,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
           followGrowingAnswer();
         } else if (eventName === 'done') {
           if (data.context) aiSearchContext = data.context;
-          finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources);
+          finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources, res.headers.get('x-request-id'));
           // Bypasses the throttle for this last call — the polished swap
           // can change the answer's final height, so this makes sure its
           // actual end is what's left in view, not wherever the last
@@ -4394,6 +4412,53 @@ document.addEventListener('click', async (e) => {
   }
   btn.classList.add('copied');
   setTimeout(() => btn.classList.remove('copied'), 1500);
+});
+
+// 👍/👎: pressing the active button again withdraws the vote. 👎 opens an optional reason row. State lives in the DOM so replayed turns keep it.
+async function sendAiFeedback(box, rating, reason) {
+  const copyEl = box.querySelector('.ai-copy-btn');
+  const answer = copyEl ? copyEl.dataset.answer || '' : '';
+  try {
+    const res = await fetch('/api/search/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: box.dataset.requestId, rating, ...(reason ? { reason } : {}), question: box.dataset.question || '', answer, sourceCount: Number(box.dataset.sources) || 0, isFollowup: box.dataset.followup === '1' }),
+    });
+    return res.ok;
+  } catch (_) { return false; }
+}
+function syncAiFeedbackReplay(box) {
+  const turnEl = box.closest('.ai-search-turn');
+  const marker = `data-request-id="${box.dataset.requestId}"`;
+  if (turnEl) aiSearchTurnsHtml = aiSearchTurnsHtml.map((h) => (h.includes(marker) ? turnEl.outerHTML : h));
+}
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest && e.target.closest('.ai-fb-btn, .ai-fb-reason');
+  if (!btn) return;
+  const box = btn.closest('.ai-feedback');
+  if (!box || box.dataset.busy === '1') return;
+  const up = box.querySelector('.ai-fb-up');
+  const down = box.querySelector('.ai-fb-down');
+  const reasonsEl = box.querySelector('.ai-fb-reasons');
+  const before = { up: up.getAttribute('aria-pressed'), down: down.getAttribute('aria-pressed'), reasonsHidden: reasonsEl.hidden };
+  const set = (u, d) => { up.setAttribute('aria-pressed', String(u)); down.setAttribute('aria-pressed', String(d)); };
+  let rating; let reason = null;
+  if (btn.classList.contains('ai-fb-reason')) {
+    rating = -1; reason = btn.dataset.reason;
+    reasonsEl.querySelectorAll('.ai-fb-reason').forEach((b) => b.classList.toggle('selected', b === btn));
+  } else if (btn === up) {
+    rating = up.getAttribute('aria-pressed') === 'true' ? 0 : 1;
+    set(rating === 1, false); reasonsEl.hidden = true;
+  } else {
+    rating = down.getAttribute('aria-pressed') === 'true' ? 0 : -1;
+    set(false, rating === -1); reasonsEl.hidden = rating !== -1;
+    reasonsEl.querySelectorAll('.ai-fb-reason').forEach((b) => b.classList.remove('selected'));
+  }
+  box.dataset.busy = '1';
+  const ok = await sendAiFeedback(box, rating, reason);
+  box.dataset.busy = '0';
+  if (!ok) { set(before.up === 'true', before.down === 'true'); reasonsEl.hidden = before.reasonsHidden; return; }
+  syncAiFeedbackReplay(box);
 });
 
 // Chart hover card: replaces the browser's plain native tooltip. The chart's

@@ -11,7 +11,8 @@ const annualRecords = require('../lib/annualReportRecords');
 const classificationScope = require('../lib/classificationScope');
 const termExpansion = require('../lib/termExpansion');
 const verificationRoutine = require('../lib/verificationRoutine');
-const { isAuthenticated } = require('../lib/auth');
+const { isAuthenticated, requireAuth } = require('../lib/auth');
+const answerFeedback = require('../lib/answerFeedback');
 
 // DB classifications offered on the classification card (sectors with article counts, entity types), cached 10 min.
 let classificationCtxCache = { at: 0, value: null };
@@ -1547,6 +1548,36 @@ router.get('/warm', rateLimit.limitMiddleware(warmCounter), (req, res) => {
   res.status(202).json({ warming: result.started });
 });
 
+// 👍/👎 on an answer. Anyone who received an answer may vote (the search itself is public); the list and its analysis are admin-only.
+const feedbackCounter = rateLimit.createWindowCounter({ windowMs: 10 * 60 * 1000, max: 60 });
+router.post('/feedback', rateLimit.limitMiddleware(feedbackCounter, '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.'), async (req, res) => {
+  try {
+    const r = await answerFeedback.saveFeedback(pool, req.body || {});
+    return res.status(r.status).json(r.ok ? { ok: true, saved: r.saved } : { error: r.error });
+  } catch (err) {
+    console.error('ai-answer feedback failed:', err.message);
+    return res.status(500).json({ error: 'feedback_failed' });
+  }
+});
+router.get('/feedback/summary', requireAuth, async (req, res) => {
+  try {
+    const rows = await answerFeedback.loadFeedback(pool, { days: req.query.days, limit: req.query.limit });
+    return res.json(answerFeedback.analyze(rows));
+  } catch (err) {
+    console.error('ai-answer feedback summary failed:', err.message);
+    return res.status(500).json({ error: 'feedback_failed' });
+  }
+});
+router.get('/feedback/export', requireAuth, async (req, res) => {
+  try {
+    const rows = await answerFeedback.loadFeedback(pool, { days: req.query.days, limit: req.query.limit });
+    res.type('application/x-ndjson').send(answerFeedback.toJsonl(rows, req.query.rating === '-1' ? -1 : 1));
+  } catch (err) {
+    console.error('ai-answer feedback export failed:', err.message);
+    return res.status(500).json({ error: 'feedback_failed' });
+  }
+});
+
 router.post('/', searchLimiter, (req, res) => {
   const controller = new AbortController();
   const onClose = () => {
@@ -1566,6 +1597,7 @@ router.post('/', searchLimiter, (req, res) => {
 async function handleSearch(req, res, signal) {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
+  res.setHeader('X-Request-Id', requestId); // lets the page attach a 👍/👎 to exactly this answer (merged into writeHead's headers)
   const isFollowup = Array.isArray(req.body.history) && req.body.history.length > 0;
   const streaming = wantsStream(req);
 

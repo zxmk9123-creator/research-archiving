@@ -268,7 +268,8 @@ test('REVIEW: the headline executor goes through the guard — a READY headline 
     return { rows: [] };
   };
   try {
-    const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000 });
+    // pinned to 11:00 KST: the guard waits for the collection before 10:00 KST, so the unpinned test only passed during part of the day
+    const result = await defaultExecutors.retry_headline({ deadlineAt: Date.now() + 120000, now: new Date('2026-10-30T02:00:00Z') });
     assert.deepEqual(result, { ran: false, reason: 'up_to_date', stillRunning: 0, modelCalls: 0, maxModelCalls: 2, budgetExhausted: false, timeBudgetExceeded: false });
     assert.ok(!statements.includes('INSERT') && !statements.includes('UPDATE') && !statements.includes('DELETE'), `only reads happened: ${statements}`);
   } finally { pool.query = orig; }

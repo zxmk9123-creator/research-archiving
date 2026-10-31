@@ -1130,6 +1130,24 @@ ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS ttft_ms INTEGER;
 ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS streamed BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE ai_search_logs ADD COLUMN IF NOT EXISTS model_used TEXT;
 
+-- Reader votes (👍/👎) on AI answers. Unlike ai_search_logs this holds the question and answer text, but only for answers a reader chose to rate;
+-- rating the same answer again with the same button removes the row. Also created lazily by lib/answerFeedback.js.
+CREATE TABLE IF NOT EXISTS ai_answer_feedback (
+  id SERIAL PRIMARY KEY,
+  request_id UUID NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  rating SMALLINT NOT NULL CHECK (rating IN (-1, 1)),
+  reason TEXT,
+  comment TEXT,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  source_count INTEGER,
+  is_followup BOOLEAN NOT NULL DEFAULT false,
+  features JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_ai_answer_feedback_created_at ON ai_answer_feedback(created_at);
+
 -- Exact-URL dedup, made reliable at the DB level. Production investigation
 -- (confirmed via the live items table) found two genuine exact-duplicate
 -- source_url pairs — ids [233,234] (barchart.com futures quote) and
