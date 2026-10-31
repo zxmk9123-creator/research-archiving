@@ -119,12 +119,15 @@ test('keyOf: numbers inside a warning do not make a new incident, a new day does
   assert.notEqual(keyOf('source 77 timed out 3 times', '2026-10-29'), keyOf('source 77 timed out 3 times', '2026-10-30'));
 });
 
-test('dispatchAlerts: push channel (ntfy) alone, with headers; webhook failure falls through to push', async () => {
-  const calls = [];
-  const fetchImpl = async (u, o) => { calls.push({ u, o }); return { ok: u.includes('push'), status: 200 }; };
-  const key = `push-${Date.now()}`;
-  const r = await dispatchAlerts([{ key, text: 'incident', urgent: true }], { url: 'https://hook.example/x', pushUrl: 'https://push.example/topic', fetchImpl, now: 5000 });
-  assert.equal(r.sent, 1); assert.equal(calls.length, 2);
-  assert.equal(calls[1].o.headers.Priority, 'high'); assert.equal(calls[1].o.body, 'incident');
-  assert.equal((await dispatchAlerts([{ key: key + 'b', text: 'x' }], { url: '', pushUrl: 'https://push.example/topic', fetchImpl, now: 6000 })).configured, true);
+test('dispatchAlerts: e-mail channel sends high-importance mail; webhook failure falls through to e-mail; failing mail is recorded', async () => {
+  const { emailConfig } = require('../server/lib/opsAlerts');
+  assert.equal(emailConfig({}), null);
+  const cfg = emailConfig({ ALERT_SMTP_USER: 'a@gmail.com', ALERT_SMTP_PASS: 'abcd efgh ijkl mnop' });
+  assert.equal(cfg.pass, 'abcdefghijklmnop'); assert.equal(cfg.to, 'a@gmail.com');
+  const mails = [];
+  const key = `mail-${Date.now()}`;
+  const r = await dispatchAlerts([{ key, text: 'incident', urgent: true }], { url: 'https://hook.example/x', email: cfg, sendMail: async (c, m) => { mails.push(m); }, fetchImpl: async () => ({ ok: false, status: 500 }), now: 5000 });
+  assert.equal(r.sent, 1); assert.match(mails[0].subject, /^\[긴급\]/);
+  const bad = await dispatchAlerts([{ key: key + 'x', text: 't' }], { email: cfg, sendMail: async () => { throw new Error('535 auth'); }, now: 6000 });
+  assert.equal(bad.failed, 1);
 });

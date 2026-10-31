@@ -1,5 +1,5 @@
 // Delivers operational warnings to up to two optional channels: a webhook that accepts {"text": "..."} (Slack/Discord-compatible, ALERT_WEBHOOK_URL)
-// and a mobile push (ALERT_PUSH_URL = an ntfy topic URL, e.g. https://ntfy.sh/<secret-topic>; the ntfy phone app shows it as a push notification).
+// and an e-mail (Gmail SMTP: ALERT_SMTP_USER + ALERT_SMTP_PASS = a Google app password; ALERT_EMAIL_TO defaults to the sender), sent high-importance.
 // An alert counts as delivered when at least one configured channel accepted it. Nothing is sent, and nothing is claimed as sent, when it is not set. Delivery outcomes are
 // kept in scheduler_jobs ('ops_alerts') so an incident alerts once, a failed delivery is retried a bounded number of times, and a
 // different incident (different key) alerts again.
@@ -10,12 +10,24 @@ const RETRY_AFTER_MS = 30 * 60000;
 const MAX_ATTEMPTS = 3;
 const KEEP_MS = 7 * 86400000;
 
+function emailConfig(env = process.env) {
+  const user = (env.ALERT_SMTP_USER || '').trim();
+  const pass = (env.ALERT_SMTP_PASS || '').replace(/\s+/g, '');
+  if (!user || !pass) return null;
+  return { user, pass, to: (env.ALERT_EMAIL_TO || user).trim(), host: env.ALERT_SMTP_HOST || 'smtp.gmail.com' };
+}
+
+async function smtpSend(cfg, { subject, text }) {
+  const transport = require('nodemailer').createTransport({ host: cfg.host, port: 465, secure: true, auth: { user: cfg.user, pass: cfg.pass }, connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 10000 });
+  await transport.sendMail({ from: `Research Archiving <${cfg.user}>`, to: cfg.to, subject, text, priority: 'high', headers: { Importance: 'high', 'X-Priority': '1' } });
+}
+
 const keyOf = (text, day) => `${day}:${String(text).replace(/\d+/g, '#').slice(0, 80)}`;
 
 // alerts: [{ key, text }]. Returns { configured, sent, failed, skipped }.
-async function dispatchAlerts(alerts, { url = process.env.ALERT_WEBHOOK_URL, pushUrl = process.env.ALERT_PUSH_URL, fetchImpl = fetch, now = Date.now() } = {}) {
-  const result = { configured: Boolean(url || pushUrl), sent: 0, failed: 0, skipped: 0 };
-  if (!(url || pushUrl) || !alerts.length) return result;
+async function dispatchAlerts(alerts, { url = process.env.ALERT_WEBHOOK_URL, email = emailConfig(), sendMail = smtpSend, fetchImpl = fetch, now = Date.now() } = {}) {
+  const result = { configured: Boolean(url || email), sent: 0, failed: 0, skipped: 0 };
+  if (!(url || email) || !alerts.length) return result;
   let due = [];
   // if the delivery state cannot be read, alert anyway: silence is worse than a possible repeat
   due = alerts;
@@ -34,7 +46,7 @@ async function dispatchAlerts(alerts, { url = process.env.ALERT_WEBHOOK_URL, pus
   for (const a of due) {
     const tries = [];
     if (url) tries.push(() => fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: `[Research Archiving] ${a.text}` }), signal: AbortSignal.timeout(8000) }));
-    if (pushUrl) tries.push(() => fetchImpl(pushUrl, { method: 'POST', headers: { Title: 'Research Archiving', Priority: a.urgent ? 'high' : 'default', Tags: a.urgent ? 'warning' : 'information_source' }, body: String(a.text).slice(0, 900), signal: AbortSignal.timeout(8000) }));
+    if (email) tries.push(async () => { await sendMail(email, { subject: `${a.urgent ? '[긴급] ' : ''}[Research Archiving] ${String(a.text).slice(0, 80)}`, text: String(a.text) }); return { ok: true, status: 250 }; });
     let last = { ok: false };
     for (const send of tries) {
       try {
@@ -60,4 +72,4 @@ async function dispatchAlerts(alerts, { url = process.env.ALERT_WEBHOOK_URL, pus
   return result;
 }
 
-module.exports = { dispatchAlerts, keyOf, JOB, MAX_ATTEMPTS, RETRY_AFTER_MS };
+module.exports = { emailConfig, dispatchAlerts, keyOf, JOB, MAX_ATTEMPTS, RETRY_AFTER_MS };
