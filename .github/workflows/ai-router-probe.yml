@@ -1,0 +1,37 @@
+name: AI router probe
+
+# Early warning for AI failures: GET /api/cron/ai-probe reads 24 h of AI-search telemetry and makes ONE tiny completion through the FreeLLMAPI router.
+# Fails the run (GitHub notification) when most answers fail or the router is dead; warns on degradation. Read-only: nothing is retried or changed.
+# Runs 6 h apart, the last one ahead of the 07:00 KST pipeline (22:00 UTC).
+on:
+  schedule:
+    - cron: '30 21,3,9,15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ai-router-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe AI router
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 90 -o probe.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/ai-probe" || true)
+          echo "probe endpoint: HTTP $code"
+          if [ "$code" != "200" ]; then echo "::error::probe endpoint answered HTTP $code"; head -c 500 probe.json 2>/dev/null; exit 1; fi
+          status=$(jq -er '.status' probe.json) || { echo "::error::invalid probe body"; head -c 300 probe.json; exit 1; }
+          detail=$(jq -r '.check.detail' probe.json)
+          { echo "### AI router: $status"; echo; echo '```'; echo "$detail"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$detail"
+          case "$status" in
+            pass) exit 0 ;;
+            warn|unknown) echo "::warning::AI router $status: $detail"; exit 0 ;;
+            *) echo "::error::AI router FAILED: $detail"; exit 1 ;;
+          esac

@@ -156,6 +156,18 @@ function healthHandler({ check = () => require('./pipelineHealth').runHealthChec
   };
 }
 
+// GET /api/cron/ai-probe: AI router early warning (24 h search telemetry + one tiny live completion). Read-only apart from that one call.
+function aiProbeHandler({ check = () => require('./aiRouterHealth').runAiRouterCheck() } = {}) {
+  return async (req, res) => {
+    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    try {
+      res.json(await check());
+    } catch (err) {
+      res.status(500).json({ status: 'unknown', error: String(err && err.message).slice(0, 160) });
+    }
+  };
+}
+
 // GET /api/cron/doctor?mode=diagnose|recover (same bearer-secret auth). Default is diagnose: read-only analysis. mode=recover additionally needs
 // DOCTOR_RECOVERY=on in the environment; without it the answer says recovery is not permitted and nothing is executed.
 function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(opts) } = {}) {
@@ -170,4 +182,4 @@ function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(o
   };
 }
 
-module.exports = { doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
+module.exports = { aiProbeHandler, doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
