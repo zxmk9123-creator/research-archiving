@@ -46,7 +46,7 @@ async function dispatchAlerts(alerts, { url = process.env.ALERT_WEBHOOK_URL, ema
   for (const a of due) {
     const tries = [];
     if (url) tries.push(() => fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: `[Research Archiving] ${a.text}` }), signal: AbortSignal.timeout(8000) }));
-    if (email) tries.push(async () => { await sendMail(email, { subject: `${a.urgent ? '[긴급] ' : ''}[Research Archiving] ${String(a.text).slice(0, 80)}`, text: String(a.text) }); return { ok: true, status: 250 }; });
+    if (email) tries.push(async () => { await sendMail(email, { subject: `${a.urgent ? '[긴급] ' : ''}[Research Archiving] ${String(a.subject || a.text).slice(0, 80)}`, text: String(a.text) }); return { ok: true, status: 250 }; });
     let last = { ok: false };
     for (const send of tries) {
       try {

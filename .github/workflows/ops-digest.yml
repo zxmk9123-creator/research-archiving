@@ -1,0 +1,27 @@
+name: Ops digest
+
+# Daily operations summary by e-mail after noon KST (03:07 UTC = 12:07 KST): pipeline health, AI router, answer ratings, Doctor.
+# The server sends it once per KST day; a second run the same day is skipped. Fails if nothing could be delivered.
+on:
+  schedule:
+    - cron: '7 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ops-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send digest
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 120 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/ops-digest" || true)
+          echo "HTTP $code"; jq -r '.subject // empty' out.json 2>/dev/null
+          [ "$code" = "200" ] || { echo "::error::digest was not delivered"; head -c 300 out.json; exit 1; }

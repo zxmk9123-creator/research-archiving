@@ -43,6 +43,7 @@ app.get('/api/cron/diagnose', async (req, res) => {
 
 app.get('/api/cron/daily', require('./lib/cronRunner').dailyHandler());
 app.get('/api/cron/health', require('./lib/cronRunner').healthHandler());
+app.get('/api/cron/ops-digest', require('./lib/cronRunner').opsDigestHandler());
 app.get('/api/cron/alert-test', require('./lib/cronRunner').alertTestHandler());
 app.get('/api/cron/ai-probe', require('./lib/cronRunner').aiProbeHandler());
 app.get('/api/cron/doctor', require('./lib/cronRunner').doctorHandler());
