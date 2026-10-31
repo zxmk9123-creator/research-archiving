@@ -118,3 +118,13 @@ test('keyOf: numbers inside a warning do not make a new incident, a new day does
   assert.equal(keyOf('source 77 timed out 3 times', '2026-10-29'), keyOf('source 77 timed out 4 times', '2026-10-29'));
   assert.notEqual(keyOf('source 77 timed out 3 times', '2026-10-29'), keyOf('source 77 timed out 3 times', '2026-10-30'));
 });
+
+test('dispatchAlerts: push channel (ntfy) alone, with headers; webhook failure falls through to push', async () => {
+  const calls = [];
+  const fetchImpl = async (u, o) => { calls.push({ u, o }); return { ok: u.includes('push'), status: 200 }; };
+  const key = `push-${Date.now()}`;
+  const r = await dispatchAlerts([{ key, text: 'incident', urgent: true }], { url: 'https://hook.example/x', pushUrl: 'https://push.example/topic', fetchImpl, now: 5000 });
+  assert.equal(r.sent, 1); assert.equal(calls.length, 2);
+  assert.equal(calls[1].o.headers.Priority, 'high'); assert.equal(calls[1].o.body, 'incident');
+  assert.equal((await dispatchAlerts([{ key: key + 'b', text: 'x' }], { url: '', pushUrl: 'https://push.example/topic', fetchImpl, now: 6000 })).configured, true);
+});

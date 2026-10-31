@@ -387,6 +387,15 @@ async function runDoctor({
       return d;
     });
   } catch (err) { console.error('doctor report store failed:', err.message); }
+  // a person is needed: push it to the phone / webhook (no-op unless ALERT_PUSH_URL or ALERT_WEBHOOK_URL is set; once per incident via opsAlerts dedupe)
+  if (safeReport.humanNeeded && mode !== 'none') {
+    try {
+      const { dispatchAlerts, keyOf } = require('./opsAlerts');
+      const causes = safeReport.findings.filter((f) => f.classification === 'needs_human').map((f) => f.cause).join(', ') || safeReport.outcome;
+      const text = `Doctor: 사람 확인 필요 — ${causes} (before: ${safeReport.before.failing.join(', ') || 'none'})`;
+      safeReport.alerts = await dispatchAlerts([{ key: keyOf(`doctor ${causes}`, new Date().toISOString().slice(0, 10)), text, urgent: true }]);
+    } catch (err) { console.error('doctor alert failed:', err.message); }
+  }
   return safeReport;
 }
 
