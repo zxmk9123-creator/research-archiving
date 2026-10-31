@@ -1,0 +1,20 @@
+name: Alert test
+
+# Manual only: sends ONE test alert through the configured channels (webhook / Gmail) and fails if nothing was delivered.
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Send test alert
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          code=$(curl -sS -m 60 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/alert-test" || true)
+          echo "HTTP $code"; cat out.json
+          [ "$code" = "200" ] || { echo "::error::test alert was not delivered (configured=false means env vars missing)"; exit 1; }

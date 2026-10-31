@@ -131,3 +131,12 @@ test('dispatchAlerts: e-mail channel sends high-importance mail; webhook failure
   const bad = await dispatchAlerts([{ key: key + 'x', text: 't' }], { email: cfg, sendMail: async () => { throw new Error('535 auth'); }, now: 6000 });
   assert.equal(bad.failed, 1);
 });
+
+test('alertTestHandler: 401 without secret; 200 when delivered; 502 when nothing delivered', async () => {
+  const { alertTestHandler } = require('../server/lib/cronRunner');
+  process.env.CRON_SECRET = 's';
+  const run = async (send, auth) => { const o = { code: 200 }; const res = { status: (c) => { o.code = c; return res; }, json: (b) => { o.body = b; return res; } }; await alertTestHandler({ send })({ headers: { authorization: auth }, query: {} }, res); return o; };
+  assert.equal((await run(async () => ({}), undefined)).code, 401);
+  assert.equal((await run(async () => ({ configured: true, sent: 1 }), 'Bearer s')).code, 200);
+  assert.equal((await run(async () => ({ configured: false, sent: 0 }), 'Bearer s')).code, 502);
+});
