@@ -151,3 +151,12 @@ test('schema.sql defines ai_answer_feedback with one vote per request id', () =>
   assert.match(sql, /request_id UUID NOT NULL UNIQUE/);
   assert.match(sql, /rating SMALLINT NOT NULL CHECK \(rating IN \(-1, 1\)\)/);
 });
+
+test('answerQualityCheck: silent on thin data, pass when steady, warn on a drop', () => {
+  const { answerQualityCheck } = require('../server/lib/answerFeedback');
+  assert.deepEqual(answerQualityCheck(undefined), []);
+  assert.deepEqual(answerQualityCheck({ recent: { up: 3, down: 2 }, prior: { up: 20, down: 5 } }), []);
+  assert.equal(answerQualityCheck({ recent: { up: 8, down: 4 }, prior: { up: 16, down: 8 } })[0].status, 'pass');
+  const w = answerQualityCheck({ recent: { up: 4, down: 8 }, prior: { up: 20, down: 5 } })[0];
+  assert.equal(w.status, 'warn'); assert.equal(w.id, 'answer_quality');
+});

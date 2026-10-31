@@ -189,4 +189,31 @@ function toJsonl(rows, rating = 1) {
   })).join('\n');
 }
 
-module.exports = { REASONS, MAX_QUESTION, MAX_ANSWER, answerFeatures, validateFeedback, saveFeedback, loadFeedback, analyze, toJsonl, ensureTable };
+// Pure. Closes the loop: the reader votes feed a regression signal. input = { recent: {up, down}, prior: {up, down} } (last 7 days vs the 21 days
+// before). Warn-only (a vote count is never an outage); silent below MIN_VOTES in either window, so a quiet week yields no row.
+const MIN_VOTES = 8;
+const DROP_WARN = 0.2;
+function answerQualityCheck(input) {
+  if (!input || !input.recent || !input.prior) return [];
+  const n = (w) => (Number(w.up) || 0) + (Number(w.down) || 0);
+  const rate = (w) => (Number(w.up) || 0) / n(w);
+  if (n(input.recent) < MIN_VOTES || n(input.prior) < MIN_VOTES) return [];
+  const r = rate(input.recent); const p = rate(input.prior);
+  const detail = `like rate ${pct(r)} over ${n(input.recent)} votes in the last 7 days vs ${pct(p)} over ${n(input.prior)} in the 21 days before`;
+  if (p - r >= DROP_WARN) return [{ id: 'answer_quality', status: 'warn', detail: `answer quality dropped: ${detail}` }];
+  return [{ id: 'answer_quality', status: 'pass', detail }];
+}
+
+// SELECT only (health checks never write): a database where the table does not exist yet makes this throw, which the caller reports as 'not collected'.
+async function collectAnswerQuality(db) {
+  const { rows } = await db.query(
+    `SELECT count(*) FILTER (WHERE rating = 1 AND created_at > now() - interval '7 days')::int AS r_up,
+            count(*) FILTER (WHERE rating = -1 AND created_at > now() - interval '7 days')::int AS r_down,
+            count(*) FILTER (WHERE rating = 1 AND created_at <= now() - interval '7 days')::int AS p_up,
+            count(*) FILTER (WHERE rating = -1 AND created_at <= now() - interval '7 days')::int AS p_down
+       FROM ai_answer_feedback WHERE created_at > now() - interval '28 days'`);
+  const r = rows[0] || {};
+  return { recent: { up: r.r_up || 0, down: r.r_down || 0 }, prior: { up: r.p_up || 0, down: r.p_down || 0 } };
+}
+
+module.exports = { answerQualityCheck, collectAnswerQuality, REASONS, MAX_QUESTION, MAX_ANSWER, answerFeatures, validateFeedback, saveFeedback, loadFeedback, analyze, toJsonl, ensureTable };

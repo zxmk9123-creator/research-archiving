@@ -135,6 +135,7 @@ function evaluateHealth(input, now = Date.now()) {
     ...triggerCheck(input, now),
     ...recoveryCheck(input, now),
     ...require('./aiRouterHealth').aiRouterCheck(input.aiRouter, now),
+    ...require('./answerFeedback').answerQualityCheck(input.answerQuality),
   ];
   const has = (s) => checks.some((c) => c.status === s);
   const status = has('fail') ? 'failed' : has('warn') ? 'warn' : has('unknown') ? 'unknown' : 'ok';
@@ -170,6 +171,7 @@ async function collectHealthInput(now = new Date()) {
   input.heartbeat = await safe(async () => { const r = await job('trigger_heartbeat'); return r ? r.last_totals : null; }, undefined);
   // telemetry only (no live probe): the health check stays cheap and deterministic; the ai-router-probe workflow adds the probe
   input.aiRouter = await safe(() => require('./aiRouterHealth').collectAiRouterInput(), undefined);
+  input.answerQuality = await safe(() => require('./answerFeedback').collectAnswerQuality(pool), undefined);
   return input;
 }
 
