@@ -58,25 +58,32 @@ async function readRows(db, { reporter, partner, flow, cmd }, from, to) {
 // never mixed month by month: the two sides differ in valuation (FOB/CIF), timing and coverage).
 const pickSource = (exporterRows, importerRows) => (exporterRows.length ? 'exporter_report' : importerRows.length ? 'importer_report' : 'none');
 
-// q = { ex, im, hs, from, to } already validated. Returns the same series/kpis shape as the Korea-based dashboard.
+// q = { ex, im, hs, from, to } already validated; ex or im may be 0 ("all countries" = Comtrade's World partner) but not both.
+// Returns the same series/kpis shape as the Customs-based dashboard, plus `scope`: pair | exporter_total | importer_total.
 async function loadPair(q, { call = (p) => callComtrade(p), db = pool, now = new Date() } = {}) {
   await ensureTables(db);
   const cmd = q.hs.length > 6 ? q.hs.slice(0, 6) : q.hs;
   const ctx = { calls: 0, deadline: Date.now() + LIMITS.budgetMs, incomplete: false, error: null };
   const y0 = Number(Q.addMonths(q.from, -12).slice(0, 4)); const y1 = Number(q.to.slice(0, 4));
-  const xKey = { reporter: q.ex, partner: q.im, flow: 'X', cmd }; const mKey = { reporter: q.im, partner: q.ex, flow: 'M', cmd };
-  for (let y = y1; y >= y0; y--) await ensureYear(db, call, ctx, now, { ...xKey, year: y }); // newest years first: they matter most if the budget runs out
+  const scope = q.ex && q.im ? 'pair' : q.ex ? 'exporter_total' : 'importer_total';
+  // one country's total is that country's own report against the World partner; there is no mirror to fall back on (it would be the sum of every other country's report)
+  const xKey = scope === 'importer_total' ? null : { reporter: q.ex, partner: q.im, flow: 'X', cmd }; // partner 0 = World
+  const mKey = scope === 'exporter_total' ? null : { reporter: q.im, partner: q.ex, flow: 'M', cmd };
   const lo = Q.addMonths(q.from, -12);
-  let xRows = await readRows(db, xKey, lo, q.to);
+  let xRows = [];
+  if (xKey) {
+    for (let y = y1; y >= y0; y--) await ensureYear(db, call, ctx, now, { ...xKey, year: y }); // newest years first: they matter most if the budget runs out
+    xRows = await readRows(db, xKey, lo, q.to);
+  }
   let mRows = [];
-  if (!xRows.length) {
+  if (mKey && (scope === 'importer_total' || !xRows.length)) {
     for (let y = y1; y >= y0; y--) await ensureYear(db, call, ctx, now, { ...mKey, year: y });
     mRows = await readRows(db, mKey, lo, q.to);
   }
   const source = pickSource(xRows, mRows);
   const rows = source === 'importer_report' ? mRows : xRows;
   return {
-    source, rows, cmd, incomplete: ctx.incomplete, error: ctx.error, calls: ctx.calls,
+    source, scope, rows, cmd, incomplete: ctx.incomplete, error: ctx.error, calls: ctx.calls,
     series: Q.buildSeries(rows, q.from, q.to), kpis: Q.buildKpis(rows, q.from, q.to),
   };
 }

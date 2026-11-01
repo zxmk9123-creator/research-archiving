@@ -237,14 +237,21 @@
   }
 
   function modeSwitch(state) {
-    return el('div', { class: 'tv-row tv-modes' }, segmented('조회 방식', [['kr', '한국 기준'], ['pair', '두 나라 사이']], state.mode, (v) => go(state, { mode: v, flow: v === 'pair' ? 'pair' : 'imp', country: '' })));
+    const about = state.mode === 'pair' ? '전 세계 국가 사이의 교역 · HS 6자리까지 · 신고 시점이 늦을 수 있음' : '한국의 수출입 · HS 10자리까지 · 월별 · 상대국별 상세';
+    return el('div', { class: 'tv-row tv-modes' }, segmented('자료 출처', [['kr', '관세청'], ['pair', 'UN Comtrade']], state.mode, (v) => go(state, { mode: v, flow: v === 'pair' ? 'pair' : 'imp', country: '' })),
+      el('span', { class: 'tv-hint' }, about));
   }
 
   // Two-country mode: exporter and importer from the fixed country list (native selects), with a swap button.
   function pairPickers(state, countries) {
     const opt = (c, cur) => el('option', { value: String(c.code), selected: String(c.code) === cur || null }, c.name);
+    const all = { code: 0, name: '전체 국가' };
+    // choosing the other side's value swaps them; "전체 국가" on both sides is refused by moving the other side back to what this one had
     const pick = (label, key, other) => el('label', { class: 'tv-seg tv-partner' }, el('span', { class: 'tv-label' }, label),
-      el('select', { class: 'tv-select', 'aria-label': label, onchange: (e) => go(state, { [key]: e.target.value, ...(e.target.value === state[other] ? { [other]: state[key] } : {}) }) }, countries.map((c) => opt(c, state[key]))));
+      el('select', { class: 'tv-select', 'aria-label': label, onchange: (e) => {
+        const v = e.target.value;
+        go(state, { [key]: v, ...((v === state[other] || (v === '0' && state[other] === '0')) ? { [other]: state[key] === '0' ? (key === 'ex' ? '360' : '699') : state[key] } : {}) });
+      } }, [opt(all, state[key]), ...countries.map((c) => opt(c, state[key]))]));
     return el('div', { class: 'tv-row tv-pair-row' }, pick('수출국', 'ex', 'im'),
       el('button', { type: 'button', class: 'tv-swap', 'aria-label': '수출국과 수입국 바꾸기', title: '수출국과 수입국 바꾸기', onclick: () => go(state, { ex: state.im, im: state.ex }) }, '⇄'),
       pick('수입국', 'im', 'ex'));
@@ -464,7 +471,7 @@
       ['품목 분류', '가장 세부 단위(HS 10자리)로 저장하고 상위 분류는 합계로 계산합니다. 그래서 하위 품목을 모두 더하면 상위 품목과 정확히 같습니다. 국가별 통계는 관세청이 HS 6자리까지만 제공하므로 그보다 세부 품목을 고르면 상위 6자리 기준으로 보여 줍니다.'],
       ['조회 기간', `${bounds ? `현재 ${ym(bounds.min)}부터 ${ym(bounds.max)}까지 조회할 수 있습니다. ` : ''}적재를 시작한 달부터 매월 한 달씩 늘어나며, 기간 입력은 이 범위 안에서만 고를 수 있습니다. 범위를 벗어나거나 시작·종료가 바뀐 주소로 열면 자동으로 범위 안으로 맞추고 그 사실을 화면에 알립니다.`],
       ['장애 시', '화면은 플랫폼 데이터베이스에 저장된 값만 읽습니다. 관세청 API에 장애가 있어도 마지막으로 받은 값은 그대로 보이며, 동기화 실패는 운영 알림으로 확인합니다.'],
-      ['두 나라 사이', '"두 나라 사이"는 UN Comtrade(유엔 공공 무역통계)로 한국이 끼지 않는 교역도 볼 수 있습니다. 수출국이 신고한 수출 통계를 먼저 쓰고, 신고가 없으면 수입국이 신고한 수입 통계로 대체하며 어느 쪽인지 화면에 표시합니다. 수출은 FOB, 수입은 CIF 기준이라 두 값이 다를 수 있습니다. 처음 조회하는 조합은 그때 받아 저장하므로 첫 로딩이 느리고, 국가별 신고가 늦어 최근 몇 달은 비어 있을 수 있습니다. HS 6자리까지 지원합니다.'],
+      ['UN Comtrade', 'UN Comtrade(유엔 공공 무역통계)로 한국이 끼지 않는 교역도 볼 수 있습니다. 수출국과 수입국을 각각 고르며, 한쪽을 "전체 국가"로 두면 그 나라의 총 수출(또는 총 수입)을 모든 상대국 합계로 봅니다. 두 나라를 모두 고르면 수출국이 신고한 수출 통계를 먼저 쓰고, 신고가 없을 때만 수입국이 신고한 수입 통계로 대체하며 어느 쪽인지 화면에 표시합니다(총량은 그 나라 자신의 신고만 씁니다). 수출은 FOB, 수입은 CIF 기준이라 두 값이 다를 수 있습니다. 처음 조회하는 조합은 그때 받아 저장하므로 첫 로딩이 느리고, 국가별 신고가 늦어 최근 몇 달은 비어 있을 수 있습니다. HS 6자리까지 지원합니다.'],
       ['예정', '선박 단위 해상 물동량(Kpler, 2017~2026년)을 같은 화면 구조에 추가할 예정입니다. 통관 기준(관세청)과 선적 기준(Kpler)은 시점이 달라 합산하지 않고 나란히 비교합니다.'],
     ];
     return el('details', { class: 'section tv-policy', open: open || null }, el('summary', {}, '무역통계 운영 방침'),
@@ -506,6 +513,7 @@
     root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다. 품목은 이름으로 찾고 기간과 지표를 골라 보세요.'), policySection(data && data.bounds, policyWasOpen)));
     if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); commit(); return; }
     if (pairMode && data.disabled) { root.append(el('div', { class: 'tv-filters' }, modeSwitch(state)), el('p', { class: 'tv-muted' }, '두 나라 조회는 UN Comtrade 인증 키(UN_CONTRADE)가 설정되면 사용할 수 있습니다.')); commit(); return; }
+    if (pairMode && data.scope) FLOW_NAME.pair = { exporter_total: '수출', importer_total: '수입' }[data.scope] || '교역'; // tiles and chart titles say 수출/수입/교역
     if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); commit(); return; }
 
     root.append(el('div', { class: 'tv-filters' },
@@ -524,8 +532,12 @@
       pairMode ? el('span', { class: 'tv-route' }, data.exporter.name, el('span', { class: 'tv-route-arrow', 'aria-hidden': 'true' }, '→'), data.importer.name) : null,
       data.country ? el('a', { class: 'tv-country-chip', href: href(state, { country: '' }), title: '전체 국가로 돌아가기' }, el('span', { class: 'tv-muted' }, '상대국 '), data.countryName || data.country, el('span', { class: 'tv-x', 'aria-hidden': 'true' }, '×'), el('span', { class: 'tv-sr' }, ' 해제')) : null));
     if (pairMode) {
-      const src = { exporter_report: `${data.exporter.name}가 신고한 수출 통계`, importer_report: `${data.importer.name}가 신고한 수입 통계(수출국 신고가 없어 대체)`, none: '' }[data.source];
-      root.append(el('p', { class: 'tv-context' }, data.source === 'none' ? '선택한 기간에 두 나라의 신고 자료가 없습니다.' : `${src} 기준입니다.${data.seriesHs !== data.hs ? ` 두 나라 조회는 HS 6자리까지 지원하여 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
+      const ex = data.exporter.name; const im = data.importer.name;
+      const src = data.scope === 'exporter_total' ? `${ex}가 신고한 전체 수출(모든 상대국 합계)`
+        : data.scope === 'importer_total' ? `${im}가 신고한 전체 수입(모든 상대국 합계)`
+          : data.source === 'importer_report' ? `${im}가 신고한 수입 통계(${ex}의 수출 신고가 없어 대체)` : `${ex}가 신고한 수출 통계`;
+      const none = data.scope === 'pair' ? '선택한 기간에 두 나라의 신고 자료가 없습니다.' : `선택한 기간에 ${data.scope === 'exporter_total' ? ex : im}의 신고 자료가 없습니다.`;
+      root.append(el('p', { class: 'tv-context' }, data.source === 'none' ? none : `${src} 기준입니다.${data.seriesHs !== data.hs ? ` UN Comtrade는 HS 6자리까지 지원하여 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
       if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.apiError ? `UN Comtrade에서 일부 기간을 받지 못했습니다(${data.apiError.code}). 받은 기간까지만 표시하며, 잠시 후 다시 열면 이어서 받습니다.` : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
     }
     if (data.country) {

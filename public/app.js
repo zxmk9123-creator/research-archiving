@@ -4133,10 +4133,10 @@ function startHeadlinesTour(replay = false) {
 // read the summary numbers, then the trend, the breakdown and the countries. Replayed from "사용 가이드" while on this tab.
 const TRADE_TOUR_SEEN_KEY = 'ra_trade_tour_seen';
 const TRADE_TOUR_STEPS = [
+  { selector: '.tv-modes', title: '자료 출처', desc: '관세청은 한국의 수출입(세부 품목 10자리, 상대국별 상세), UN Comtrade는 전 세계 어느 두 나라 사이의 교역입니다. UN Comtrade에서는 수출국이나 수입국 한쪽을 "전체 국가"로 두면 그 나라의 총 수출·총 수입을 볼 수 있어요.' },
   { selector: '.tv-search', title: '품목 찾기', desc: 'HS코드를 몰라도 됩니다. 팜유·콩기름·카놀라·우지·바이오디젤처럼 평소 쓰는 이름으로 찾거나, 옆의 "품목 둘러보기"에서 고르세요.' },
-  { selector: '.tv-period', title: '기간·지표', desc: '시작·종료월이나 1·3·5·10년·전체 버튼으로 기간을 정하고, 아래에서 수입·수출·순수출과 물량·금액·단가를 고릅니다. 차트 위에서 월·분기·연 단위로 묶어 볼 수 있어요. 자료가 있는 기간 안에서만 고를 수 있어요.' },
-  { selector: '.tv-tiles', title: '요약 숫자', desc: '최근 월 값과 전년 동월·전월 대비, 최근 12개월 합계와 평균 단가입니다. 월별 계절성이 커서 전년 동월 비교가 기준이에요.' },
-  { selector: '.tv-cols .tv-card', title: '구성과 상대국', desc: '선택한 품목을 빠짐없이 나눈 하위 품목(합계 100%)과 상대국 비중입니다. 품목 이름을 누르면 한 단계 더 세부로 들어갑니다.' },
+  { selector: '.tv-period', title: '기간·지표', desc: '시작·종료월이나 1·3·5·10년·전체 버튼으로 기간을 정하고, 아래에서 물량·금액·단가(관세청은 수입·수출·순수출도)를 고릅니다. 자료가 있는 기간 안에서만 고를 수 있어요.' },
+  { selector: '.tv-tiles', title: '요약 숫자와 구성', desc: '최근 월 값과 전년 동월·전월 대비, 최근 12개월 합계가 먼저 보이고, 아래에서 월·분기·연 차트와 하위 품목·상대국 비중(관세청)을 확인합니다. 품목 이름을 누르면 한 단계 더 세부로 들어가요.' },
 ];
 function startTradeTour(replay = false) {
   if (replay) localStorage.removeItem(TRADE_TOUR_SEEN_KEY);

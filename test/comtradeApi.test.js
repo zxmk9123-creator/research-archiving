@@ -107,3 +107,16 @@ test('loadPair: the per-request call budget stops a cold long range and says so'
   assert.equal(r.incomplete, true); assert.ok(n <= 8, `made ${n} calls`);
   assert.ok(r.series.some((p) => p.ton != null), 'the newest years were fetched first');
 });
+
+test('loadPair: a country against "all countries" reads that country\'s own report vs World (partner 0) and never falls back to a mirror', async () => {
+  const seenCalls = [];
+  const call = async (p) => { seenCalls.push(`${p.reporter}>${p.partner}:${p.flow}`); return { ok: true, code: 'ok', calls: 1, rows: monthsOf(p.periods, 5000000) }; };
+  const exp = await loadPair({ ex: 360, im: 0, hs: '1511', from: '202601', to: '202609' }, { call, db: fakeDb(), now: NOW });
+  assert.equal(exp.scope, 'exporter_total'); assert.equal(exp.source, 'exporter_report'); assert.ok(seenCalls.every((c) => c === '360>0:X'));
+  seenCalls.length = 0;
+  const imp = await loadPair({ ex: 0, im: 410, hs: '1511', from: '202601', to: '202609' }, { call, db: fakeDb(), now: NOW });
+  assert.equal(imp.scope, 'importer_total'); assert.equal(imp.source, 'importer_report'); assert.ok(seenCalls.every((c) => c === '410>0:M'));
+  seenCalls.length = 0;
+  const empty = await loadPair({ ex: 360, im: 0, hs: '1511', from: '202601', to: '202609' }, { call: async (p) => { seenCalls.push(p.flow); return { ok: true, code: 'ok', calls: 1, rows: [] }; }, db: fakeDb(), now: NOW });
+  assert.equal(empty.source, 'none'); assert.ok(seenCalls.every((f) => f === 'X'), 'no mirror call for a total');
+});

@@ -235,8 +235,10 @@ router.get('/countries-list', (req, res) => {
   res.json({ countries: COUNTRIES.map((c) => ({ code: c.code, iso: c.iso, name: c.ko })), enabled: Boolean(comtradeKey()) });
 });
 router.get('/pair', async (req, res) => {
+  // 0 = all countries (a country's total exports or total imports); both sides at 0 would be "the world with itself" and is refused
   const ex = Number(req.query.ex); const im = Number(req.query.im);
-  if (!isCountry(ex) || !isCountry(im)) return res.status(400).json({ error: 'invalid_country' });
+  if ((ex !== 0 && !isCountry(ex)) || (im !== 0 && !isCountry(im))) return res.status(400).json({ error: 'invalid_country' });
+  if (ex === 0 && im === 0) return res.status(400).json({ error: 'need_one_country' });
   if (ex === im) return res.status(400).json({ error: 'same_country' });
   if (!comtradeKey()) return res.json({ disabled: true });
   try {
@@ -251,8 +253,8 @@ router.get('/pair', async (req, res) => {
     res.set('Cache-Control', 'private, max-age=60');
     res.json({
       mode: 'pair', hs, flow: 'pair', from, to, latest: max, bounds: { min, max }, adjusted: parsed.adjusted, name: cn.get(hs) || null, seriesHs: r.cmd,
-      breadcrumb: chain.map((code) => ({ code, name: cn.get(code) || null })), exporter: { code: ex, name: countryByCode(ex).ko }, importer: { code: im, name: countryByCode(im).ko },
-      source: r.source, incomplete: r.incomplete, apiError: r.error, kpis: r.kpis, series: r.series, children: [], countries: [],
+      breadcrumb: chain.map((code) => ({ code, name: cn.get(code) || null })), exporter: { code: ex, name: ex ? countryByCode(ex).ko : '전체 국가' }, importer: { code: im, name: im ? countryByCode(im).ko : '전체 국가' },
+      scope: r.scope, source: r.source, incomplete: r.incomplete, apiError: r.error, kpis: r.kpis, series: r.series, children: [], countries: [],
     });
   } catch (err) {
     console.error('GET /api/trade/pair failed:', err.message);
