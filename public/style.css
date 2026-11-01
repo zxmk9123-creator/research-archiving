@@ -1691,3 +1691,5 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 @keyframes tv-turn { to { transform: rotate(360deg); } }
 .tv-unsupported h3 { margin-bottom: 6px; } .tv-unsupported .tv-tools { margin-top: 12px; }
 @media (prefers-reduced-motion: reduce) { .tv-spin { animation: none; } }
+.tv-retry { margin-left: 4px; gap: 6px; display: inline-flex; align-items: center; vertical-align: middle; }
+.tv-retry:disabled { opacity: .7; cursor: progress; }

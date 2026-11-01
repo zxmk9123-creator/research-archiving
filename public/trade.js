@@ -488,7 +488,18 @@
     return [...big, { name, share: rest.reduce((a, r) => a + (r.share || 0), 0), ton: rest.reduce((a, r) => a + (r.ton || 0), 0) }];
   }
 
+  function retryButton(app, query, deps) {
+    const b = el('button', { type: 'button', class: 'tv-chip tv-retry' }, calendarIcon(), '빠진 기간 다시 받기');
+    b.addEventListener('click', () => { b.disabled = true; b.replaceChildren(el('span', { class: 'tv-spin', 'aria-hidden': 'true' }), '받는 중… 최대 1분'); retryFull = true; render(app, query, deps); });
+    return b;
+  }
+  function calendarIcon() {
+    const i = sv('svg', { viewBox: '0 0 16 16', width: '14', height: '14', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.4' });
+    i.append(sv('rect', { x: '2', y: '3', width: '12', height: '11', rx: '2' }), sv('path', { d: 'M2 7h12M5.5 1.5v3M10.5 1.5v3' }));
+    return i;
+  }
   let pollTimer = null;
+  let retryFull = false; // the next pair request asks for the missing periods and waits for them (the calendar button)
   // poll > 0: a quiet refresh of a view that was still loading (no dimming, no entrance animation, scroll untouched)
   async function render(app, query, deps, poll = 0) {
     clearTimeout(pollTimer);
@@ -504,6 +515,7 @@
     try {
       if (pairMode) {
         const pq = new URLSearchParams({ hs: state.hs, ex: state.ex, im: state.im }); if (state.from) pq.set('from', state.from); if (state.to) pq.set('to', state.to);
+        if (retryFull) { pq.set('full', '1'); retryFull = false; }
         const [d, c] = await Promise.all([api(`/trade/pair?${pq}`), api('/trade/countries-list').catch(() => ({ countries: [] }))]);
         data = d; countryList = (c && c.countries) || [];
       } else {
@@ -548,7 +560,7 @@
           : data.source === 'importer_report' ? `${im}가 신고한 수입 통계(${ex}의 수출 신고가 없어 대체)` : `${ex}가 신고한 수출 통계`;
       const none = data.scope === 'pair' ? '선택한 기간에 두 나라의 신고 자료가 없습니다.' : `선택한 기간에 ${data.scope === 'exporter_total' ? ex : im}의 신고 자료가 없습니다.`;
       root.append(el('p', { class: 'tv-context' }, data.source === 'none' ? none : `${src} 기준입니다.${data.itemNote ? ` ${data.itemNote}` : data.seriesHs !== data.hs && !data.codeLabel ? ` UN Comtrade는 HS 6자리까지 지원하여 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
-      if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.pending ? el('span', {}, el('span', { class: 'tv-spin', 'aria-hidden': 'true' }), '처음 조회하는 조합이라 나머지 기간을 받는 중입니다. 화면이 자동으로 갱신됩니다.') : data.apiError ? `UN Comtrade에서 일부 기간을 받지 못했습니다(${data.apiError.code}). 받은 기간까지만 표시하며, 잠시 후 다시 열면 이어서 받습니다.` : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
+      if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.pending ? el('span', {}, el('span', { class: 'tv-spin', 'aria-hidden': 'true' }), '처음 조회하는 조합이라 나머지 기간을 받는 중입니다. 화면이 자동으로 갱신됩니다.') : data.apiError ? el('span', {}, `UN Comtrade에서 일부 기간을 받지 못했습니다(${data.apiError.code}). 받은 기간까지만 표시합니다. 빠진 기간만 다시 받아 볼 수 있으며, 최대 1분 정도 걸릴 수 있습니다. `, retryButton(app, query, deps)) : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
     }
     if (data.country) {
       const what = { imp: `${data.countryName}에서 들여온 수입`, exp: `${data.countryName}(으)로 보낸 수출`, net: `${data.countryName}와(과)의 수출 − 수입` }[state.flow];
