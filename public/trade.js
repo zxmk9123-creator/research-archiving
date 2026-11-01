@@ -341,12 +341,20 @@
     const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
     if (m === 'price' || pts.length > 60) {
       if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
-      if (m !== 'price' && vals.some((v) => v != null)) {
-        const first = vals.findIndex((v) => v != null); const last = vals.length - 1 - [...vals].reverse().findIndex((v) => v != null);
-        svg.append(sv('polygon', { points: `${x(first)},${y(0)} ${path(vals).join(' ')} ${x(last)},${y(0)}`, class: 'tv-area' }));
-      }
-      svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none', pathLength: '1' }));
-      vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: `tv-dot${pts[i].partial ? ' is-partial' : ''}` })); });
+      // drawn once per half: above the zero line in the series hue, below it in the net-import hue, so the area and the line change color where they cross
+      const halves = net && m !== 'price' ? [['pos', T, y(0), ''], ['neg', y(0), H - B, ' tv-neg']] : [['all', T, H - B, '']];
+      const uid = `tvclip${Math.random().toString(36).slice(2, 7)}`;
+      const defs = sv('defs');
+      halves.forEach(([id, y1, y2]) => defs.append(sv('clipPath', { id: `${uid}${id}` }, sv('rect', { x: 0, y: y1, width: W, height: Math.max(0, y2 - y1) }))));
+      svg.append(defs);
+      const first = vals.findIndex((v) => v != null); const last = vals.length - 1 - [...vals].reverse().findIndex((v) => v != null);
+      halves.forEach(([id, , , neg]) => {
+        const g = sv('g', { 'clip-path': `url(#${uid}${id})`, class: neg.trim() });
+        if (m !== 'price' && first >= 0) g.append(sv('polygon', { points: `${x(first)},${y(0)} ${path(vals).join(' ')} ${x(last)},${y(0)}`, class: 'tv-area' }));
+        g.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none', pathLength: '1' }));
+        svg.append(g);
+      });
+      vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: `tv-dot${net && v < 0 ? ' tv-dot-neg' : ''}${pts[i].partial ? ' is-partial' : ''}` })); });
     } else {
       const bw = Math.max(3, Math.min(grain === 'month' ? 20 : 36, step * 0.5));
       vals.forEach((v, i) => {
