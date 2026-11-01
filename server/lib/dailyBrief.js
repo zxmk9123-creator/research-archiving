@@ -257,7 +257,7 @@ async function countEvidenceCandidates(briefDate) {
 
 // The model sometimes answers with the format description instead of content (`"item_id":int`, `"developments":[...]`). That is not
 // parseable JSON and, unlike a random glitch, repeats on an identical prompt — so it is recognised and the next attempt says why.
-const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b/;
+const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b|A사가 B 공장|증설 소식으로 원료 수급이 빠듯|A사가 연 10만 톤|증설 일정 확정 여부/;
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
 async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null } = {}) {
@@ -315,6 +315,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     '각 후보의 중요도를 1~5 정수로 평가한다. developments는 주목할 자료 5개를 목표로 한다: 중요도 4 이상을 먼저 고르고, 5개에 못 미치면 중요도 3 자료로 채운다. 같은 사건을 다룬 자료는 하나만 고른다. 입력 자료가 5개 미만이거나 나머지가 모두 중요도 2 이하일 때만 5개 미만으로 출력하고, 무관한 자료로 억지로 채우지 않는다.',
     '각 development는 압축해서 쓴다: summary는 "누가/무엇이 + 핵심 수치"를 담은 한 문장(90자 안팎, 130자 이내), significance는 "그래서 어떤 영향인가"를 한 문장(60자 안팎, 90자 이내)이다. 배경 설명·부연·같은 말 반복 없이 수치, 주체, 영향만 쓴다. 한국어로 쓰고 끝에 온점을 붙이지 않는다. 중국어·일본어·태국어 문자를 섞지 않는다.',
     'JSON 객체만 출력한다. 모든 값은 입력 자료로 채운 실제 내용이어야 하며 `...`·`[...]`·`int` 같은 자리표시자나 생략 표기는 금지다. 형식 예시(내용은 예시를 쓰지 말고 입력 자료로 작성): {"lead":"A사가 B 공장 증설 투자를 확정했다","market_summary":"증설 소식으로 원료 수급이 빠듯해졌다. 가격 상승 압력이 커진다.","developments":[{"item_id":101,"importance":4,"summary":"A사가 연 10만 톤 규모 증설을 발표","significance":"원료 수요 확대로 가격 변동성이 커진다"}],"watchpoints":["증설 일정 확정 여부"]}',
+    '위 형식 예시의 문장(A사·B 공장·증설 등)은 구조 설명용 가짜 내용이다. 어떤 필드에도 그대로 또는 비슷하게 옮기면 안 되며, lead·market_summary·watchpoints는 반드시 입력 자료의 실제 주체·수치·지명으로 쓴다. 문장은 "~했다/~한다" 평서체로 통일하고("~했습니다" 금지), "…"로 문장을 끊거나 명사구 나열로 끝내지 않는다. market_summary는 각 development의 summary를 그대로 붙여 쓰지 말고 영향 중심으로 다시 쓴다.',
     '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 developments에 담은 자료 전체(최대 5건)를 빠짐없이 포괄한다: 자료마다 핵심 변화와 영향을 한 문장씩, 가장 시의적인 현상부터 순서대로 쓰고, 1위 자료 하나로 채우지 않는다.',
     'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead는 앞쪽 자료를 중심으로 쓰고 market_summary는 developments 전체를 아우른다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',

@@ -271,3 +271,10 @@ test('time budget: the abandoned model call is ABORTED at the provider (signal),
     assert.deepEqual(seen, [undefined], 'without a budget nothing changes: no signal is passed');
   } finally { h.restore(); }
 });
+
+test('PLACEHOLDER_OUTPUT_RE rejects the prompt example echoed back as content', () => {
+  const { PLACEHOLDER_OUTPUT_RE } = require('../server/lib/dailyBrief');
+  assert.ok(PLACEHOLDER_OUTPUT_RE.test('{"lead":"A사가 B 공장 증설 투자를 확정했다"}'));
+  assert.ok(PLACEHOLDER_OUTPUT_RE.test('"watchpoints":["증설 일정 확정 여부"]'));
+  assert.ok(!PLACEHOLDER_OUTPUT_RE.test('{"lead":"세계은행이 2026년 에너지 가격 32% 상승을 전망"}'));
+});
