@@ -49,7 +49,7 @@
 
   // ---- pieces ----
   function segmented(label, options, current, onPick) {
-    const wrap = el('div', { class: 'tv-seg', role: 'group', 'aria-label': label });
+    const wrap = el('div', { class: 'tv-seg', role: 'group', 'aria-label': label }, el('span', { class: 'tv-label', 'aria-hidden': 'true' }, label));
     for (const [value, text] of options) {
       wrap.append(el('button', { type: 'button', class: value === current ? 'is-on' : '', 'aria-pressed': String(value === current), onclick: () => onPick(value) }, text));
     }
@@ -265,6 +265,22 @@
     return card;
   }
 
+  // 운영 방침: how the numbers get here and what they do and do not claim (same collapsed-by-default pattern as the other tabs' explainers)
+  function policySection() {
+    const items = [
+      ['출처', '관세청 수출입무역통계를 공공데이터포털 Open API(품목별·품목별 국가별·국가별 수출입실적)로 받습니다. 수치는 공표값 그대로이며, 비어 있는 달을 추정치로 채우지 않습니다.'],
+      ['범위', '동식물성 유지 전 품목(HS 15류), 유지종자(대두·유채씨·해바라기씨 등), 유박(대두박 등), 바이오디젤(HS 3826)의 28개 품목군입니다. 국내 수입·수출 통관 기준입니다.'],
+      ['갱신 주기', '관세청은 월말 후 약 2주 뒤 전월 실적을 공표합니다. 매월 17일에 자동 동기화하며, 최근 1~2개월은 잠정치라 이후 수정될 수 있습니다. 동기화 때 같은 기간을 다시 받아 수정치를 반영합니다.'],
+      ['단위와 계산', '중량은 톤(공표 kg ÷ 1,000), 금액은 미 달러입니다. 단가는 금액 ÷ 중량으로 이 화면에서 계산한 값으로, 품질·조건이 다른 품목이 섞이면 실제 거래가와 다를 수 있습니다.'],
+      ['품목 분류', '가장 세부 단위(HS 10자리)로 저장하고 상위 분류는 합계로 계산합니다. 그래서 하위 품목을 모두 더하면 상위 품목과 정확히 같습니다. 국가별 통계는 관세청이 HS 6자리까지만 제공하므로 그보다 세부 품목을 고르면 상위 6자리 기준으로 보여 줍니다.'],
+      ['조회 기간', '자료가 있는 기간 안에서만 조회되며, 범위를 벗어나거나 시작·종료가 바뀐 기간은 자동으로 맞추고 그 사실을 안내합니다. 한 번에 최대 10년까지 볼 수 있습니다.'],
+      ['장애 시', '화면은 플랫폼 데이터베이스에 저장된 값만 읽습니다. 관세청 API에 장애가 있어도 마지막으로 받은 값은 그대로 보이며, 동기화 실패는 운영 알림으로 확인합니다.'],
+      ['예정', '선박 단위 해상 물동량(Kpler, 2017~2026년)을 같은 화면 구조에 추가할 예정입니다. 통관 기준(관세청)과 선적 기준(Kpler)은 시점이 달라 합산하지 않고 나란히 비교합니다.'],
+    ];
+    return el('details', { class: 'section tv-policy' }, el('summary', {}, '무역통계 운영 방침'),
+      el('dl', { class: 'tv-policy-list' }, items.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
+  }
+
   // rows under 0.5% become one "기타" row so the list shows who actually matters
   function foldSmall(rows) {
     const big = rows.filter((r) => (r.share || 0) >= 0.005).slice(0, 10);
@@ -283,7 +299,7 @@
     app.textContent = '';
     const root = el('section', { class: 'tv-root' });
     app.append(root);
-    root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다.')));
+    root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다. 품목은 이름으로 찾고 기간과 지표를 골라 보세요.'), policySection()));
     if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); return; }
     if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); return; }
 
@@ -291,7 +307,7 @@
       el('div', { class: 'tv-row tv-row-search' }, searchBox(state), await browsePanel(state)),
       breadcrumb(data, state),
       el('div', { class: 'tv-row' }, periodControls(data, state)),
-      el('div', { class: 'tv-row' },
+      el('div', { class: 'tv-row tv-switches' },
         segmented('수입·수출', [['imp', '수입'], ['exp', '수출']], state.flow, (v) => go(state, { flow: v })),
         segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가']], state.metric, (v) => go(state, { metric: v })))));
     if (data.adjusted && data.adjusted.length) root.append(el('p', { class: 'tv-notice', role: 'status' }, `${data.adjusted.map((a) => ADJUST_TEXT[a] || a).join(' · ')}.`));

@@ -3968,6 +3968,7 @@ function updateActiveNavTab(path) {
   const activeRoute = path === 'archive' || path === 'detail' ? 'archive'
     : path === 'headlines' ? 'headlines'
     : path === 'reference' ? 'reference'
+    : path === 'trade' ? 'trade'
     : path === 'sources' ? 'sources' : path === 'review' ? 'review'
     : path === 'ops' ? 'ops' : 'home';
   document.querySelectorAll('.topbar nav a[data-route]').forEach((el) => {
@@ -4106,6 +4107,7 @@ const ONBOARDING_STEPS = [
   { selector: '[data-route="headlines"]', title: '헤드라인', desc: '오늘 수집·최근 7일 내 발행된 자료 중 주목할 변화를 헤드메시지부터 자료별 인사이트까지 순서대로 확인합니다.' },
   { selector: '[data-route="archive"]', title: '자료', desc: '발행된 모든 자료를 최신순으로 모아봅니다. 뉴스/보고서 탭과 필터로 좁혀볼 수 있어요.' },
   { selector: '[data-route="reference"]', title: '레퍼런스', desc: '자동 수집 대상이 아니더라도 참고 가치가 높은 리서치/통계 출처를 모아둔 목록입니다.' },
+  { selector: '[data-route="trade"]', title: '무역통계', desc: '관세청 수출입무역통계(공공데이터포털 Open API)로 유지·유지종자·유박·바이오디젤 28개 품목군의 월별 수출입 물량·금액·단가와 상대국을 봅니다. 품목은 이름(예: 콩기름, 카놀라)으로 찾고, 품목군 → 세부 품목 → 최종 품목 순으로 좁힐 수 있어요. 자료는 매월 17일 전월분까지 자동으로 반영되며(관세청 공표가 월말 후 약 2주 걸림), 최근 월은 잠정치입니다. 공표된 수치를 그대로 쓰고 추정치로 빈칸을 채우지 않으며, 국가별 통계는 세부 품목(HS 6자리)까지만 제공됩니다.' },
   { selector: '[data-route="sources"]', title: 'Sources', desc: '자료를 수집하는 RSS·기관 소스를 등록하고 관리하는 운영자용 화면입니다.' },
   { selector: '[data-route="review"]', title: 'Review', desc: 'AI가 자동 채집·판단한 초안을 발행 전에 사람이 검수하는 화면입니다. 검수 결과는 주제가 비슷한 이후 기사 판단에 우선 참고되어 정확도가 보정됩니다.' },
   { selector: '[data-route="ops"]', title: '운영 현황', desc: '파이프라인의 실패 원인, 소스별 수집량·품질, 미검수(Draft) 적체량을 한눈에 보는 운영자용 대시보드입니다.' },
@@ -4124,6 +4126,26 @@ function startHeadlinesTour(replay = false) {
   if (replay) localStorage.removeItem(HEADLINES_TOUR_SEEN_KEY);
   if (!document.querySelector('.headline-lead h2') || !document.querySelector('.headline-story-title')) return false;
   runSpotlightTour(HEADLINES_TOUR_STEPS, HEADLINES_TOUR_SEEN_KEY);
+  return true;
+}
+
+// 무역통계 tab tour — the order a first-time user works the page: find the item by name, set the period, choose what to measure,
+// read the summary numbers, then the trend, the breakdown and the countries. Replayed from "사용 가이드" while on this tab.
+const TRADE_TOUR_SEEN_KEY = 'ra_trade_tour_seen';
+const TRADE_TOUR_STEPS = [
+  { selector: '.tv-search', title: '품목 찾기', desc: 'HS코드를 몰라도 됩니다. 팜유·콩기름·카놀라·우지·바이오디젤처럼 평소 쓰는 이름을 입력하면 해당 품목이 나와요. 칸을 누르기만 해도 자주 찾는 품목이 보입니다.' },
+  { selector: '.tv-browse > summary', title: '품목 둘러보기', desc: '식물성 기름·동물성 기름·가공 유지·원료(유지종자)·바이오연료로 묶어 놓은 목록에서 고를 수도 있습니다.' },
+  { selector: '.tv-period', title: '기간', desc: '시작월과 종료월을 고르거나 12·24·36개월, 연도 버튼을 누르세요. 자료가 있는 기간 안에서만 고를 수 있고, 범위를 벗어나면 자동으로 맞춰집니다.' },
+  { selector: '.tv-switches', title: '수입·수출과 지표', desc: '수입/수출을 바꾸고, 물량(톤)·금액(달러)·단가(달러/톤) 중 볼 지표를 고릅니다.' },
+  { selector: '.tv-tiles', title: '요약 숫자', desc: '최근 월 값과 전년 동월 대비, 직전 월 대비, 최근 12개월 합계를 먼저 확인합니다. 월별 계절성이 커서 전년 동월 비교가 기준입니다.' },
+  { selector: '.tv-tools', title: '추이 차트', desc: '막대에 마우스를 올리면 그 달의 값이 보입니다. 전년 동월 비교선을 켜고 끄거나, 표로 보거나, CSV로 내려받을 수 있어요.' },
+  { selector: '.tv-cols .tv-card', title: '구성', desc: '선택한 품목을 빠짐없이 나눈 하위 품목입니다(합계 100%). 이름을 누르면 한 단계 더 세부로 들어갑니다.' },
+  { selector: '.tv-cols .tv-card + .tv-card', title: '상대국', desc: '선택 기간 동안 어느 나라와 얼마나 거래했는지 비중으로 보여줍니다.' },
+];
+function startTradeTour(replay = false) {
+  if (replay) localStorage.removeItem(TRADE_TOUR_SEEN_KEY);
+  if (!document.querySelector('.tv-search') || !document.querySelector('.tv-tiles')) return false;
+  runSpotlightTour(TRADE_TOUR_STEPS, TRADE_TOUR_SEEN_KEY);
   return true;
 }
 
@@ -4276,7 +4298,10 @@ async function routeToPage() {
     else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
     else if (path === 'reference') await renderReference(query);
-    else if (path === 'trade') await renderTrade(query);
+    else if (path === 'trade') {
+      await renderTrade(query);
+      if (initialRouteToursReady && !localStorage.getItem(TRADE_TOUR_SEEN_KEY)) startTradeTour();
+    }
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
     else if (path === 'ops') await renderOps();
@@ -4375,6 +4400,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const path = parseHash().path || 'home';
     if (path === 'home') startHomeTour();
     else if (path === 'headlines') startHeadlinesTour();
+    else if (path === 'trade') startTradeTour();
   });
 
   // "사용 가이드" link (top-right of the topbar): replays whichever tour
@@ -4407,6 +4433,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     } else if (path === 'reference') {
       localStorage.removeItem(REFERENCE_TOUR_SEEN_KEY);
       startReferenceTour();
+    } else if (path === 'trade') {
+      if (!startTradeTour(true)) {
+        const step = ONBOARDING_STEPS.find((item) => item.selector === '[data-route="trade"]');
+        runSpotlightTour([step], 'ra_tab_info_seen_trade');
+      }
     } else {
       const step = ONBOARDING_STEPS.find((s) => s.selector === `[data-route="${path}"]`);
       if (step) {
