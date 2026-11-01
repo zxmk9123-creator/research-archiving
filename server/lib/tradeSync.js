@@ -32,17 +32,33 @@ async function ensureTable(db = pool) {
     PRIMARY KEY (source, hs_code, period, country_code))`);
 }
 
-async function upsertRows(db, hs, rows, withCountry) {
-  let n = 0;
+// The API answers per sub-code (HS10 / HS6) and per country: several rows share one month. The heading's figure is their SUM, so rows are folded
+// per (month, country) before storing; otherwise the last row would overwrite the others.
+function foldRows(rows, withCountry) {
+  const add = (a, b) => (a == null && b == null ? null : (a || 0) + (b || 0));
+  const map = new Map();
   for (const r of rows) {
     const country = withCountry ? (r.countryCode || '') : '';
     if (withCountry && !country) continue;
+    const key = `${r.period}|${country}`;
+    const cur = map.get(key) || { period: r.period, countryCode: country, countryName: withCountry ? r.countryName : null, impWgt: null, impAmt: null, expWgt: null, expAmt: null };
+    cur.impWgt = add(cur.impWgt, r.impWgt); cur.impAmt = add(cur.impAmt, r.impAmt);
+    cur.expWgt = add(cur.expWgt, r.expWgt); cur.expAmt = add(cur.expAmt, r.expAmt);
+    map.set(key, cur);
+  }
+  return [...map.values()];
+}
+
+async function upsertRows(db, hs, rawRows, withCountry) {
+  let n = 0;
+  for (const r of foldRows(rawRows, withCountry)) {
+    const country = r.countryCode;
     await db.query(
       `INSERT INTO trade_flow (source, hs_code, period, country_code, country_name, imp_wgt, imp_amt, exp_wgt, exp_amt)
        VALUES ('customs',$1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (source, hs_code, period, country_code) DO UPDATE SET country_name = EXCLUDED.country_name, imp_wgt = EXCLUDED.imp_wgt,
          imp_amt = EXCLUDED.imp_amt, exp_wgt = EXCLUDED.exp_wgt, exp_amt = EXCLUDED.exp_amt, fetched_at = now()`,
-      [hs, r.period, country, withCountry ? r.countryName : null, r.impWgt, r.impAmt, r.expWgt, r.expAmt],
+      [hs, r.period, country, r.countryName, r.impWgt, r.impAmt, r.expWgt, r.expAmt],
     );
     n++;
   }
@@ -82,4 +98,4 @@ async function runTradeSync({ mode = 'sync', months = 24, now = new Date(), call
   return report;
 }
 
-module.exports = { OILS, monthWindows, runTradeSync, ensureTable };
+module.exports = { foldRows, OILS, monthWindows, runTradeSync, ensureTable };
