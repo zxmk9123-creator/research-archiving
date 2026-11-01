@@ -2905,7 +2905,10 @@ async function renderTrade(query = {}) {
   const hasRows = rows.length >= 2;
   const tonChart = hasRows ? chart({ title: `${ser.name} 월별 수입량`, unit: '톤', type: 'bar', labels: rows.map((r) => label(r.period)), series: [{ name: '수입량', data: rows.map((r) => (r.impTon == null ? null : Math.round(r.impTon))) }] }) : empty;
   const priceChart = hasRows ? chart({ title: `${ser.name} 수입 단가`, unit: '달러/톤', type: 'line', labels: rows.map((r) => label(r.period)), series: [{ name: '단가', data: rows.map((r) => r.unitPrice) }] }) : empty;
-  const cs = (cty.countries || []).slice(0, 8);
+  // countries under 0.5% are folded into one "기타" bar so the chart shows who actually matters
+  const big = (cty.countries || []).filter((c) => (c.share || 0) >= 0.005).slice(0, 8);
+  const rest = 1 - big.reduce((a, c) => a + (c.share || 0), 0);
+  const cs = rest >= 0.005 && big.length ? [...big, { name: '기타', share: rest }] : big;
   const through = cty.through ? `, ${cty.through.slice(0, 4)}.${cty.through.slice(4)}까지` : '';
   const share = cs.length >= 2 ? chart({ title: `${ser.name} 수입 국가 비중 (최근 12개월${through})`, unit: '%', type: 'hbar', labels: cs.map((c) => c.name), series: [{ name: '비중', data: cs.map((c) => Math.round((c.share || 0) * 1000) / 10) }] }) : empty;
   app.innerHTML = `<section class="section"><div class="section-header"><h2>무역통계</h2></div>
