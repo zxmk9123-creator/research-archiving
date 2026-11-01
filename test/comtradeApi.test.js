@@ -92,11 +92,11 @@ test('loadPair: fetches once per year, then answers from the cache; exporter sou
   assert.equal(calls.length, 3, 'nothing fetched the second time'); assert.equal(again.series.length, 21);
 });
 
-test('loadPair: years are fetched in parallel (four at a time), not one after another', async () => {
+test('loadPair: years are fetched in parallel (two at a time), not one after another', async () => {
   let running = 0; let peak = 0;
   const call = async (p) => { running++; peak = Math.max(peak, running); await new Promise((r) => setTimeout(r, 25)); running--; return { ok: true, code: 'ok', calls: 1, rows: answer(p, 1000) }; };
   await loadPair({ ex: 360, im: 699, hs: '1511', from: '202301', to: '202609' }, { call, db: fakeDb(), now: NOW });
-  assert.ok(peak >= 3 && peak <= 4, `peak concurrency ${peak}`);
+  assert.ok(peak === 2, `peak concurrency ${peak}`);
 });
 
 test('loadPair: several items share one call per year (an item group asks its HS6 codes together)', async () => {
@@ -197,4 +197,17 @@ test('item groups: what Comtrade and the country breakdown can and cannot separa
   assert.deepEqual(groupById('COTTONSEED').comtrade.cmds, ['151221', '151229']);
   assert.equal(groupById('MUSTARD').comtrade, null); assert.equal(groupById('SAFFLOWER').country, null);
   assert.ok(groupById('RAPESEED').comtrade.note.includes('겨자유'));
+});
+
+test('callComtrade waits out a short 429 and retries; gives up on a long one', async () => {
+  const { callComtrade } = require('../server/lib/comtradeApi');
+  const env = { UN_CONTRADE: 'k' };
+  let n = 0; const waits = [];
+  const ok = { ok: true, status: 200, headers: new Map(), text: async () => JSON.stringify({ data: [] }) };
+  const f = async () => (++n === 1 ? { ok: false, status: 429, headers: { get: () => '1' }, text: async () => '{"message":"Rate limit"}' } : ok);
+  const r = await callComtrade({ freq: 'M', reporter: 124, partner: 0, flow: 'X', cmd: '1514', periods: ['202301'] }, { fetchImpl: f, env, wait: async (ms) => waits.push(ms) });
+  assert.equal(r.ok, true); assert.deepEqual(waits, [1000]);
+  const long = async () => ({ ok: false, status: 429, headers: { get: () => '60' }, text: async () => '{}' });
+  const r2 = await callComtrade({ freq: 'M', reporter: 124, partner: 0, flow: 'X', cmd: '1514', periods: ['202301'] }, { fetchImpl: long, env, wait: async () => {} });
+  assert.equal(r2.code, 'rate_limited');
 });

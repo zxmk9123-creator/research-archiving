@@ -28,10 +28,19 @@ function parseComtrade(body) {
 }
 
 // One logical request over many periods. params = { freq:'M'|'A', reporter, partner, flow:'X'|'M', cmd, periods:[...] }.
-async function callComtrade(params, { fetchImpl = fetch, env = process.env, batch = 12 } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// seconds to wait before retrying: the Retry-After header, else "... in N seconds" from the message, else 2 s
+function retryDelayMs(res, msg) {
+  const h = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
+  const m = Number.isFinite(h) && h > 0 ? h : Number((String(msg).match(/in\s+(\d+)\s+second/i) || [])[1]);
+  return (Number.isFinite(m) && m > 0 ? m : 2) * 1000;
+}
+const MAX_RETRY_WAIT_MS = 6000;
+
+async function callComtrade(params, { fetchImpl = fetch, env = process.env, batch = 12, wait = sleep } = {}) {
   const key = comtradeKey(env);
   if (!key) return { ok: false, code: 'no_key', message: 'UN_CONTRADE is not set', rows: [], calls: 0 };
-  const rows = []; let calls = 0; let size = Math.max(1, batch);
+  const rows = []; let calls = 0; let size = Math.max(1, batch); let retries = 0;
   const todo = [...params.periods];
   while (todo.length) {
     const part = todo.slice(0, size);
@@ -49,6 +58,10 @@ async function callComtrade(params, { fetchImpl = fetch, env = process.env, batc
     const max = msg.match(/Maximum number of periods[^0-9]*(\d+)/i);
     if (res.status === 400 && max && Number(max[1]) >= 1 && Number(max[1]) < size) { size = Number(max[1]); calls--; continue; } // smaller batch, same call count basis
     if (res.status === 401 || res.status === 403) return { ok: false, code: 'auth', status: res.status, message: 'the subscription key was refused', rows, calls };
+    if (res.status === 429 && retries < 2) {
+      const ms = retryDelayMs(res, msg);
+      if (ms <= MAX_RETRY_WAIT_MS) { retries++; await wait(ms); continue; } // short limit: wait it out, then ask again
+    }
     if (res.status === 429) return { ok: false, code: 'rate_limited', status: 429, message: msg, rows, calls };
     if (!res.ok) return { ok: false, code: 'http_error', status: res.status, message: msg, rows, calls };
     rows.push(...parseComtrade(body));

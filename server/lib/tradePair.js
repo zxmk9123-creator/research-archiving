@@ -23,7 +23,7 @@ function ensureTables(db = pool) {
 }
 
 const DAY = 86400000;
-const LIMITS = { maxCalls: 12, budgetMs: 40000, concurrency: 4, quickTasks: 2, backgroundCalls: 40 };
+const LIMITS = { maxCalls: 12, budgetMs: 40000, concurrency: 2, quickTasks: 2, backgroundCalls: 40 };
 // the newest month the API can plausibly have is two months back; older years never change once fetched, the open years refresh
 const latestMonth = (now) => Q.addMonths(`${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`, -2);
 const isStale = (year, fetchedAt, now) => now.getTime() - new Date(fetchedAt).getTime() > (year >= now.getUTCFullYear() - 1 ? 20 * DAY : 400 * DAY);
@@ -84,10 +84,10 @@ async function runTasks(db, call, ctx, now, base, tasks, { maxCalls = LIMITS.max
   const take = Math.max(0, maxCalls - ctx.calls);
   const now_ = tasks.slice(0, take); const left = tasks.slice(take);
   await mapLimit(now_, LIMITS.concurrency, async (t) => {
-    if (Date.now() > ctx.deadline) { left.push(t); return; }
+    if (Date.now() > ctx.deadline || ctx.limited) { left.push(t); return; } // rate limited: stop asking, the rest stays uncovered and is retried later
     const r = await fetchTask(db, call, now, base, t);
     ctx.calls += r.calls;
-    if (!r.ok) { ctx.error = r.error; ctx.failed = true; }
+    if (!r.ok) { ctx.error = r.error; ctx.failed = true; if (r.error && r.error.code === 'rate_limited') ctx.limited = true; }
   });
   return { left };
 }
