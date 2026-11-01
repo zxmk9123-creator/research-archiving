@@ -13,6 +13,12 @@ on:
       months:
         description: 'months of history to (re)fetch per item (36 = monthly refresh; up to 360 for a backfill)'
         default: '36'
+      country_months:
+        description: 'months of per-country history to (re)fetch (default = same as months; set 1 for an item-only pass)'
+        default: ''
+      offset:
+        description: 'first item index to process (resume a backfill that stopped part-way)'
+        default: '0'
       limit:
         description: 'items per call (use 1 for a deep backfill so each call fits the time limit)'
         default: '6'
@@ -35,22 +41,31 @@ jobs:
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
           MODE: ${{ github.event.inputs.mode || 'sync' }}
           MONTHS: ${{ github.event.inputs.months || '36' }}
+          COUNTRY_MONTHS: ${{ github.event.inputs.country_months || github.event.inputs.months || '36' }}
+          START_OFFSET: ${{ github.event.inputs.offset || '0' }}
           LIMIT: ${{ github.event.inputs.limit || '6' }}
           PROBE_FROM: ${{ github.event.inputs.probe_from || '' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
           case "$MODE" in probe|sync) ;; *) MODE=sync ;; esac
-          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1&months=$MONTHS&country_months=$MONTHS&limit=$LIMIT&probe_from=$PROBE_FROM" || true; }
+          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1&months=$MONTHS&country_months=$COUNTRY_MONTHS&limit=$LIMIT&probe_from=$PROBE_FROM" || true; }
           if [ "$MODE" = "probe" ]; then
             code=$(call 0); echo "HTTP $code"; head -c 3000 out.json; echo
             [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code"; exit 1; }
             exit 0
           fi
           # sync runs in batches of a few headings per call (each call must finish inside the function limit); the response names the next offset
-          offset=0; errors=0
+          offset="$START_OFFSET"; errors=0; tries=0
           while [ -n "$offset" ] && [ "$offset" != "null" ]; do
             code=$(call "$offset"); echo "offset $offset: HTTP $code"; head -c 600 out.json; echo
-            [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code at offset $offset"; exit 1; }
+            if [ "$code" != "200" ]; then
+              # a timed-out or failed call is retried (what was stored stays stored); after 2 retries that item is skipped, not the whole run
+              tries=$((tries + 1))
+              if [ "$tries" -le 2 ]; then sleep 5; continue; fi
+              echo "::warning::skipping offset $offset after HTTP $code"; errors=$((errors + 1)); tries=0; offset=$((offset + LIMIT))
+              [ "$offset" -ge 200 ] && break; continue
+            fi
+            tries=0
             jq -e '.ok == true' out.json >/dev/null 2>&1 || errors=$((errors + 1))
             offset=$(jq -r '.next' out.json)
           done
