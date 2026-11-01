@@ -3,7 +3,7 @@
 // year-over-year). Idempotent: years already cached (and not stale) cost nothing, so it can run weekly and resume after an interruption.
 const pool = require('../db/pool');
 const { callComtrade } = require('./comtradeApi');
-const { ensureTables, planYears, runTasks, LIMITS } = require('./tradePair');
+const { ensureTables, planYears, runTasks, drainRetries, LIMITS } = require('./tradePair');
 
 // 4-digit headings for the main views, and the 6-digit codes behind the item groups (유채유 / 해바라기유 / 면실유)
 const BATCHES = [['1511', '1507', '1514', '1512', '1513', '1201', '1205'], ['151411', '151419', '151211', '151219', '151221', '151229']];
@@ -23,6 +23,7 @@ async function runWarm({ offset = 0, limit = 6, now = new Date(), call = (p) => 
   const y1 = now.getUTCFullYear(); const list = Array.from({ length: years }, (_, i) => y1 - i);
   const ctx = { calls: 0, deadline: Date.now() + 240000, error: null, failed: false };
   const errors = [];
+  if (offset === 0) await drainRetries({ db, call, now, limit: 10, force: true }).catch((e) => errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`)); // failed years first
   for (const base of COMBOS.slice(offset, offset + limit)) {
     for (const cmds of BATCHES) {
       const tasks = await planYears(db, now, base, cmds, list);

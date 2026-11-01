@@ -326,6 +326,7 @@ router.get('/pair', async (req, res) => {
     }
     // fast: answer after the first years and let the rest load in the background (the page asks again until nothing is pending)
     const r = await loadPair({ ex, im, hs, cmds: group ? group.comtrade.cmds : null, from, to }, { fast: req.query.full !== '1' });
+    track(require('../lib/tradePair').drainRetries().catch((e) => console.error('comtrade retry failed:', e.message))); // earlier failures get another try whenever someone asks
     if (r.pending) track(r.continueLoading().catch((e) => console.error('pair background fill failed:', e.message)));
     const chain = group ? ['15', group.parent] : [2, 4, 6].filter((n) => n <= hs.length).map((n) => hs.slice(0, n));
     const cn = await names(chain.concat(!group && hs.length > 6 ? [hs] : []));

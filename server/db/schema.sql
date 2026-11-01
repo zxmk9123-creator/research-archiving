@@ -1410,3 +1410,7 @@ CREATE TABLE IF NOT EXISTS trade_bilateral_cov (
   reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, year INTEGER NOT NULL,
   rows INTEGER NOT NULL DEFAULT 0, fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (reporter, partner, flow, cmd, year)
 );
+CREATE TABLE IF NOT EXISTS trade_bilateral_retry (
+  reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, year INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1, next_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_error TEXT, PRIMARY KEY (reporter, partner, flow, cmd, year)
+);

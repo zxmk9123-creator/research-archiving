@@ -1,10 +1,10 @@
 name: Comtrade warm-up
 
 # Pre-fills the UN Comtrade cache with the most-opened series (country totals, main item pairs) so first views are already stored.
-# Weekly (Monday 18:30 UTC = Tuesday 03:30 KST) and on demand. Resumable: years already cached cost nothing.
+# Daily (18:30 UTC = 03:30 KST; retries the queued failed years first) and on demand. Resumable: years already cached cost nothing.
 on:
   schedule:
-    - cron: '30 18 * * 1'
+    - cron: '30 18 * * *'
   workflow_dispatch:
     inputs:
       offset:

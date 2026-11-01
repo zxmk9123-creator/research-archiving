@@ -58,11 +58,14 @@ test('pickSource: exporter report first, importer mirror only when the exporter 
 
 // a tiny in-memory stand-in for the two cache tables
 function fakeDb() {
-  const bil = new Map(); const cov = new Map();
+  const bil = new Map(); const cov = new Map(); const retry = new Map();
   return {
-    bil, cov,
+    bil, cov, retry,
     async query(sql, a) {
       if (/^CREATE TABLE/.test(sql)) return { rows: [] };
+      if (/INSERT INTO trade_bilateral_retry/.test(sql)) { const k = a.slice(0, 5).join('|'); retry.set(k, (retry.get(k) || 0) + 1); return { rows: [] }; }
+      if (/DELETE FROM trade_bilateral_retry/.test(sql)) { for (const c of a[4]) retry.delete([a[0], a[1], a[2], c, a[3]].join('|')); return { rows: [] }; }
+      if (/FROM trade_bilateral_retry/.test(sql)) return { rows: [...retry.keys()].map((k) => { const [reporter, partner, flow, cmd, year] = k.split('|'); return { reporter, partner, flow, cmd, year }; }) };
       if (/FROM trade_bilateral_cov/.test(sql)) {
         const [r, p, f, cmds, years] = a;
         return { rows: [...cov.entries()].filter(([k]) => { const [kr, kp, kf, kc, ky] = k.split('|'); return Number(kr) === r && Number(kp) === p && kf === f && cmds.includes(kc) && years.includes(Number(ky)); })
@@ -210,4 +213,17 @@ test('callComtrade waits out a short 429 and retries; gives up on a long one', a
   const long = async () => ({ ok: false, status: 429, headers: { get: () => '60' }, text: async () => '{}' });
   const r2 = await callComtrade({ freq: 'M', reporter: 124, partner: 0, flow: 'X', cmd: '1514', periods: ['202301'] }, { fetchImpl: long, env, wait: async () => {} });
   assert.equal(r2.code, 'rate_limited');
+});
+
+test('a failed year is queued, retried by drainRetries when due, and leaves the queue once it succeeds', async () => {
+  const { drainRetries } = require('../server/lib/tradePair');
+  const db = fakeDb(); const q = { ex: 360, im: 699, hs: '1511', from: '202601', to: '202609' };
+  const bad = async () => ({ ok: false, code: 'network', calls: 1, message: 'x' });
+  const r = await loadPair(q, { call: bad, db, now: NOW });
+  assert.equal(r.incomplete, true); assert.ok(db.retry.size > 0, 'failure queued');
+  const calls = [];
+  const d = await drainRetries({ db, call: okCall(calls), now: NOW, force: true, limit: 5 });
+  assert.ok(d.tasks > 0 && calls.length > 0); assert.equal(db.retry.size, 0, 'queue emptied');
+  const again = await loadPair(q, { call: okCall(calls), db, now: NOW });
+  assert.equal(again.incomplete, false);
 });

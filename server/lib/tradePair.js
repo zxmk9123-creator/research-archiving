@@ -15,6 +15,10 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS trade_bilateral_cov (
     reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, year INTEGER NOT NULL,
     rows INTEGER NOT NULL DEFAULT 0, fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (reporter, partner, flow, cmd, year))`,
+  // years whose fetch failed: retried with backoff when later requests arrive (drainRetries) and by the daily warm-up
+  `CREATE TABLE IF NOT EXISTS trade_bilateral_retry (
+    reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, year INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 1, next_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_error TEXT, PRIMARY KEY (reporter, partner, flow, cmd, year))`,
 ];
 const ensured = new WeakMap();
 function ensureTables(db = pool) {
@@ -60,7 +64,17 @@ function fetchTask(db, call, now, base, task) {
     const last = latestMonth(now);
     const periods = Array.from({ length: 12 }, (_, i) => `${task.year}${String(i + 1).padStart(2, '0')}`).filter((p) => p <= last);
     const r = await call({ freq: 'M', reporter: base.reporter, partner: base.partner, flow: base.flow, cmd: task.cmds.join(','), periods });
-    if (!r.ok) return { ok: false, calls: Math.max(1, r.calls || 1), error: { code: r.code, message: r.message } };
+    if (!r.ok) {
+      // remember the failure so the year is retried later (backoff 2, 4, 8 ... up to 360 minutes); best effort, never blocks the answer
+      for (const cmd of task.cmds) {
+        await db.query(
+          `INSERT INTO trade_bilateral_retry (reporter, partner, flow, cmd, year, last_error, next_at) VALUES ($1,$2,$3,$4,$5,$6, now() + interval '2 minutes')
+           ON CONFLICT (reporter, partner, flow, cmd, year) DO UPDATE SET attempts = trade_bilateral_retry.attempts + 1, last_error = EXCLUDED.last_error,
+             next_at = now() + make_interval(mins => LEAST(360, power(2, LEAST(trade_bilateral_retry.attempts + 1, 9))::int))`,
+          [base.reporter, base.partner, base.flow, cmd, task.year, String(r.code).slice(0, 40)]).catch(() => {});
+      }
+      return { ok: false, calls: Math.max(1, r.calls || 1), error: { code: r.code, message: r.message } };
+    }
     const counts = new Map(task.cmds.map((c) => [c, 0]));
     for (const x of r.rows) {
       if (!counts.has(x.cmd)) continue;
@@ -75,8 +89,30 @@ function fetchTask(db, call, now, base, task) {
         `INSERT INTO trade_bilateral_cov (reporter, partner, flow, cmd, year, rows) VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (reporter, partner, flow, cmd, year) DO UPDATE SET rows = EXCLUDED.rows, fetched_at = now()`, [base.reporter, base.partner, base.flow, cmd, task.year, rows]);
     }
+    await db.query('DELETE FROM trade_bilateral_retry WHERE reporter=$1 AND partner=$2 AND flow=$3 AND year=$4 AND cmd = ANY($5::text[])',
+      [base.reporter, base.partner, base.flow, task.year, task.cmds]).catch(() => {});
     return { ok: true, calls: Math.max(1, r.calls || 1) };
   });
+}
+
+// Retry failed years that are due. Called after a request is answered (so traffic itself drives the retries; at most once a minute per process)
+// and at the start of the daily warm-up. Stops at the first rate limit. Returns { tasks, calls, left }.
+let lastDrain = 0;
+async function drainRetries({ db = pool, call = (p) => callComtrade(p), now = new Date(), limit = 2, force = false } = {}) {
+  if (!force && Date.now() - lastDrain < 60000) return { tasks: 0, calls: 0, left: 0, skipped: true };
+  lastDrain = Date.now();
+  await ensureTables(db);
+  const { rows } = await db.query('SELECT reporter, partner, flow, cmd, year FROM trade_bilateral_retry WHERE next_at <= now() ORDER BY next_at LIMIT 40');
+  const groups = new Map();
+  for (const x of rows) {
+    const k = `${x.reporter}|${x.partner}|${x.flow}|${x.year}`;
+    const g = groups.get(k) || { base: { reporter: Number(x.reporter), partner: Number(x.partner), flow: x.flow }, task: { year: Number(x.year), cmds: [] } };
+    g.task.cmds.push(x.cmd); groups.set(k, g);
+  }
+  const ctx = { calls: 0, deadline: Date.now() + 120000, error: null, failed: false };
+  const picked = [...groups.values()].slice(0, limit);
+  for (const g of picked) { if (ctx.limited) break; await runTasks(db, call, ctx, now, g.base, [g.task], { maxCalls: 1000 }); }
+  return { tasks: picked.length, calls: ctx.calls, left: groups.size - picked.length, failed: ctx.failed };
 }
 
 // Run tasks in parallel within a call budget. Returns { done, left } (left = tasks not started because of the budget or the deadline).
@@ -170,4 +206,4 @@ async function loadPair(q, { call = (p) => callComtrade(p), db = pool, now = new
   };
 }
 
-module.exports = { loadPair, pickSource, ensureTables, latestMonth, planYears, runTasks, fetchTask, mapLimit, LIMITS };
+module.exports = { drainRetries, loadPair, pickSource, ensureTables, latestMonth, planYears, runTasks, fetchTask, mapLimit, LIMITS };
