@@ -10,9 +10,10 @@ const col = (flow) => (flow === 'exp' ? { wgt: 'exp_wgt', amt: 'exp_amt' } : { w
 const num = (v) => (v == null ? null : Number(v));
 const like = (hs) => `${hs}%`;
 
-async function latestPeriod() {
-  const { rows } = await pool.query("SELECT max(period) AS p FROM trade_flow WHERE source = 'customs' AND country_code = ''");
-  return rows[0] && rows[0].p ? String(rows[0].p) : null;
+// the months the data covers: the period picker and the clamp both use these
+async function periodBounds() {
+  const { rows } = await pool.query("SELECT min(period) AS lo, max(period) AS hi FROM trade_flow WHERE source = 'customs' AND country_code = ''");
+  return rows[0] && rows[0].hi ? { min: String(rows[0].lo), max: String(rows[0].hi) } : null;
 }
 async function names(codes) {
   if (!codes.length) return new Map();
@@ -33,9 +34,10 @@ async function loadSeriesRows(hs, flow, from, to) {
 router.get('/dashboard', async (req, res) => {
   try {
     await ensureTable(pool);
-    const latest = await latestPeriod();
-    if (!latest) return res.json({ empty: true });
-    const parsed = Q.parseQuery(req.query, latest);
+    const bounds = await periodBounds();
+    if (!bounds) return res.json({ empty: true });
+    const latest = bounds.max;
+    const parsed = Q.parseQuery(req.query, bounds);
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
     const { hs, flow, from, to } = parsed.value;
     const c = col(flow);
@@ -71,7 +73,7 @@ router.get('/dashboard', async (req, res) => {
     const cn = await names(chain);
     res.set('Cache-Control', 'private, max-age=60');
     res.json({
-      hs, flow, from, to, latest, name: cn.get(hs) || null,
+      hs, flow, from, to, latest, bounds, adjusted: parsed.adjusted, name: cn.get(hs) || null,
       breadcrumb: chain.map((code) => ({ code, name: cn.get(code) || null })),
       kpis, series, children, countries, countryScope: cs, countryCoverage: covered,
     });
@@ -81,29 +83,53 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-// Find an item by code prefix or name.
+// Find an item the way people think of it: everyday words first (콩기름 -> 대두유), then catalog names, then codes. Each result carries its
+// parent heading so a 10-digit line reads "팜유 › 정제한 것" instead of a bare code.
+const { ALIASES, GROUPS, HS_NAMES } = require('../lib/hsNames');
+const norm = (t) => String(t || '').toLowerCase().replace(/[\s·,()]/g, '');
 router.get('/search', async (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 40);
-  if (q.length < 1) return res.json({ results: [] });
+  if (!q) return res.json({ results: [] });
   try {
     await ensureTable(pool);
+    const nq = norm(q);
+    const scored = new Map(); // code -> score (higher first)
+    const bump = (code, score) => { if (!scored.has(code) || scored.get(code) < score) scored.set(code, score); };
+    for (const [word, codes] of Object.entries(ALIASES)) {
+      const nw = norm(word);
+      if (nw === nq) codes.forEach((c, i) => bump(c, 100 - i));
+      else if (nw.startsWith(nq) || (nq.length >= 2 && nq.includes(nw))) codes.forEach((c, i) => bump(c, 80 - i));
+    }
     const isCode = /^\d+$/.test(q);
     const { rows } = isCode
-      ? await pool.query('SELECT hs_code, name, level FROM hs_catalog WHERE hs_code LIKE $1 ORDER BY level, hs_code LIMIT 20', [`${q}%`])
-      : await pool.query("SELECT hs_code, name, level FROM hs_catalog WHERE name ILIKE $1 ORDER BY level, hs_code LIMIT 20", [`%${q.replace(/[%_\\]/g, '')}%`]);
-    res.json({ results: rows.map((r) => ({ code: r.hs_code, name: r.name, level: r.level })) });
+      ? await pool.query('SELECT hs_code, name, level FROM hs_catalog WHERE hs_code LIKE $1 ORDER BY level, hs_code LIMIT 30', [`${q}%`])
+      : await pool.query("SELECT hs_code, name, level FROM hs_catalog WHERE replace(name, ' ', '') ILIKE $1 ORDER BY level, hs_code LIMIT 30", [`%${q.replace(/[%_\\\s]/g, '')}%`]);
+    for (const r of rows) bump(r.hs_code, isCode ? 60 - r.level : 50 - r.level);
+    const codes = [...scored.keys()];
+    const parents = [...new Set(codes.flatMap((c) => [c.slice(0, 4), c.slice(0, 2)]))];
+    const nm = await names([...new Set([...codes, ...parents])]);
+    const label = (c) => nm.get(c) || HS_NAMES[c] || null;
+    const results = codes.sort((a, b) => scored.get(b) - scored.get(a) || a.length - b.length || a.localeCompare(b)).slice(0, 12)
+      .map((c) => ({ code: c, name: label(c), level: c.length, parent: c.length > 4 ? label(c.slice(0, 4)) : c.length === 4 ? label(c.slice(0, 2)) : null }));
+    res.json({ results });
   } catch (err) {
     console.error('GET /api/trade/search failed:', err.message);
     res.status(500).json({ error: 'trade_unavailable' });
   }
 });
 
+// Browse without codes: plain-language groups of headings.
+router.get('/groups', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.json({ groups: GROUPS.map((g) => ({ name: g.name, items: g.codes.map((c) => ({ code: c, name: HS_NAMES[c] || c })) })) });
+});
+
 // CSV of the monthly series for the current selection (UTF-8 with BOM so Excel reads Korean text).
 router.get('/export.csv', async (req, res) => {
   try {
     await ensureTable(pool);
-    const latest = await latestPeriod();
-    const parsed = latest ? Q.parseQuery(req.query, latest) : { ok: false, error: 'no_data' };
+    const bounds = await periodBounds();
+    const parsed = bounds ? Q.parseQuery(req.query, bounds) : { ok: false, error: 'no_data' };
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
     const { hs, flow, from, to } = parsed.value;
     const series = Q.buildSeries(await loadSeriesRows(hs, flow, from, to), from, to);

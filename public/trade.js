@@ -4,8 +4,8 @@
 (function () {
   'use strict';
   const SVG = 'http://www.w3.org/2000/svg';
-  const PRESETS = [['15', '유지 전체'], ['1511', '팜유'], ['1507', '대두유'], ['1514', '유채유'], ['1512', '해바라기유'], ['1513', '야자·팜핵유'], ['3826', '바이오디젤']];
-  const LEVEL_LABEL = { 2: '류(2자리)', 4: '호(4자리)', 6: '소호(6자리)', 8: '8자리', 10: '품목(10자리)' };
+  // plain words for HS levels; the code itself stays secondary
+  const LEVEL_LABEL = { 2: '대분류', 4: '품목군', 6: '세부 품목', 8: '세부 품목', 10: '최종 품목' };
   const METRICS = { ton: ['물량', '톤'], usd: ['금액', '달러'], price: ['단가', '달러/톤'] };
   let api = (p) => fetch(`/api${p}`).then((r) => r.json());
 
@@ -61,49 +61,102 @@
     nav.append(el('a', { href: href(state, { hs: '15' }) }, '유지 전체'));
     for (const c of data.breadcrumb) {
       if (c.code === '15') continue;
-      nav.append(el('span', { 'aria-hidden': 'true' }, ' › '), el('a', { href: href(state, { hs: c.code }), 'aria-current': c.code === data.hs ? 'page' : null }, c.name ? `${c.name} ` : '', el('small', {}, c.code)));
+      nav.append(el('span', { 'aria-hidden': 'true' }, ' › '), el('a', { href: href(state, { hs: c.code }), 'aria-current': c.code === data.hs ? 'page' : null }, c.name || c.code));
     }
     return nav;
   }
 
+  // Search by everyday words (콩기름, 카놀라, 바이오디젤 ...) or a code; arrow keys + Enter; an empty focus shows what people look for most.
+  const POPULAR = [['1511', '팜유'], ['1507', '대두유(콩기름)'], ['1514', '유채유(카놀라)'], ['1512', '해바라기유'], ['1502', '우지(소기름)'], ['3826', '바이오디젤']];
   function searchBox(state) {
-    const input = el('input', { type: 'search', class: 'tv-search', placeholder: 'HS코드 또는 품목명 검색 (예: 1511, 대두)', 'aria-label': '품목 검색', autocomplete: 'off' });
-    const list = el('ul', { class: 'tv-suggest', role: 'listbox', hidden: true });
-    let timer;
+    const listId = 'tv-suggest-list';
+    const input = el('input', { type: 'search', class: 'tv-search', placeholder: '품목 이름으로 찾기 — 예: 팜유, 콩기름, 카놀라, 바이오디젤', 'aria-label': '품목 검색', autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false', 'aria-controls': listId, 'aria-autocomplete': 'list' });
+    const list = el('ul', { class: 'tv-suggest', role: 'listbox', id: listId, hidden: true });
+    let items = []; let active = -1; let timer; let seq = 0;
+    const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+    const highlight = (i) => {
+      items.forEach((li, k) => li.setAttribute('aria-selected', String(k === i)));
+      active = i;
+      if (items[i]) { items[i].scrollIntoView({ block: 'nearest' }); input.setAttribute('aria-activedescendant', items[i].id); }
+    };
+    const fill = (title, rows) => {
+      list.textContent = ''; items = [];
+      if (title) list.append(el('li', { class: 'tv-suggest-h', role: 'presentation' }, title));
+      rows.forEach((r, k) => {
+        const li = el('li', { role: 'option', id: `tv-opt-${k}`, 'aria-selected': 'false', onmousedown: (e) => { e.preventDefault(); go(state, { hs: r.code }); } },
+          el('span', { class: 'tv-opt-name' }, r.name || r.code),
+          r.parent ? el('span', { class: 'tv-opt-path' }, r.parent) : null,
+          el('span', { class: 'tv-opt-code' }, `${LEVEL_LABEL[r.level || r.code.length] || ''} · ${r.code}`));
+        items.push(li); list.append(li);
+      });
+      if (!rows.length) list.append(el('li', { class: 'tv-suggest-empty', role: 'presentation' }, '찾는 품목이 없습니다. 다른 이름(예: 콩기름 → 대두유)이나 아래 "품목 둘러보기"를 이용해 보세요.'));
+      list.hidden = false; input.setAttribute('aria-expanded', 'true'); active = -1;
+    };
+    const showPopular = () => fill('자주 찾는 품목', POPULAR.map(([code, name]) => ({ code, name, level: code.length })));
+    input.addEventListener('focus', () => { if (!input.value.trim()) showPopular(); });
+    input.addEventListener('blur', () => setTimeout(close, 120));
     input.addEventListener('input', () => {
       clearTimeout(timer);
       const q = input.value.trim();
-      if (!q) { list.hidden = true; return; }
+      if (!q) { showPopular(); return; }
+      const my = ++seq;
       timer = setTimeout(async () => {
         let res; try { res = await api(`/trade/search?q=${encodeURIComponent(q)}`); } catch (_) { return; }
-        list.textContent = '';
-        const rows = (res && res.results) || [];
-        for (const r of rows) {
-          list.append(el('li', { role: 'option' }, el('a', { href: href(state, { hs: r.code }) }, el('b', {}, r.code), ' ', r.name, ' ', el('small', {}, LEVEL_LABEL[r.level] || ''))));
-        }
-        if (!rows.length) list.append(el('li', { class: 'tv-muted' }, '검색 결과가 없습니다'));
-        list.hidden = false;
-      }, 200);
+        if (my !== seq) return; // a newer keystroke already asked
+        fill(null, (res && res.results) || []);
+      }, 160);
     });
-    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') list.hidden = true; });
-    return el('div', { class: 'tv-searchwrap' }, input, list);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (list.hidden) showPopular(); highlight(Math.min(items.length - 1, active + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(0, active - 1)); }
+      else if (e.key === 'Enter') { const pick = items[active >= 0 ? active : 0]; if (pick && !list.hidden) { e.preventDefault(); pick.dispatchEvent(new MouseEvent('mousedown')); } }
+      else if (e.key === 'Escape') close();
+    });
+    return el('div', { class: 'tv-searchwrap' }, el('span', { class: 'tv-search-icon', 'aria-hidden': 'true' }, '⌕'), input, list);
   }
 
-  function periodControls(data, state) {
-    const latest = data.latest;
-    const set = (from, to) => go(state, { from, to });
-    const from = el('input', { type: 'month', value: `${data.from.slice(0, 4)}-${data.from.slice(4)}`, max: `${latest.slice(0, 4)}-${latest.slice(4)}`, 'aria-label': '시작월' });
-    const to = el('input', { type: 'month', value: `${data.to.slice(0, 4)}-${data.to.slice(4)}`, max: `${latest.slice(0, 4)}-${latest.slice(4)}`, 'aria-label': '종료월' });
-    const apply = () => { const f = from.value.replace('-', ''); const t = to.value.replace('-', ''); if (/^\d{6}$/.test(f) && /^\d{6}$/.test(t) && f <= t) set(f, t); };
-    from.addEventListener('change', apply); to.addEventListener('change', apply);
-    const btn = (text, f, t) => el('button', { type: 'button', class: 'tv-chip', onclick: () => set(f, t) }, text);
-    const wrap = el('div', { class: 'tv-period' },
-      el('label', {}, '기간 ', from, ' ~ ', to),
-      el('span', { class: 'tv-presets' },
-        btn('12개월', addMonths(latest, -11), latest), btn('24개월', addMonths(latest, -23), latest), btn('36개월', addMonths(latest, -35), latest),
-        btn('올해', `${latest.slice(0, 4)}01`, latest), btn('전년', `${Number(latest.slice(0, 4)) - 1}01`, `${Number(latest.slice(0, 4)) - 1}12`)));
-    return wrap;
+  // Browse without knowing any code: plain-language groups -> headings.
+  async function browsePanel(state) {
+    const box = el('details', { class: 'tv-browse' }, el('summary', {}, '품목 둘러보기'));
+    let loaded = false;
+    box.addEventListener('toggle', async () => {
+      if (!box.open || loaded) return;
+      loaded = true;
+      let res; try { res = await api('/trade/groups'); } catch (_) { return; }
+      const grid = el('div', { class: 'tv-browse-grid' });
+      for (const g of (res && res.groups) || []) {
+        grid.append(el('div', { class: 'tv-browse-g' }, el('h4', {}, g.name), el('ul', {}, g.items.map((it) => el('li', {}, el('a', { href: href(state, { hs: it.code }), class: it.code === state.hs ? 'is-on' : '' }, it.name))))));
+      }
+      box.append(grid);
+    });
+    return box;
   }
+
+  // The picker can only reach months the data covers (min/max); the server clamps too, so a typed or shared bad range still renders.
+  function periodControls(data, state) {
+    const b = data.bounds || { min: data.from, max: data.latest };
+    const toInput = (p) => `${p.slice(0, 4)}-${p.slice(4)}`;
+    const clamp = (p) => (p < b.min ? b.min : p > b.max ? b.max : p);
+    const set = (f, t) => { f = clamp(f); t = clamp(t); if (f > t) [f, t] = [t, f]; go(state, { from: f, to: t }); };
+    const from = el('input', { type: 'month', value: toInput(data.from), min: toInput(b.min), max: toInput(b.max), 'aria-label': '시작월', required: true });
+    const to = el('input', { type: 'month', value: toInput(data.to), min: toInput(b.min), max: toInput(b.max), 'aria-label': '종료월', required: true });
+    const apply = () => { const f = from.value.replace('-', ''); const t = to.value.replace('-', ''); if (/^\d{6}$/.test(f) && /^\d{6}$/.test(t)) set(f, t); };
+    from.addEventListener('change', apply); to.addEventListener('change', apply);
+    const latest = b.max;
+    const span = (n) => { const f = addMonths(latest, -(n - 1)); return f < b.min ? b.min : f; };
+    const year = latest.slice(0, 4); const prevYear = String(Number(year) - 1);
+    const opts = [['12개월', span(12), latest], ['24개월', span(24), latest], ['36개월', span(36), latest], [`${year}년`, `${year}01`, latest], [`${prevYear}년`, `${prevYear}01`, `${prevYear}12`]];
+    const btns = opts.map(([text, f, t]) => {
+      const reachable = t >= b.min && f <= b.max;
+      const on = clamp(f) === data.from && clamp(t) === data.to;
+      return el('button', { type: 'button', class: `tv-chip ${on ? 'is-on' : ''}`, disabled: !reachable, title: reachable ? null : '이 기간에는 데이터가 없습니다', onclick: () => set(f, t) }, text);
+    });
+    return el('div', { class: 'tv-period' },
+      el('span', { class: 'tv-label' }, '기간'), from, el('span', { 'aria-hidden': 'true' }, '–'), to, el('span', { class: 'tv-presets' }, btns),
+      el('span', { class: 'tv-hint' }, `조회 가능: ${ym(b.min)} – ${ym(b.max)}`));
+  }
+
+  const ADJUST_TEXT = { to_clamped: '종료월을 최신 자료월로 맞췄습니다', from_clamped: '시작월을 가장 오래된 자료월로 맞췄습니다', swapped: '시작월과 종료월을 바꿨습니다', range_shortened: '조회 기간을 최대 10년으로 줄였습니다', from_invalid: '시작월 형식이 올바르지 않아 기본값을 썼습니다', to_invalid: '종료월 형식이 올바르지 않아 기본값을 썼습니다' };
 
   function delta(v) {
     if (v == null) return el('span', { class: 'tv-delta' }, '–');
@@ -199,7 +252,7 @@
     const t = el('table', { class: 'tv-table tv-rank' }, el('thead', {}, el('tr', {}, ['', '비중', '물량(톤)'].map((h, i) => el('th', { scope: 'col', class: i ? 'tv-num' : '' }, h)))));
     const body = el('tbody');
     for (const r of rows) {
-      const label = linkFor ? el('a', { href: linkFor(r) }, r.code ? el('b', {}, r.code) : null, ' ', r.name || '') : el('span', {}, r.name || r.code);
+      const label = linkFor ? el('a', { href: linkFor(r) }, r.name || '이름 없는 품목', ' ', el('small', { class: 'tv-code' }, r.code)) : el('span', {}, r.name || r.code);
       body.append(el('tr', {}, el('th', { scope: 'row' }, label, el('span', { class: 'tv-bar-track' }, el('span', { class: 'tv-bar-fill', style: `width:${Math.max(1, ((r.share || 0) / top) * 100)}%` }))), el('td', { class: 'tv-num' }, r.share == null ? '–' : `${(r.share * 100).toFixed(1)}%`), el('td', { class: 'tv-num' }, nf(r.ton))));
     }
     t.append(body); card.append(t);
@@ -216,19 +269,20 @@
     app.textContent = '';
     const root = el('section', { class: 'tv-root' });
     app.append(root);
-    root.append(el('div', { class: 'tv-head' }, el('h2', {}, '무역통계'), el('p', { class: 'tv-muted' }, '관세청 수출입무역통계(공공데이터포털). 중량은 톤, 금액은 달러이며 단가는 금액÷중량입니다. 최근 월은 잠정치일 수 있습니다.')));
+    root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다.')));
     if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); return; }
     if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); return; }
 
-    const chips = el('div', { class: 'tv-presets' }, PRESETS.map(([hs, name]) => el('a', { class: `tv-chip ${state.hs === hs ? 'is-on' : ''}`, href: href(state, { hs }) }, name)));
     root.append(el('div', { class: 'tv-filters' },
-      el('div', { class: 'tv-row' }, searchBox(state), chips),
+      el('div', { class: 'tv-row tv-row-search' }, searchBox(state), await browsePanel(state)),
       breadcrumb(data, state),
-      el('div', { class: 'tv-row' }, periodControls(data, state),
+      el('div', { class: 'tv-row' }, periodControls(data, state)),
+      el('div', { class: 'tv-row' },
         segmented('수입·수출', [['imp', '수입'], ['exp', '수출']], state.flow, (v) => go(state, { flow: v })),
         segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가']], state.metric, (v) => go(state, { metric: v })))));
+    if (data.adjusted && data.adjusted.length) root.append(el('p', { class: 'tv-notice', role: 'status' }, `${data.adjusted.map((a) => ADJUST_TEXT[a] || a).join(' · ')}.`));
 
-    root.append(el('h3', { class: 'tv-selected' }, data.name || data.hs, ' ', el('small', {}, `${data.hs} · ${LEVEL_LABEL[data.hs.length] || ''}`)));
+    root.append(el('div', { class: 'tv-selected' }, el('h3', {}, data.name || '이름 없는 품목'), el('span', { class: 'tv-badge' }, LEVEL_LABEL[data.hs.length] || ''), el('span', { class: 'tv-code' }, `HS ${data.hs}`)));
     root.append(kpiStrip(data, state));
 
     const csv = `/api/trade/export.csv?${qs}`;
@@ -241,13 +295,14 @@
       state.view === 'table' ? seriesTable(data) : el('div', {}, legend(state), trendChart(data, state))));
 
     const nl = data.children;
-    const nextName = { 4: '호(4자리)', 6: '소호(6자리)', 10: '품목(10자리)' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
-    root.append(el('div', { class: 'tv-cols' },
-      nl.length ? rankList(`하위 분류 — ${nextName}`, `선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 클릭하면 더 세부로 들어갑니다. 선택 기간 기준.`, nl, (r) => href(state, { hs: r.code }))
-        : el('section', { class: 'tv-card' }, el('h3', {}, '하위 분류'), el('p', { class: 'tv-muted' }, '가장 세부 단계(10자리)입니다.')),
+    const nextName = { 4: '품목군', 6: '세부 품목', 10: '최종 품목' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
+    const cols = el('div', { class: 'tv-cols' },
+      nl.length ? rankList(`구성 — ${nextName}별`, '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', nl, (r) => href(state, { hs: r.code }))
+        : el('section', { class: 'tv-card' }, el('h3', {}, '구성'), el('p', { class: 'tv-muted' }, '가장 세부 단계의 품목입니다.')),
       rankList(`${state.flow === 'exp' ? '수출 상대국' : '수입 원산지'} 비중`,
-        data.countryScope !== data.hs ? `국가별 통계는 HS 6자리까지 제공되어 ${data.countryScope} 기준입니다.` : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
-        data.countries.slice(0, 10), null)));
+        data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
+        data.countries.slice(0, 10), null));
+    root.append(cols, el('p', { class: 'tv-source' }, '출처: 관세청 수출입무역통계(공공데이터포털 Open API). 중량은 톤, 금액은 미 달러, 단가는 금액÷중량으로 계산한 값입니다. 최근 월은 잠정치일 수 있습니다.'));
   }
 
   window.TradeDashboard = { render };

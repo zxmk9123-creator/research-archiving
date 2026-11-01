@@ -10,17 +10,27 @@ const addMonths = (period, n) => {
   return `${yy}${String(mm + 1).padStart(2, '0')}`;
 };
 
-// Returns { ok, value } | { ok:false, error }. Defaults: HS 15 (all fats and oils), last 24 months, imports.
-function parseQuery(q, latest) {
+const MAX_MONTHS = 120;
+// Returns { ok, value, adjusted:[...] } | { ok:false, error }. The period never errors: it is clamped to what the data covers
+// (bounds = { min, max }), swapped when reversed and shortened to MAX_MONTHS, and each correction is named so the page can say so.
+// Defaults: HS 15 (all fats and oils), last 24 months, imports.
+function parseQuery(q, bounds) {
+  const b = typeof bounds === 'string' ? { min: '000101', max: bounds } : bounds;
   const hs = String(q.hs || '15').trim();
   if (!/^\d+$/.test(hs) || !LEVELS.includes(hs.length)) return { ok: false, error: 'invalid_hs' };
   const flow = q.flow === 'exp' ? 'exp' : 'imp';
-  const to = q.to ? String(q.to) : latest;
-  if (!to || !isPeriod(to)) return { ok: false, error: 'invalid_period' };
-  const from = q.from ? String(q.from) : addMonths(to, -23);
-  if (!isPeriod(from) || from > to) return { ok: false, error: 'invalid_period' };
-  if (addMonths(from, 119) < to) return { ok: false, error: 'range_too_long' };
-  return { ok: true, value: { hs, flow, from, to } };
+  const adjusted = [];
+  let to = isPeriod(String(q.to || '')) ? String(q.to) : b.max;
+  if (q.to && !isPeriod(String(q.to))) adjusted.push('to_invalid');
+  let from = isPeriod(String(q.from || '')) ? String(q.from) : addMonths(to, -23);
+  if (q.from && !isPeriod(String(q.from))) adjusted.push('from_invalid');
+  if (from > to) { [from, to] = [to, from]; adjusted.push('swapped'); }
+  if (to > b.max) { to = b.max; adjusted.push('to_clamped'); }
+  if (from < b.min) { from = b.min; adjusted.push('from_clamped'); }
+  if (from > b.max) { from = addMonths(b.max, -23) < b.min ? b.min : addMonths(b.max, -23); adjusted.push('from_clamped'); }
+  if (to < b.min) { to = b.max; adjusted.push('to_clamped'); }
+  if (addMonths(from, MAX_MONTHS - 1) < to) { from = addMonths(to, -(MAX_MONTHS - 1)); adjusted.push('range_shortened'); }
+  return { ok: true, value: { hs, flow, from, to }, adjusted };
 }
 
 const pctChange = (cur, prev) => (cur == null || prev == null || prev === 0 ? null : (cur - prev) / prev);
@@ -63,4 +73,4 @@ function buildKpis(rows, from, to) {
   };
 }
 
-module.exports = { LEVELS, nextLevel, isPeriod, addMonths, parseQuery, pctChange, buildSeries, buildKpis };
+module.exports = { MAX_MONTHS, LEVELS, nextLevel, isPeriod, addMonths, parseQuery, pctChange, buildSeries, buildKpis };

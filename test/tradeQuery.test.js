@@ -2,15 +2,25 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Q = require('../server/lib/tradeQuery');
 
-test('parseQuery: defaults, validation, range limits', () => {
-  const ok = Q.parseQuery({}, '202609');
-  assert.deepEqual(ok.value, { hs: '15', flow: 'imp', from: '202410', to: '202609' });
-  assert.equal(Q.parseQuery({ hs: '151' }, '202609').error, 'invalid_hs');
-  assert.equal(Q.parseQuery({ hs: '15a1' }, '202609').error, 'invalid_hs');
-  assert.equal(Q.parseQuery({ from: '202613' }, '202609').error, 'invalid_period');
-  assert.equal(Q.parseQuery({ from: '202609', to: '202601' }, '202609').error, 'invalid_period');
-  assert.equal(Q.parseQuery({ from: '201001', to: '202609' }, '202609').error, 'range_too_long');
-  assert.equal(Q.parseQuery({ hs: '1511', flow: 'exp', to: '202606' }, '202609').value.flow, 'exp');
+test('parseQuery: defaults; the period is clamped, swapped or shortened instead of failing', () => {
+  const b = { min: '202311', max: '202609' };
+  const ok = Q.parseQuery({}, b);
+  assert.deepEqual(ok.value, { hs: '15', flow: 'imp', from: '202410', to: '202609' }); assert.deepEqual(ok.adjusted, []);
+  assert.equal(Q.parseQuery({ hs: '151' }, b).error, 'invalid_hs');
+  const late = Q.parseQuery({ from: '202501', to: '203001' }, b);
+  assert.deepEqual([late.value.from, late.value.to, late.adjusted], ['202501', '202609', ['to_clamped']]);
+  const early = Q.parseQuery({ from: '200001', to: '202401' }, b);
+  assert.deepEqual([early.value.from, early.value.to], ['202311', '202401']); assert.ok(early.adjusted.includes('from_clamped'));
+  const rev = Q.parseQuery({ from: '202605', to: '202501' }, b);
+  assert.deepEqual([rev.value.from, rev.value.to], ['202501', '202605']); assert.ok(rev.adjusted.includes('swapped'));
+  const bad = Q.parseQuery({ from: '2025-13', to: 'x' }, b);
+  assert.deepEqual([bad.value.from, bad.value.to], ['202410', '202609']); assert.ok(bad.adjusted.includes('to_invalid'));
+  const outside = Q.parseQuery({ from: '203001', to: '203006' }, b);
+  assert.ok(outside.value.from >= b.min && outside.value.to <= b.max && outside.value.from <= outside.value.to);
+  const longB = { min: '200001', max: '202609' };
+  const long = Q.parseQuery({ from: '200101', to: '202609' }, longB);
+  assert.equal(long.value.from, Q.addMonths('202609', -(Q.MAX_MONTHS - 1))); assert.ok(long.adjusted.includes('range_shortened'));
+  assert.equal(Q.parseQuery({ hs: '1511', flow: 'exp', to: '202606' }, b).value.flow, 'exp');
 });
 test('nextLevel walks 2 -> 4 -> 6 -> 10 and stops', () => {
   assert.deepEqual([2, 4, 6, 8, 10].map(Q.nextLevel), [4, 6, 10, 10, null]);
