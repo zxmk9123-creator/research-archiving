@@ -180,7 +180,8 @@
 
   // The main chart: bars for volume/value, a line for unit price; optional prior-year line; crosshair snaps to the month; tooltip lists both values.
   function trendChart(data, state) {
-    const m = state.metric; const pts = data.series; const W = 760; const H = 320; const L = 62; const R = 14; const T = 14; const B = 30;
+    const m = state.metric; const pts = data.series; const avail = (document.getElementById('app') || document.body).clientWidth - 76;
+    const W = Math.round(Math.max(300, Math.min(1080, avail))); const H = W < 560 ? 240 : 300; const L = W < 560 ? 46 : 62; const R = 10; const T = 14; const B = 30;
     const vals = pts.map((p) => valueOf(p, m)); const prevs = state.yoy === '1' ? pts.map((p) => valueOf(p, m, true)) : [];
     const finite = [...vals, ...prevs].filter((v) => v != null);
     const wrap = el('div', { class: 'tv-chartwrap' });
@@ -191,16 +192,21 @@
     const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'tv-svg', role: 'img', 'aria-label': `${data.name || data.hs} ${state.flow === 'exp' ? '수출' : '수입'} ${METRICS[m][0]} 월별 추이` });
     for (let i = 0; i <= 4; i++) {
       const v = (max / 4) * i; const yy = y(v);
-      svg.append(sv('line', { x1: L, x2: W - R, y1: yy, y2: yy, class: 'tv-grid' }), sv('text', { x: L - 8, y: yy + 4, 'text-anchor': 'end', class: 'tv-axis' }, m === 'usd' ? fmtUsd(v) : nf(v)));
+      svg.append(sv('line', { x1: L, x2: W - R, y1: yy, y2: yy, class: 'tv-grid' }), sv('text', { x: L - 8, y: yy + 4, 'text-anchor': 'end', class: 'tv-axis' }, m === 'usd' ? fmtUsd(v) : v >= 10000 && W < 560 ? `${nf(v / 1000)}k` : nf(v)));
     }
-    pts.forEach((p, i) => { if (pts.length <= 18 || i % Math.ceil(pts.length / 12) === 0 || p.period.endsWith('01')) svg.append(sv('text', { x: x(i), y: H - 8, 'text-anchor': 'middle', class: 'tv-axis' }, p.period.endsWith('01') || i === 0 ? ym(p.period) : p.period.slice(4))); });
+    const k = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor((W - L - R) / 64))));
+    pts.forEach((p, i) => {
+      if ((pts.length - 1 - i) % k !== 0) return;
+      const withYear = i < k || p.period.endsWith('01') || pts.slice(Math.max(0, i - k + 1), i).some((q) => q.period.endsWith('01'));
+      svg.append(sv('text', { x: x(i), y: H - 8, 'text-anchor': 'middle', class: 'tv-axis' }, withYear ? `${p.period.slice(2, 4)}.${p.period.slice(4)}` : p.period.slice(4)));
+    });
     if (m === 'price') {
       const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
       if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
       svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none' }));
       vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: 'tv-dot' })); });
     } else {
-      const bw = Math.max(3, Math.min(34, step * 0.7));
+      const bw = Math.max(3, Math.min(28, step * 0.62));
       vals.forEach((v, i) => { if (v == null) return; const h = Math.max(1, y(0) - y(v)); svg.append(sv('path', { d: `M${x(i) - bw / 2},${y(0)} v${-(h - 3)} q0,-3 3,-3 h${bw - 6} q3,0 3,3 v${h - 3} z`, class: 'tv-bar' })); });
       if (prevs.length) svg.append(sv('polyline', { points: prevs.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean).join(' '), class: 'tv-line-prev', fill: 'none' }));
     }
@@ -259,6 +265,14 @@
     return card;
   }
 
+  // rows under 0.5% become one "기타" row so the list shows who actually matters
+  function foldSmall(rows) {
+    const big = rows.filter((r) => (r.share || 0) >= 0.005).slice(0, 10);
+    const rest = rows.filter((r) => !big.includes(r));
+    if (!rest.length) return big;
+    return [...big, { name: `기타 ${rest.length}개국`, share: rest.reduce((a, r) => a + (r.share || 0), 0), ton: rest.reduce((a, r) => a + (r.ton || 0), 0) }];
+  }
+
   async function render(app, query, deps) {
     if (deps && deps.api) api = deps.api;
     const state = keep(query);
@@ -297,11 +311,11 @@
     const nl = data.children;
     const nextName = { 4: '품목군', 6: '세부 품목', 10: '최종 품목' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
     const cols = el('div', { class: 'tv-cols' },
-      nl.length ? rankList(`구성 — ${nextName}별`, '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', nl, (r) => href(state, { hs: r.code }))
+      nl.length ? rankList(`구성 — ${nextName}별`, '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', nl.map((r) => (/^기타/.test(r.name || '') && data.name ? { ...r, name: `${r.name} (${data.name})` } : r)), (r) => href(state, { hs: r.code }))
         : el('section', { class: 'tv-card' }, el('h3', {}, '구성'), el('p', { class: 'tv-muted' }, '가장 세부 단계의 품목입니다.')),
       rankList(`${state.flow === 'exp' ? '수출 상대국' : '수입 원산지'} 비중`,
         data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
-        data.countries.slice(0, 10), null));
+        foldSmall(data.countries), null));
     root.append(cols, el('p', { class: 'tv-source' }, '출처: 관세청 수출입무역통계(공공데이터포털 Open API). 중량은 톤, 금액은 미 달러, 단가는 금액÷중량으로 계산한 값입니다. 최근 월은 잠정치일 수 있습니다.'));
   }
 

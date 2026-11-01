@@ -1540,7 +1540,7 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .tv-table th, .tv-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); text-align: left; font-weight: 400; }
 .tv-table thead th { font-size: 12px; font-weight: 600; color: var(--text-tertiary); } .tv-table tbody tr:hover { background: var(--surface-sunken); }
 .tv-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tv-rank th[scope="row"] { width: 64%; } .tv-rank a { color: var(--text); font-weight: 500; text-decoration: none; } .tv-rank a:hover { color: var(--action); }
+.tv-rank th[scope="row"] { width: 64%; font-size: 14px; color: var(--text); font-weight: 500; } .tv-rank a { color: var(--text); font-weight: 500; text-decoration: none; } .tv-rank a:hover { color: var(--action); }
 .tv-bar-track { display: block; height: 6px; margin-top: 6px; background: var(--tv-grid); border-radius: 3px; } .tv-bar-fill { display: block; height: 6px; background: var(--tv-s1); border-radius: 3px; }
 .tv-source { margin-top: var(--sp-5); font-size: 12px; color: var(--text-tertiary); line-height: 1.6; }
 @media (max-width: 640px) { .tv-filters { position: relative; padding: var(--sp-3); } .tv-tile-value { font-size: 22px; } .tv-cols { grid-template-columns: 1fr; } .tv-hint { flex-basis: 100%; } }
