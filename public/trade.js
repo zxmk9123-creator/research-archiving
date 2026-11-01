@@ -28,8 +28,10 @@
   // number + quieter unit, e.g. 53,647 톤 / $1,156 /톤 / $63.4 M
   function figure(key, kind, v) {
     if (v == null) return el('span', { class: 'tv-fig' }, '–');
-    const parts = kind === 'ton' ? ['', (x) => nf(x), '톤'] : kind === 'price' ? ['$', (x) => nf(x), '/톤']
-      : v >= 1e6 ? ['$', (x) => nf(x / 1e6, 1), 'M'] : ['$', (x) => nf(x / 1e3), 'K'];
+    // the sign leads (−$2.6M, −149,193톤); the magnitude counts, so an animation never shows a misplaced minus
+    const sign = v < 0 ? '−' : ''; const a = Math.abs(v);
+    const parts = kind === 'ton' ? [sign, (x) => nf(Math.abs(x)), '톤'] : kind === 'price' ? [`${sign}$`, (x) => nf(Math.abs(x)), '/톤']
+      : a >= 1e6 ? [`${sign}$`, (x) => nf(Math.abs(x) / 1e6, 1), 'M'] : [`${sign}$`, (x) => nf(Math.abs(x) / 1e3), 'K'];
     const num = el('span', { class: 'tv-fig-n' });
     countTo(num, key, v, parts[1]);
     return el('span', { class: 'tv-fig', 'aria-label': fmtOf[kind](v) }, parts[0] ? el('span', { class: 'tv-fig-p' }, parts[0]) : null, num, el('span', { class: 'tv-fig-u' }, parts[2]));
@@ -69,10 +71,42 @@
   const ym = (p) => `${p.slice(0, 4)}.${p.slice(4)}`;
   const valueOf = (p, metric, prev) => (prev ? { ton: p.prevTon, usd: p.prevUsd, price: p.prevPrice }[metric] : { ton: p.ton, usd: p.usd, price: p.price }[metric]);
   const yoyOf = (p, metric) => ({ ton: p.yoyTon, usd: p.yoyUsd, price: p.yoyPrice }[metric]);
+  const signed = (v, unit) => (v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${nf(Math.abs(v))}${unit}`);
+  const fmtSigned = { ton: (v) => signed(v, '톤'), usd: (v) => (v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtUsd(Math.abs(v))}`), price: fmtPrice };
+  const compactTon = (v) => (v == null ? '–' : Math.abs(v) >= 10000 ? `${nf(v / 10000, 1)}만 톤` : `${nf(v)}톤`);
+  const pc = (a, b) => (a == null || b == null || b === 0 || a * b < 0 ? null : (a - b) / Math.abs(b));
+
+  // Month → quarter / year buckets. A bucket missing months (range edge, not yet published) is flagged partial, and its year-over-year
+  // compares the same months only (each month already carries its own prior-year value), so it is still like-for-like.
+  function aggregate(series, grain, net) {
+    if (grain === 'month') return series.map((p) => ({ ...p, key: p.period, months: p.ton == null ? 0 : 1, expected: 1, partial: false }));
+    const keyOf = (p) => (grain === 'year' ? p.period.slice(0, 4) : `${p.period.slice(0, 4)}Q${Math.ceil(Number(p.period.slice(4)) / 3)}`);
+    const add = (a, b) => (b == null ? a : (a || 0) + b);
+    const map = new Map();
+    for (const p of series) {
+      const k = keyOf(p);
+      const b = map.get(k) || { key: k, period: p.period, ton: null, usd: null, prevTon: null, prevUsd: null, months: 0, expected: grain === 'year' ? 12 : 3 };
+      b.ton = add(b.ton, p.ton); b.usd = add(b.usd, p.usd); b.prevTon = add(b.prevTon, p.prevTon); b.prevUsd = add(b.prevUsd, p.prevUsd);
+      if (p.ton != null) b.months += 1;
+      map.set(k, b);
+    }
+    return [...map.values()].map((b) => {
+      const price = !net && b.ton ? b.usd / b.ton : null; const prevPrice = !net && b.prevTon ? b.prevUsd / b.prevTon : null;
+      return { ...b, price, prevPrice, yoyTon: pc(b.ton, b.prevTon), yoyUsd: pc(b.usd, b.prevUsd), yoyPrice: pc(price, prevPrice), partial: b.months > 0 && b.months < b.expected };
+    });
+  }
+  const bucketLabel = (b, grain, long) => (grain === 'year' ? b.key : grain === 'quarter' ? `${long ? b.key.slice(0, 4) : `'${b.key.slice(2, 4)}`} ${b.key.slice(4)}` : long ? ym(b.key) : null);
+
   const addMonths = (period, n) => { const y = Number(period.slice(0, 4)); const m = Number(period.slice(4)) - 1 + n; return `${y + Math.floor(m / 12)}${String(((m % 12) + 12) % 12 + 1).padStart(2, '0')}`; };
 
   // ---- state in the URL ----
-  const keep = (q) => ({ hs: q.hs || '15', from: q.from || '', to: q.to || '', flow: q.flow === 'exp' ? 'exp' : 'imp', metric: ['ton', 'usd', 'price'].includes(q.metric) ? q.metric : 'ton', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' });
+  const keep = (q) => {
+    const flow = ['imp', 'exp', 'net'].includes(q.flow) ? q.flow : 'imp';
+    const metric = ['ton', 'usd', 'price'].includes(q.metric) && !(flow === 'net' && q.metric === 'price') ? q.metric : 'ton'; // no unit price of a balance
+    return { hs: q.hs || '15', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
+  };
+  const FLOW_NAME = { imp: '수입', exp: '수출', net: '순수출' };
+  const GRAIN_NAME = { month: '월별', quarter: '분기별', year: '연도별' };
   const href = (state, over) => {
     const s = { ...state, ...over };
     const p = new URLSearchParams();
@@ -84,8 +118,8 @@
   // ---- pieces ----
   function segmented(label, options, current, onPick) {
     const wrap = el('div', { class: 'tv-seg', role: 'group', 'aria-label': label }, el('span', { class: 'tv-label', 'aria-hidden': 'true' }, label));
-    for (const [value, text] of options) {
-      wrap.append(el('button', { type: 'button', class: value === current ? 'is-on' : '', 'aria-pressed': String(value === current), onclick: () => onPick(value) }, text));
+    for (const [value, text, disabledWhy] of options) {
+      wrap.append(el('button', { type: 'button', class: value === current ? 'is-on' : '', 'aria-pressed': String(value === current), disabled: Boolean(disabledWhy), title: disabledWhy || null, onclick: () => onPick(value) }, text));
     }
     return wrap;
   }
@@ -149,19 +183,54 @@
     return el('div', { class: 'tv-searchwrap' }, el('span', { class: 'tv-search-icon', 'aria-hidden': 'true' }, '⌕'), input, list);
   }
 
-  // Browse without knowing any code: plain-language groups -> headings.
+  // Browse without knowing any code: a two-pane popover — plain-language groups on the left, the group's items on the right with their
+  // last-12-month import volume, a 12-month import trail and a net-exporter mark. Arrow keys move between groups; Esc or a click outside closes.
+  function sparkline(trail) {
+    const vals = (trail || []).map((v) => (v == null ? null : Number(v)));
+    const fin = vals.filter((v) => v != null);
+    if (fin.length < 2) return el('span', { class: 'tv-spark tv-spark-empty', 'aria-hidden': 'true' });
+    const W = 72; const H = 22; const max = Math.max(...fin) || 1; const min = Math.min(...fin);
+    const xs = (i) => (i / (vals.length - 1)) * W; const ys = (v) => H - 2 - ((v - min) / (max - min || 1)) * (H - 4);
+    const pts = vals.map((v, i) => (v == null ? null : `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`)).filter(Boolean).join(' ');
+    const last = vals.length - 1 - [...vals].reverse().findIndex((v) => v != null);
+    return sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'tv-spark', 'aria-hidden': 'true' }, sv('polyline', { points: pts, fill: 'none' }), sv('circle', { cx: xs(last), cy: ys(vals[last]), r: 2 }));
+  }
+  function groupItems(g, state) {
+    return el('ul', { class: 'tv-browse-items' }, g.items.map((it) => el('li', {},
+      el('a', { href: href(state, { hs: it.code }), class: state.hs === it.code || state.hs.startsWith(it.code) ? 'is-on' : '' },
+        el('span', { class: 'tv-bi-top' }, el('span', { class: 'tv-bi-name' }, it.name), it.expTon > it.impTon && it.expTon > 0 ? el('span', { class: 'tv-side' }, '순수출') : null),
+        el('span', { class: 'tv-bi-bottom' }, el('span', { class: 'tv-bi-vol' }, it.impTon == null ? '자료 없음' : `수입 ${compactTon(it.impTon)}`), sparkline(it.trail))))));
+  }
   async function browsePanel(state) {
     const box = el('details', { class: 'tv-browse' }, el('summary', {}, '품목 둘러보기'));
-    let loaded = false;
+    const summary = box.firstChild;
+    let built = false;
+    const onDoc = (e) => { if (!box.contains(e.target)) box.open = false; };
+    const onKey = (e) => { if (e.key === 'Escape') { box.open = false; summary.focus(); } };
     box.addEventListener('toggle', async () => {
-      if (!box.open || loaded) return;
-      loaded = true;
-      let res; try { res = await api('/trade/groups'); } catch (_) { return; }
-      const grid = el('div', { class: 'tv-browse-grid' });
-      for (const g of (res && res.groups) || []) {
-        grid.append(el('div', { class: 'tv-browse-g' }, el('h4', {}, g.name), el('ul', {}, g.items.map((it) => el('li', {}, el('a', { href: href(state, { hs: it.code }), class: it.code === state.hs ? 'is-on' : '' }, it.name))))));
-      }
-      box.append(grid);
+      if (!box.open) { document.removeEventListener('pointerdown', onDoc); document.removeEventListener('keydown', onKey); return; }
+      document.addEventListener('pointerdown', onDoc); document.addEventListener('keydown', onKey);
+      if (built) return;
+      built = true;
+      const panel = el('div', { class: 'tv-browse-panel' }, el('p', { class: 'tv-muted tv-browse-loading' }, '품목을 불러오는 중…'));
+      box.append(panel);
+      let res; try { res = await api('/trade/groups'); } catch (_) { res = null; }
+      const groups = (res && res.groups) || [];
+      if (!groups.length) { panel.replaceChildren(el('p', { class: 'tv-muted' }, '목록을 불러오지 못했습니다.')); return; }
+      const nav = el('div', { class: 'tv-browse-nav', role: 'tablist', 'aria-orientation': 'vertical', 'aria-label': '품목 분류' });
+      const body = el('div', { class: 'tv-browse-body', role: 'tabpanel' });
+      const select = (gi, focus) => {
+        [...nav.children].forEach((b, k) => { b.setAttribute('aria-selected', String(k === gi)); b.tabIndex = k === gi ? 0 : -1; });
+        body.replaceChildren(el('h4', {}, groups[gi].name), groupItems(groups[gi], state));
+        if (focus) nav.children[gi].focus();
+      };
+      groups.forEach((g, gi) => nav.append(el('button', {
+        type: 'button', role: 'tab', onclick: () => select(gi),
+        onkeydown: (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); select((gi + (e.key === 'ArrowDown' ? 1 : -1) + groups.length) % groups.length, true); } },
+      }, el('span', {}, g.name), el('span', { class: 'tv-browse-count' }, String(g.items.length)))));
+      const start = Math.max(0, groups.findIndex((g) => g.items.some((it) => state.hs.startsWith(it.code))));
+      panel.replaceChildren(nav, body, el('p', { class: 'tv-browse-foot' }, `수입량·추세선은 최근 12개월 기준${res.through ? ` (${ym(res.through)}까지)` : ''} · "순수출"은 수출이 수입보다 많은 품목`));
+      select(start);
     });
     return box;
   }
@@ -197,86 +266,114 @@
     const dir = v > 0.0005 ? '▲' : v < -0.0005 ? '▼' : '■';
     return el('span', { class: 'tv-delta', 'aria-label': `${v > 0 ? '증가' : v < 0 ? '감소' : '변동 없음'} ${fmtPct(v)}` }, el('span', { class: 'tv-arrow', 'aria-hidden': 'true' }, dir), fmtPct(v));
   }
+  function absDelta(v, unitFmt) {
+    if (v == null) return el('span', { class: 'tv-delta' }, '–');
+    const dir = v > 0 ? '▲' : v < 0 ? '▼' : '■';
+    return el('span', { class: 'tv-delta' }, el('span', { class: 'tv-arrow', 'aria-hidden': 'true' }, dir), unitFmt(v));
+  }
   function tile(label, value, sub) { return el('div', { class: 'tv-tile' }, el('div', { class: 'tv-tile-label' }, label), el('div', { class: 'tv-tile-value' }, value), sub ? el('div', { class: 'tv-tile-sub' }, sub) : null); }
 
   function kpiStrip(data, state) {
-    const k = data.kpis; const m = state.metric; const flowName = state.flow === 'exp' ? '수출' : '수입';
+    const k = data.kpis; const m = state.metric; const net = state.flow === 'net'; const flowName = FLOW_NAME[state.flow];
     if (!k) return el('p', { class: 'tv-muted' }, '선택한 기간에 데이터가 없습니다.');
     const cur = { ton: k.ton, usd: k.usd, price: k.price }[m];
-    const yoy = { ton: k.yoyTon, usd: k.yoyUsd, price: k.yoyPrice }[m];
     const t12 = k.t12;
-    // month-on-month for the chosen metric, from the series itself (latest month vs the one before)
     const i = data.series.findIndex((p) => p.period === k.period);
-    const prev = i > 0 ? valueOf(data.series[i - 1], m) : null;
-    const mom = cur != null && prev ? (cur - prev) / prev : null;
-    return el('div', { class: 'tv-tiles' },
-      tile(`${ym(k.period)} ${flowName} ${METRICS[m][0]}`, figure('cur', m, cur),
-        el('span', { class: 'tv-subs' }, el('span', {}, '전년 동월 ', delta(yoy)), el('span', {}, '전월 ', delta(mom)))),
-      tile(`최근 12개월 ${flowName}량`, figure('t12', 'ton', t12 ? t12.ton : null), t12 ? el('span', {}, '직전 12개월 대비 ', delta(t12.changeTon)) : el('span', { class: 'tv-muted' }, '12개월치 자료가 쌓이면 표시됩니다')),
-      tile('최근 12개월 평균 단가', figure('t12p', 'price', t12 ? t12.price : null), el('span', { class: 'tv-muted' }, '금액 ÷ 중량')));
+    const prevMonth = i > 0 ? valueOf(data.series[i - 1], m) : null;
+    const sameMonthLastYear = i >= 0 ? valueOf(data.series[i], m, true) : null;
+    const fmtD = (v) => (m === 'usd' ? fmtSigned.usd(v) : signed(v, m === 'price' ? '$/톤' : '톤'));
+    // for a balance the change is shown in tons/dollars: a % change of a number that can cross zero misleads
+    const dYoY = net ? absDelta(cur != null && sameMonthLastYear != null ? cur - sameMonthLastYear : null, fmtD) : delta(pc(cur, sameMonthLastYear));
+    const dMoM = net ? absDelta(cur != null && prevMonth != null ? cur - prevMonth : null, fmtD) : delta(pc(cur, prevMonth));
+    const side = (v) => (net && v != null ? el('span', { class: 'tv-side' }, v >= 0 ? '순수출' : '순수입') : null);
+    const tiles = [
+      tile(el('span', {}, `${ym(k.period)} ${flowName} ${METRICS[m][0]} `, side(cur)), figure('cur', m, cur),
+        el('span', { class: 'tv-subs' }, el('span', {}, '전년 동월 ', dYoY), el('span', {}, '전월 ', dMoM))),
+      tile(el('span', {}, `최근 12개월 ${flowName}${net ? ' 물량' : '량'} `, side(t12 && t12.ton)), figure('t12', 'ton', t12 ? t12.ton : null),
+        t12 ? el('span', {}, '직전 12개월 대비 ', net ? absDelta(t12.prevTon != null ? t12.ton - t12.prevTon : null, (v) => signed(v, '톤')) : delta(t12.changeTon))
+          : el('span', { class: 'tv-muted' }, '12개월치 자료가 쌓이면 표시됩니다')),
+      net ? tile(el('span', {}, '최근 12개월 순수출액 ', side(t12 && t12.usd)), figure('t12u', 'usd', t12 ? t12.usd : null), el('span', { class: 'tv-muted' }, '수출액 − 수입액'))
+        : tile('최근 12개월 평균 단가', figure('t12p', 'price', t12 ? t12.price : null), el('span', { class: 'tv-muted' }, '금액 ÷ 중량')),
+    ];
+    return el('div', { class: 'tv-tiles' }, tiles);
   }
 
-  // The main chart: bars for volume/value, a line for unit price; optional prior-year line; crosshair snaps to the month; tooltip lists both values.
-  function trendChart(data, state) {
-    const m = state.metric; const pts = data.series; const avail = (document.getElementById('app') || document.body).clientWidth - 76;
-    const W = Math.round(Math.max(300, Math.min(1080, avail))); const H = W < 560 ? 200 : 240; const L = W < 560 ? 44 : 58; const R = 8; const T = 10; const B = 26;
-    const bars = []; // bar elements by month index, for hover focus
+  // The main chart over month / quarter / year buckets. Bars (or a line for long ranges and unit prices) start at zero and go below it for a
+  // net-import balance, in the second hue so the sign never rests on position alone; partial buckets are drawn lighter and say so on hover.
+  function trendChart(data, state, pts) {
+    const m = state.metric; const net = state.flow === 'net'; const grain = state.grain;
+    const avail = (document.getElementById('app') || document.body).clientWidth - 76;
+    const W = Math.round(Math.max(300, Math.min(1080, avail))); const H = W < 560 ? 200 : 240; const L = W < 560 ? 48 : 62; const R = 8; const T = 10; const B = 26;
+    const bars = [];
     const vals = pts.map((p) => valueOf(p, m)); const prevs = state.yoy === '1' ? pts.map((p) => valueOf(p, m, true)) : [];
     const finite = [...vals, ...prevs].filter((v) => v != null);
     const wrap = el('div', { class: 'tv-chartwrap' });
     if (!finite.length) { wrap.append(el('p', { class: 'tv-muted' }, '표시할 데이터가 없습니다.')); return wrap; }
-    // round tick step (1·2·5 × 10ⁿ) so gridlines land on readable values; 3–5 lines
     const niceStep = (v) => { const e = 10 ** Math.floor(Math.log10(v || 1)); const n = v / e; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * e; };
-    const tick = niceStep(Math.max(...finite) / 4); const nTicks = Math.max(1, Math.ceil(Math.max(...finite) / tick)); const max = tick * nTicks; const min = 0;
-    const step = (W - L - R) / pts.length; const x = (i) => L + step * (i + 0.5); const y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min));
-    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'tv-svg', role: 'img', 'aria-label': `${data.name || data.hs} ${state.flow === 'exp' ? '수출' : '수입'} ${METRICS[m][0]} 월별 추이` });
-    for (let i = 0; i <= nTicks; i++) {
-      const v = tick * i; const yy = y(v);
-      svg.append(sv('line', { x1: L, x2: W - R, y1: yy, y2: yy, class: 'tv-grid' }), sv('text', { x: L - 8, y: yy + 4, 'text-anchor': 'end', class: 'tv-axis' }, m === 'usd' ? fmtUsd(v) : v >= 10000 && W < 560 ? `${nf(v / 1000)}k` : nf(v)));
+    const hi = Math.max(0, ...finite); const lo = Math.min(0, ...finite);
+    const tick = niceStep((hi - lo) / 4 || 1); const top = Math.ceil(hi / tick) * tick || tick; const bottom = Math.floor(lo / tick) * tick;
+    const step = (W - L - R) / pts.length; const x = (i) => L + step * (i + 0.5); const y = (v) => T + (H - T - B) * ((top - v) / (top - bottom));
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'tv-svg', role: 'img', 'aria-label': `${data.name || data.hs} ${FLOW_NAME[state.flow]} ${METRICS[m][0]} ${GRAIN_NAME[grain]} 추이` });
+    const axisFmt = (v) => (m === 'usd' ? (v < 0 ? `−${fmtUsd(-v)}` : fmtUsd(v)) : Math.abs(v) >= 10000 && W < 560 ? `${nf(v / 1000)}k` : nf(v));
+    for (let v = bottom; v <= top + tick / 2; v += tick) {
+      const yy = y(v);
+      svg.append(sv('line', { x1: L, x2: W - R, y1: yy, y2: yy, class: Math.abs(v) < tick / 2 ? 'tv-grid tv-zero' : 'tv-grid' }), sv('text', { x: L - 8, y: yy + 4, 'text-anchor': 'end', class: 'tv-axis' }, axisFmt(v)));
     }
-    const k = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor((W - L - R) / 64))));
+    const k = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor((W - L - R) / (grain === 'month' ? 64 : 56)))));
     pts.forEach((p, i) => {
       if ((pts.length - 1 - i) % k !== 0) return;
-      const withYear = i < k || p.period.endsWith('01') || pts.slice(Math.max(0, i - k + 1), i).some((q) => q.period.endsWith('01'));
-      svg.append(sv('text', { x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'tv-axis' }, withYear ? `${p.period.slice(2, 4)}.${p.period.slice(4)}` : p.period.slice(4)));
+      let text = bucketLabel(p, grain, false);
+      if (grain === 'month') {
+        const withYear = i < k || p.period.endsWith('01') || pts.slice(Math.max(0, i - k + 1), i).some((q) => q.period.endsWith('01'));
+        text = withYear ? `${p.period.slice(2, 4)}.${p.period.slice(4)}` : p.period.slice(4);
+      }
+      svg.append(sv('text', { x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'tv-axis' }, text));
     });
+    const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
     if (m === 'price' || pts.length > 60) {
-      const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
       if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
+      if (m !== 'price' && vals.some((v) => v != null)) {
+        const first = vals.findIndex((v) => v != null); const last = vals.length - 1 - [...vals].reverse().findIndex((v) => v != null);
+        svg.append(sv('polygon', { points: `${x(first)},${y(0)} ${path(vals).join(' ')} ${x(last)},${y(0)}`, class: 'tv-area' }));
+      }
       svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none', pathLength: '1' }));
-      vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: 'tv-dot' })); });
-      if (m !== 'price' && vals.some((v) => v != null)) svg.prepend(sv('polygon', { points: `${x(vals.findIndex((v) => v != null))},${y(0)} ${path(vals).join(' ')} ${x(vals.length - 1 - [...vals].reverse().findIndex((v) => v != null))},${y(0)}`, class: 'tv-area' }));
+      vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: `tv-dot${pts[i].partial ? ' is-partial' : ''}` })); });
     } else {
-      const bw = Math.max(3, Math.min(20, step * 0.5));
+      const bw = Math.max(3, Math.min(grain === 'month' ? 20 : 36, step * 0.5));
       vals.forEach((v, i) => {
         if (v == null) return;
-        const h = Math.max(1, y(0) - y(v)); const r = Math.min(3, bw / 2, h); // rounded data end, flat on the baseline
-        bars[i] = sv('path', { d: `M${x(i) - bw / 2},${y(0)} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z`, class: 'tv-bar', style: `--d:${Math.min(i * 14, 420)}ms` });
+        const h = Math.max(1, Math.abs(y(0) - y(v))); const r = Math.min(3, bw / 2, h); const x0 = x(i) - bw / 2; const y0 = y(0);
+        const d = v >= 0 // rounded data end, flat on the zero line, either direction
+          ? `M${x0},${y0} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z`
+          : `M${x0},${y0} v${h - r} q0,${r} ${r},${r} h${bw - 2 * r} q${r},0 ${r},${-r} v${-(h - r)} z`;
+        bars[i] = sv('path', { d, class: `tv-bar${v < 0 ? ' tv-bar-neg' : ''}${pts[i].partial ? ' is-partial' : ''}`, style: `--d:${Math.min(i * 14, 420)}ms` });
         svg.append(bars[i]);
       });
-      if (prevs.length) svg.append(sv('polyline', { points: prevs.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean).join(' '), class: 'tv-line-prev', fill: 'none' }));
+      if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
     }
     const cross = sv('line', { x1: 0, x2: 0, y1: T, y2: H - B, class: 'tv-cross' });
-    const hit = sv('rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent', tabindex: '0', 'aria-label': '월별 값 보기: 방향키로 이동' });
+    const hit = sv('rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent', tabindex: '0', 'aria-label': '기간별 값 보기: 방향키로 이동' });
     svg.append(cross, hit);
     const tip = el('div', { class: 'tv-tip', role: 'status' });
+    const fmtV = net ? fmtSigned[m] : fmtOf[m];
     const show = (i) => {
       const p = pts[i]; if (!p) return;
       cross.style.transform = `translateX(${x(i)}px)`; svg.classList.add('is-hover');
       bars.forEach((b, j) => b && b.classList.toggle('is-active', j === i));
+      const v = valueOf(p, m); const pv = valueOf(p, m, true);
       tip.textContent = '';
-      tip.append(el('div', { class: 'tv-tip-h' }, ym(p.period)),
-        el('div', { class: 'tv-tip-r' }, el('i', { class: 'tv-key' }), el('b', {}, fmtOf[m](valueOf(p, m))), ' ', METRICS[m][0]),
-        state.yoy === '1' ? el('div', { class: 'tv-tip-r tv-muted' }, el('i', { class: 'tv-key tv-key-prev' }), fmtOf[m](valueOf(p, m, true)), ' 전년 동월') : null,
-        el('div', { class: 'tv-tip-r tv-muted' }, `전년 대비 ${fmtPct(yoyOf(p, m))}`));
+      tip.append(el('div', { class: 'tv-tip-h' }, bucketLabel(p, grain, true) || ym(p.period), p.partial ? el('span', { class: 'tv-tip-note' }, ` ${p.months}개월 집계`) : null),
+        el('div', { class: 'tv-tip-r' }, el('i', { class: `tv-key${net && v < 0 ? ' tv-key-neg' : ''}` }), el('b', {}, fmtV(v)), ' ', net && v != null ? (v >= 0 ? '순수출' : '순수입') : METRICS[m][0]),
+        state.yoy === '1' ? el('div', { class: 'tv-tip-r tv-muted' }, el('i', { class: 'tv-key tv-key-prev' }), fmtV(pv), grain === 'year' ? ' 전년' : ' 전년 동기') : null,
+        el('div', { class: 'tv-tip-r tv-muted' }, net ? `전년 대비 ${v != null && pv != null ? fmtV(v - pv) : '–'}` : `전년 대비 ${fmtPct(yoyOf(p, m))}`));
       const rect = svg.getBoundingClientRect(); const px = (x(i) / W) * rect.width;
-      const left = px + 14 + 170 > rect.width ? px - 14 - 170 : px + 14; // flips to the left near the right edge
+      const left = px + 14 + 180 > rect.width ? px - 14 - 180 : px + 14;
       tip.style.transform = `translateX(${Math.max(0, left)}px)`; tip.classList.add('is-on');
     };
     const idxAt = (e) => { const r = svg.getBoundingClientRect(); const px = ((e.clientX - r.left) / r.width) * W; return Math.max(0, Math.min(pts.length - 1, Math.floor((px - L) / step))); };
     let cur = pts.length - 1;
-    hit.addEventListener('pointermove', (e) => { cur = idxAt(e); show(cur); });
     const hide = () => { svg.classList.remove('is-hover'); tip.classList.remove('is-on'); };
+    hit.addEventListener('pointermove', (e) => { cur = idxAt(e); show(cur); });
     hit.addEventListener('pointerleave', hide);
     hit.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') cur = Math.max(0, cur - 1); else if (e.key === 'ArrowRight') cur = Math.min(pts.length - 1, cur + 1); else return; e.preventDefault(); show(cur); });
     hit.addEventListener('blur', hide);
@@ -285,30 +382,39 @@
   }
 
   function legend(state) {
-    if (state.yoy !== '1') return null; // one series: the card title names it
-    const items = [el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key' }), `${METRICS[state.metric][0]} (${METRICS[state.metric][1]})`)];
-    if (state.yoy === '1') items.push(el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key tv-key-prev' }), '전년 동월'));
+    const net = state.flow === 'net';
+    const items = [];
+    if (net) items.push(el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key' }), '순수출(＋)'), el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key tv-key-neg' }), '순수입(−)'));
+    else if (state.yoy === '1') items.push(el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key' }), `${METRICS[state.metric][0]} (${METRICS[state.metric][1]})`));
+    if (state.yoy === '1') items.push(el('span', { class: 'tv-legend-i' }, el('i', { class: 'tv-key tv-key-prev' }), state.grain === 'year' ? '전년' : '전년 동기'));
+    if (!items.length) return null; // one series: the card title names it
     return el('div', { class: 'tv-legend' }, items);
   }
 
-  function seriesTable(data) {
-    const t = el('table', { class: 'tv-table' }, el('thead', {}, el('tr', {}, ['월', '물량(톤)', '금액(USD)', '단가(USD/톤)', '물량 전년비', '단가 전년비'].map((h) => el('th', { scope: 'col' }, h)))));
+  function seriesTable(pts, state) {
+    const net = state.flow === 'net';
+    const heads = [state.grain === 'month' ? '월' : state.grain === 'quarter' ? '분기' : '연도', `${net ? '순수출 ' : ''}물량(톤)`, `${net ? '순수출 ' : ''}금액(USD)`, ...(net ? [] : ['단가(USD/톤)']), net ? '물량 전년 대비(톤)' : '물량 전년비', ...(net ? [] : ['단가 전년비'])];
+    const t = el('table', { class: 'tv-table' }, el('thead', {}, el('tr', {}, heads.map((h, i) => el('th', { scope: 'col', class: i ? 'tv-num' : '' }, h)))));
     const body = el('tbody');
-    for (const p of data.series) body.append(el('tr', {}, el('th', { scope: 'row' }, ym(p.period)), el('td', {}, p.ton == null ? '–' : nf(p.ton)), el('td', {}, p.usd == null ? '–' : nf(p.usd)), el('td', {}, p.price == null ? '–' : nf(p.price)), el('td', {}, fmtPct(p.yoyTon)), el('td', {}, fmtPct(p.yoyPrice))));
+    const n0 = (v) => (v == null ? '–' : net ? signed(v, '') : nf(v));
+    for (const p of pts) {
+      const cells = [n0(p.ton), n0(p.usd), ...(net ? [] : [p.price == null ? '–' : nf(p.price)]), net ? (p.ton != null && p.prevTon != null ? signed(p.ton - p.prevTon, '') : '–') : fmtPct(p.yoyTon), ...(net ? [] : [fmtPct(p.yoyPrice)])];
+      body.append(el('tr', { class: p.partial ? 'is-partial' : null }, el('th', { scope: 'row' }, bucketLabel(p, state.grain, true) || ym(p.period), p.partial ? el('small', { class: 'tv-code' }, ` ${p.months}개월`) : null), cells.map((c) => el('td', { class: 'tv-num' }, c))));
+    }
     t.append(body);
     return el('div', { class: 'tv-tablewrap' }, t);
   }
 
   // ranked list with an inline bar: the share is the number, the bar is only a visual aid
-  function rankList(title, note, rows, linkFor) {
+  function rankList(title, note, rows, linkFor, net = false) {
     const card = el('section', { class: 'tv-card' }, el('h3', {}, title), note ? el('p', { class: 'tv-muted tv-note' }, note) : null);
     if (!rows.length) { card.append(el('p', { class: 'tv-muted' }, '데이터가 없습니다.')); return card; }
     const top = Math.max(...rows.map((r) => r.share || 0)) || 1;
-    const t = el('table', { class: 'tv-table tv-rank' }, el('thead', {}, el('tr', {}, ['', '비중', '물량(톤)'].map((h, i) => el('th', { scope: 'col', class: i ? 'tv-num' : '' }, h)))));
+    const t = el('table', { class: 'tv-table tv-rank' }, el('thead', {}, el('tr', {}, ['', '비중', net ? '순수출(톤)' : '물량(톤)'].map((h, i) => el('th', { scope: 'col', class: i ? 'tv-num' : '' }, h)))));
     const body = el('tbody');
     for (const r of rows) {
       const label = linkFor && r.code ? el('a', { href: linkFor(r) }, r.name || '이름 없는 품목', ' ', el('small', { class: 'tv-code' }, r.code)) : el('span', { class: r.code ? '' : 'tv-muted' }, r.name || r.code);
-      body.append(el('tr', {}, el('th', { scope: 'row' }, label, el('span', { class: 'tv-bar-track' }, el('span', { class: 'tv-bar-fill', style: `width:${Math.max(1, ((r.share || 0) / top) * 100)}%` }))), el('td', { class: 'tv-num' }, r.share == null ? '–' : `${(r.share * 100).toFixed(1)}%`), el('td', { class: 'tv-num' }, nf(r.ton))));
+      body.append(el('tr', {}, el('th', { scope: 'row' }, label, el('span', { class: 'tv-bar-track' }, el('span', { class: `tv-bar-fill${net && r.ton < 0 ? ' tv-bar-fill-neg' : ''}`, style: `width:${Math.max(1, ((r.share || 0) / top) * 100)}%` }))), el('td', { class: 'tv-num' }, r.share == null ? '–' : `${(r.share * 100).toFixed(1)}%`), el('td', { class: 'tv-num' }, net ? signed(r.ton, '') : nf(r.ton))));
     }
     t.append(body); card.append(t);
     return card;
@@ -320,6 +426,8 @@
       ['출처', '관세청 수출입무역통계를 공공데이터포털 Open API(품목별·품목별 국가별·국가별 수출입실적)로 받습니다. 수치는 공표값 그대로이며, 비어 있는 달을 추정치로 채우지 않습니다.'],
       ['범위', '동식물성 유지 전 품목(HS 15류), 유지종자(대두·유채씨·해바라기씨 등), 유박(대두박 등), 바이오디젤(HS 3826)의 28개 품목군입니다. 국내 수입·수출 통관 기준입니다.'],
       ['갱신 주기', '관세청은 월말 후 약 2주 뒤 전월 실적을 공표합니다. 매월 17일에 자동 동기화하며, 최근 1~2개월은 잠정치라 이후 수정될 수 있습니다. 동기화 때 같은 기간을 다시 받아 수정치를 반영합니다.'],
+      ['집계 단위', '관세청은 월 단위로 공표하므로 기본은 월별이고, 분기·연도별은 그 달들의 합계입니다. 일별 자료는 공표되지 않아 제공하지 않습니다. 자료가 다 차지 않은 분기·연도는 옅게 표시하고 몇 개월 합계인지 함께 보여 줍니다.'],
+      ['순수출', '순수출 = 수출 − 수입(같은 품목·같은 기간)입니다. ＋면 수출이 많은 순수출, −면 수입이 많은 순수입이며, 부호가 바뀔 수 있어 증감은 %가 아니라 톤·달러 차이로 보여 줍니다. 차이 값의 단가는 의미가 없어 계산하지 않습니다.'],
       ['단위와 계산', '중량은 톤(공표 kg ÷ 1,000), 금액은 미 달러입니다. 단가는 금액 ÷ 중량으로 이 화면에서 계산한 값으로, 품질·조건이 다른 품목이 섞이면 실제 거래가와 다를 수 있습니다.'],
       ['품목 분류', '가장 세부 단위(HS 10자리)로 저장하고 상위 분류는 합계로 계산합니다. 그래서 하위 품목을 모두 더하면 상위 품목과 정확히 같습니다. 국가별 통계는 관세청이 HS 6자리까지만 제공하므로 그보다 세부 품목을 고르면 상위 6자리 기준으로 보여 줍니다.'],
       ['조회 기간', `${bounds ? `현재 ${ym(bounds.min)}부터 ${ym(bounds.max)}까지 조회할 수 있습니다. ` : ''}적재를 시작한 달부터 매월 한 달씩 늘어나며, 기간 입력은 이 범위 안에서만 고를 수 있습니다. 범위를 벗어나거나 시작·종료가 바뀐 주소로 열면 자동으로 범위 안으로 맞추고 그 사실을 화면에 알립니다.`],
@@ -359,30 +467,35 @@
       breadcrumb(data, state),
       el('div', { class: 'tv-row' }, periodControls(data, state)),
       el('div', { class: 'tv-row tv-switches' },
-        segmented('수입·수출', [['imp', '수입'], ['exp', '수출']], state.flow, (v) => go(state, { flow: v })),
-        segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가']], state.metric, (v) => go(state, { metric: v })))));
+        segmented('구분', [['imp', '수입'], ['exp', '수출'], ['net', '순수출']], state.flow, (v) => go(state, { flow: v })),
+        segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가', state.flow === 'net' ? '순수출(수출−수입)에는 단가를 계산하지 않습니다' : null]], state.metric, (v) => go(state, { metric: v })))));
     if (data.adjusted && data.adjusted.length) root.append(el('p', { class: 'tv-notice', role: 'status' }, `${data.adjusted.map((a) => ADJUST_TEXT[a] || a).join(' · ')}.`));
 
     root.append(el('div', { class: 'tv-selected' }, el('h3', {}, data.name || '이름 없는 품목'), el('span', { class: 'tv-badge' }, LEVEL_LABEL[data.hs.length] || ''), el('span', { class: 'tv-code' }, `HS ${data.hs}`)));
     root.append(kpiStrip(data, state));
 
     const csv = `/api/trade/export.csv?${qs}`;
+    const net = state.flow === 'net';
+    const pts = aggregate(data.series, state.grain, net);
     root.append(el('section', { class: 'tv-card' },
-      el('div', { class: 'tv-card-h' }, el('h3', {}, `월별 ${state.flow === 'exp' ? '수출' : '수입'} ${METRICS[state.metric][0]}`, ' ', el('small', { class: 'tv-code' }, `${ym(data.from)}–${ym(data.to)} · ${METRICS[state.metric][1]}`)),
+      el('div', { class: 'tv-card-h' }, el('h3', {}, `${GRAIN_NAME[state.grain]} ${FLOW_NAME[state.flow]} ${METRICS[state.metric][0]}`, ' ', el('small', { class: 'tv-code' }, `${ym(data.from)}–${ym(data.to)} · ${METRICS[state.metric][1]}`)),
         el('div', { class: 'tv-tools' },
-          el('button', { type: 'button', class: 'tv-chip', 'aria-pressed': String(state.yoy === '1'), onclick: () => go(state, { yoy: state.yoy === '1' ? '0' : '1' }) }, '전년 동월 비교'),
+          segmented('집계 단위', [['day', '일', '관세청 통계는 월 단위로만 공표되어 일별 자료는 없습니다'], ['month', '월'], ['quarter', '분기'], ['year', '연']], state.grain, (v) => go(state, { grain: v })),
+          el('span', { class: 'tv-tools-sep', 'aria-hidden': 'true' }),
+          el('button', { type: 'button', class: 'tv-chip', 'aria-pressed': String(state.yoy === '1'), onclick: () => go(state, { yoy: state.yoy === '1' ? '0' : '1' }) }, state.grain === 'year' ? '전년 비교' : '전년 동기 비교'),
           el('button', { type: 'button', class: 'tv-chip', 'aria-pressed': String(state.view === 'table'), onclick: () => go(state, { view: state.view === 'table' ? 'chart' : 'table' }) }, '표로 보기'),
           el('a', { class: 'tv-chip', href: csv, download: '' }, 'CSV 받기'))),
-      state.view === 'table' ? seriesTable(data) : el('div', {}, legend(state), trendChart(data, state))));
+      state.view === 'table' ? seriesTable(pts, state) : el('div', {}, legend(state), trendChart(data, state, pts)),
+      pts.some((p) => p.partial) ? el('p', { class: 'tv-note tv-muted' }, '옅은 막대는 자료가 다 차지 않은 기간(조회 범위의 앞뒤 또는 아직 공표 전)입니다. 전년 비교는 같은 달끼리만 합니다.') : null));
 
     const nl = data.children;
     const nextName = { 4: '품목군', 6: '세부 품목', 10: '최종 품목' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
     const cols = el('div', { class: 'tv-cols' },
-      nl.length ? rankList(`구성 — ${nextName}별`, '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', foldSmall(nl, 'item'), (r) => href(state, { hs: r.code }))
+      nl.length ? rankList(`구성 — ${nextName}별`, net ? '하위 품목별 순수출(＋)·순수입(−)입니다. 비중은 무역수지 규모 기준이며, 이름을 누르면 한 단계 더 들어갑니다.' : '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', foldSmall(nl, 'item'), (r) => href(state, { hs: r.code }), net)
         : el('section', { class: 'tv-card' }, el('h3', {}, '구성'), el('p', { class: 'tv-muted' }, '가장 세부 단계의 품목입니다.')),
-      rankList(`${state.flow === 'exp' ? '수출 상대국' : '수입 원산지'} 비중`,
+      rankList(net ? '상대국별 순수출' : `${state.flow === 'exp' ? '수출 상대국' : '수입 원산지'} 비중`,
         data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
-        foldSmall(data.countries), null));
+        foldSmall(data.countries), null, net));
     root.append(cols, el('p', { class: 'tv-source' }, '출처: 관세청 수출입무역통계(공공데이터포털). 최근 월은 잠정치이며, 자세한 기준은 위 "무역통계 운영 방침"에 있습니다.'));
     commit();
   }

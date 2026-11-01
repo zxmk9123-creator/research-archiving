@@ -1610,3 +1610,54 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   .tv-root *, .tv-root { animation: none !important; transition: none !important; }
 }
 @media (max-width: 640px) { .tv-tile-value { font-size: 21px; } .tv-skel-chart { height: 220px; } }
+
+/* ---- 무역통계: net flow, grain, browse popover ----
+   Net balance is a polarity: positive (net export) keeps the series hue, negative (net import) takes the second categorical hue (#eb6834),
+   always with a sign and the words 순수출/순수입 so the meaning never rests on color. The zero line is the one emphasized gridline. */
+.tv-root { --tv-neg: #eb6834; }
+.tv-bar-neg { fill: var(--tv-neg); transform-origin: 50% 0; }
+.tv-bar.is-partial, .tv-dot.is-partial { opacity: .45; } .tv-svg.is-hover .tv-bar.is-partial.is-active { opacity: .7; }
+.tv-zero { stroke: var(--border-strong); }
+.tv-key-neg { border-top-color: var(--tv-neg); }
+.tv-bar-fill-neg { background: var(--tv-neg); }
+.tv-tip-note { font-weight: 500; color: var(--text-tertiary); font-size: 11.5px; }
+.tv-side { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 11px; font-weight: 600; color: var(--text-secondary); vertical-align: 1px; }
+.tv-tools { align-items: center; } .tv-tools .tv-seg .tv-label { display: none; }
+.tv-tools-sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+.tv-seg button:disabled { opacity: .4; cursor: not-allowed; }
+.tv-table tr.is-partial th, .tv-table tr.is-partial td { color: var(--text-tertiary); }
+
+/* browse popover: groups | items */
+.tv-browse-panel { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 30; display: grid; grid-template-columns: 196px 1fr; grid-template-rows: 1fr auto;
+  min-height: 300px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-surface); box-shadow: var(--shadow-card-hover); overflow: hidden;
+  animation: tv-pop .18s var(--tv-ease) both; }
+.tv-browse-row { position: relative; }
+.tv-browse-loading { grid-column: 1 / -1; padding: var(--sp-5); }
+.tv-browse-nav { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3) var(--sp-2); background: var(--surface-sunken); border-right: 1px solid var(--border); }
+.tv-browse-nav button { display: flex; justify-content: space-between; align-items: center; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--text-secondary); font: inherit; font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer; transition: background .14s ease-out, color .14s ease-out; }
+.tv-browse-nav button:hover { background: var(--surface); color: var(--text); }
+.tv-browse-nav button[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: 0 1px 2px rgba(25, 31, 40, .06); }
+.tv-browse-count { font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.tv-browse-body { padding: var(--sp-4) var(--sp-4h); overflow: auto; max-height: 420px; }
+.tv-browse-body h4 { margin: 0 0 var(--sp-3); font-size: 12px; font-weight: 600; color: var(--text-tertiary); }
+.tv-browse-items { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
+.tv-browse-items li { animation: tv-rise .28s var(--tv-ease) both; }
+.tv-browse-items li:nth-child(2) { animation-delay: 25ms; } .tv-browse-items li:nth-child(3) { animation-delay: 50ms; } .tv-browse-items li:nth-child(4) { animation-delay: 75ms; }
+.tv-browse-items li:nth-child(n+5) { animation-delay: 100ms; }
+.tv-browse-items a { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); color: var(--text); text-decoration: none;
+  transition: border-color .14s ease-out, background .14s ease-out, transform .14s ease-out; }
+.tv-browse-items a:hover { border-color: var(--border-strong); background: var(--surface-sunken); transform: translateY(-1px); }
+.tv-browse-items a.is-on { border-color: var(--text); }
+.tv-bi-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; } .tv-bi-name { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.tv-bi-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.tv-bi-vol { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.tv-spark { width: 72px; height: 22px; flex: none; } .tv-spark polyline { stroke: var(--tv-s1); stroke-width: 1.5; stroke-linejoin: round; } .tv-spark circle { fill: var(--tv-s1); }
+.tv-spark-empty { display: inline-block; }
+.tv-browse-foot { grid-column: 1 / -1; margin: 0; padding: 8px var(--sp-4); font-size: 11.5px; color: var(--text-tertiary); border-top: 1px solid var(--border); background: var(--surface); }
+.tv-browse .tv-browse-grid { display: none; }
+@media (max-width: 640px) {
+  .tv-browse-panel { grid-template-columns: 1fr; position: fixed; left: 8px; right: 8px; top: 72px; bottom: 8px; min-height: 0; }
+  .tv-browse-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: var(--sp-2); }
+  .tv-browse-nav button { flex: none; } .tv-browse-body { max-height: none; }
+}

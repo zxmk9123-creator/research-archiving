@@ -18,7 +18,7 @@ function parseQuery(q, bounds) {
   const b = typeof bounds === 'string' ? { min: '000101', max: bounds } : bounds;
   const hs = String(q.hs || '15').trim();
   if (!/^\d+$/.test(hs) || !LEVELS.includes(hs.length)) return { ok: false, error: 'invalid_hs' };
-  const flow = q.flow === 'exp' ? 'exp' : 'imp';
+  const flow = q.flow === 'exp' || q.flow === 'net' ? q.flow : 'imp'; // net = exports − imports (positive: net exporter)
   const adjusted = [];
   let to = isPeriod(String(q.to || '')) ? String(q.to) : b.max;
   if (q.to && !isPeriod(String(q.to))) adjusted.push('to_invalid');
@@ -36,7 +36,7 @@ function parseQuery(q, bounds) {
 const pctChange = (cur, prev) => (cur == null || prev == null || prev === 0 ? null : (cur - prev) / prev);
 
 // rows: [{ period, wgt, amt }] (kg, USD) sorted by period -> series with tons, usd, unit price (USD/ton) and year-over-year changes.
-function buildSeries(rows, from, to) {
+function buildSeries(rows, from, to, { noPrice = false } = {}) {
   const by = new Map(rows.map((r) => [r.period, r]));
   const out = [];
   for (let p = from; p <= to; p = addMonths(p, 1)) {
@@ -46,16 +46,19 @@ function buildSeries(rows, from, to) {
     const prevR = by.get(addMonths(p, -12));
     const pTon = prevR && prevR.wgt != null ? prevR.wgt / KG_PER_TON : null;
     const pUsd = prevR && prevR.amt != null ? prevR.amt : null;
-    const price = ton && usd != null ? usd / ton : null;
-    const pPrice = pTon && pUsd != null ? pUsd / pTon : null;
-    out.push({ period: p, ton, usd, price, prevTon: pTon, prevUsd: pUsd, prevPrice: pPrice, yoyTon: pctChange(ton, pTon), yoyUsd: pctChange(usd, pUsd), yoyPrice: pctChange(price, pPrice) });
+    // a unit price of a difference (net flow) means nothing, so it is never computed there
+    const price = !noPrice && ton && usd != null ? usd / ton : null;
+    const pPrice = !noPrice && pTon && pUsd != null ? pUsd / pTon : null;
+    // a % change across a sign flip (net importer -> net exporter) is not a growth rate
+    const pc = (a, b) => (a == null || b == null || b === 0 || a * b < 0 ? null : (a - b) / Math.abs(b));
+    out.push({ period: p, ton, usd, price, prevTon: pTon, prevUsd: pUsd, prevPrice: pPrice, yoyTon: pc(ton, pTon), yoyUsd: pc(usd, pUsd), yoyPrice: pc(price, pPrice) });
   }
   return out;
 }
 
 // KPIs over the series (latest month with data, its month-on-month and year-on-year change, trailing-12-month total vs the 12 months before).
-function buildKpis(rows, from, to) {
-  const all = buildSeries(rows, addMonths(from, -24), to); // include the lookback needed for the 12M comparison
+function buildKpis(rows, from, to, opts = {}) {
+  const all = buildSeries(rows, addMonths(from, -24), to, opts); // include the lookback needed for the 12M comparison
   const have = all.filter((p) => p.ton != null && p.period >= from);
   const last = have[have.length - 1];
   if (!last) return null;
@@ -68,8 +71,8 @@ function buildKpis(rows, from, to) {
   const t12ton = sum(t12, 'ton'); const t12usd = sum(t12, 'usd');
   return {
     period: last.period, ton: last.ton, usd: last.usd, price: last.price,
-    momTon: prev && prev.ton != null ? pctChange(last.ton, prev.ton) : null, yoyTon: last.yoyTon, yoyUsd: last.yoyUsd, yoyPrice: last.yoyPrice,
-    t12: full(t12) ? { ton: t12ton, usd: t12usd, price: t12ton ? t12usd / t12ton : null, prevTon: full(p12) ? sum(p12, 'ton') : null, changeTon: full(p12) ? pctChange(t12ton, sum(p12, 'ton')) : null } : null,
+    momTon: prev && prev.ton != null && last.ton * prev.ton > 0 ? (last.ton - prev.ton) / Math.abs(prev.ton) : null, yoyTon: last.yoyTon, yoyUsd: last.yoyUsd, yoyPrice: last.yoyPrice,
+    t12: full(t12) ? { ton: t12ton, usd: t12usd, price: !opts.noPrice && t12ton ? t12usd / t12ton : null, prevTon: full(p12) ? sum(p12, 'ton') : null, changeTon: full(p12) && t12ton * sum(p12, 'ton') > 0 ? (t12ton - sum(p12, 'ton')) / Math.abs(sum(p12, 'ton')) : null } : null,
   };
 }
 

@@ -6,7 +6,12 @@ const { tradeKeysStatus } = require('../lib/tradeApiConfig');
 const Q = require('../lib/tradeQuery');
 
 const router = express.Router();
-const col = (flow) => (flow === 'exp' ? { wgt: 'exp_wgt', amt: 'exp_amt' } : { wgt: 'imp_wgt', amt: 'imp_amt' });
+// SQL value expressions per flow; net = exports − imports (a missing side counts as 0 only when the other side exists)
+const col = (flow) => (flow === 'exp' ? { wgt: 'exp_wgt', amt: 'exp_amt' }
+  : flow === 'net' ? { wgt: '(coalesce(exp_wgt, 0) - coalesce(imp_wgt, 0))', amt: '(coalesce(exp_amt, 0) - coalesce(imp_amt, 0))' }
+  : { wgt: 'imp_wgt', amt: 'imp_amt' });
+// ranking: by size for imports/exports, by size of the balance (either sign) for net
+const rankBy = (flow, expr) => (flow === 'net' ? `abs(${expr})` : expr);
 const num = (v) => (v == null ? null : Number(v));
 const like = (hs) => `${hs}%`;
 
@@ -57,8 +62,9 @@ router.get('/dashboard', async (req, res) => {
     const { hs, flow, from, to } = parsed.value;
     const c = col(flow);
     const rows = await loadSeriesRows(hs, flow, from, to);
-    const series = Q.buildSeries(rows, from, to);
-    const kpis = Q.buildKpis(rows, from, to);
+    const opts = { noPrice: flow === 'net' };
+    const series = Q.buildSeries(rows, from, to, opts);
+    const kpis = Q.buildKpis(rows, from, to, opts);
 
     // children = the next HS level under the selection; they partition it, so shares add up to 100%
     const nl = Q.nextLevel(hs.length);
@@ -67,10 +73,10 @@ router.get('/dashboard', async (req, res) => {
       const r = await pool.query(
         `SELECT left(hs_code, $2) AS code, sum(${c.wgt}) AS wgt, sum(${c.amt}) AS amt FROM trade_flow
           WHERE source = 'customs' AND country_code = '' AND hs_code LIKE $1 AND period BETWEEN $3 AND $4
-          GROUP BY 1 HAVING sum(${c.wgt}) > 0 ORDER BY sum(${c.wgt}) DESC LIMIT 30`, [like(hs), nl, from, to]);
-      const total = r.rows.reduce((a, x) => a + Number(x.wgt), 0);
+          GROUP BY 1 HAVING ${rankBy(flow, `sum(${c.wgt})`)} > 0 ORDER BY ${rankBy(flow, `sum(${c.wgt})`)} DESC LIMIT 30`, [like(hs), nl, from, to]);
+      const total = r.rows.reduce((a, x) => a + Math.abs(Number(x.wgt)), 0); // net: share of the total balance moved, sign kept on the value
       const nm = await names(r.rows.map((x) => x.code));
-      children = r.rows.map((x) => ({ code: x.code, name: nm.get(x.code) || null, ton: Number(x.wgt) / 1000, usd: num(x.amt), share: total ? Number(x.wgt) / total : null }));
+      children = r.rows.map((x) => ({ code: x.code, name: nm.get(x.code) || null, ton: Number(x.wgt) / 1000, usd: num(x.amt), share: total ? Math.abs(Number(x.wgt)) / total : null }));
     }
 
     // countries: stored at HS6, so a finer selection answers at its HS6 parent (flagged in `countryScope`)
@@ -78,9 +84,9 @@ router.get('/dashboard', async (req, res) => {
     const cr = await pool.query(
       `SELECT country_code, max(country_name) AS name, sum(${c.wgt}) AS wgt, sum(${c.amt}) AS amt, min(period) AS pmin, max(period) AS pmax FROM trade_flow
         WHERE source = 'customs' AND country_code <> '' AND hs_code LIKE $1 AND period BETWEEN $2 AND $3
-        GROUP BY country_code HAVING sum(${c.wgt}) > 0 ORDER BY sum(${c.wgt}) DESC`, [like(cs), from, to]);
-    const ctotal = cr.rows.reduce((a, x) => a + Number(x.wgt), 0);
-    const countries = cr.rows.slice(0, 15).map((x) => ({ code: x.country_code, name: x.name || x.country_code, ton: Number(x.wgt) / 1000, usd: num(x.amt), share: ctotal ? Number(x.wgt) / ctotal : null }));
+        GROUP BY country_code HAVING ${rankBy(flow, `sum(${c.wgt})`)} > 0 ORDER BY ${rankBy(flow, `sum(${c.wgt})`)} DESC`, [like(cs), from, to]);
+    const ctotal = cr.rows.reduce((a, x) => a + Math.abs(Number(x.wgt)), 0);
+    const countries = cr.rows.slice(0, 15).map((x) => ({ code: x.country_code, name: x.name || x.country_code, ton: Number(x.wgt) / 1000, usd: num(x.amt), share: ctotal ? Math.abs(Number(x.wgt)) / ctotal : null }));
     const covered = cr.rows.length ? { from: cr.rows.reduce((a, x) => (x.pmin < a ? x.pmin : a), '999999'), to: cr.rows.reduce((a, x) => (x.pmax > a ? x.pmax : a), '000000') } : null;
 
     // breadcrumb: the selection and its ancestors with names
@@ -133,10 +139,39 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// Browse without codes: plain-language groups of headings.
-router.get('/groups', (req, res) => {
-  res.set('Cache-Control', 'public, max-age=3600');
-  res.json({ groups: GROUPS.map((g) => ({ name: g.name, items: g.codes.map((c) => ({ code: c, name: HS_NAMES[c] || c })) })) });
+// Browse without codes: plain-language groups of headings, each with its last-12-month imports/exports and a monthly import trail for a sparkline.
+router.get('/groups', async (req, res) => {
+  try {
+    await ensureTable(pool);
+    const bounds = await periodBounds();
+    const stats = new Map();
+    if (bounds) {
+      const since = Q.addMonths(bounds.max, -11);
+      const { rows } = await pool.query(
+        `SELECT left(hs_code, 4) AS h, period, sum(imp_wgt) AS imp, sum(exp_wgt) AS exp FROM trade_flow
+          WHERE source = 'customs' AND country_code = '' AND period BETWEEN $1 AND $2 GROUP BY 1, 2`, [since, bounds.max]);
+      for (const r of rows) {
+        const s = stats.get(r.h) || { imp: 0, exp: 0, trail: {} };
+        s.imp += Number(r.imp) || 0; s.exp += Number(r.exp) || 0; s.trail[String(r.period)] = (Number(r.imp) || 0) / 1000;
+        stats.set(r.h, s);
+      }
+    }
+    const months = bounds ? Array.from({ length: 12 }, (_, i) => Q.addMonths(bounds.max, i - 11)) : [];
+    res.set('Cache-Control', 'private, max-age=300');
+    res.json({
+      through: bounds ? bounds.max : null,
+      groups: GROUPS.map((g) => ({
+        name: g.name,
+        items: g.codes.map((c) => {
+          const s = stats.get(c);
+          return { code: c, name: HS_NAMES[c] || c, impTon: s ? s.imp / 1000 : null, expTon: s ? s.exp / 1000 : null, trail: s ? months.map((p) => s.trail[p] ?? null) : [] };
+        }),
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/trade/groups failed:', err.message);
+    res.status(500).json({ error: 'trade_unavailable' });
+  }
 });
 
 // CSV of the monthly series for the current selection (UTF-8 with BOM so Excel reads Korean text).
@@ -147,9 +182,9 @@ router.get('/export.csv', async (req, res) => {
     const parsed = bounds ? Q.parseQuery(req.query, bounds) : { ok: false, error: 'no_data' };
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
     const { hs, flow, from, to } = parsed.value;
-    const series = Q.buildSeries(await loadSeriesRows(hs, flow, from, to), from, to);
+    const series = Q.buildSeries(await loadSeriesRows(hs, flow, from, to), from, to, { noPrice: flow === 'net' });
     const f = (v, d = 0) => (v == null ? '' : Number(v).toFixed(d));
-    const lines = ['월,물량(톤),금액(USD),단가(USD/톤),물량 전년비,금액 전년비,단가 전년비'];
+    const lines = [`월,${flow === 'net' ? '순수출 ' : ''}물량(톤),${flow === 'net' ? '순수출 ' : ''}금액(USD),단가(USD/톤),물량 전년비,금액 전년비,단가 전년비`];
     for (const p of series) lines.push([p.period, f(p.ton, 1), f(p.usd), f(p.price), f(p.yoyTon, 4), f(p.yoyUsd, 4), f(p.yoyPrice, 4)].join(','));
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="trade_${hs}_${flow}_${from}-${to}.csv"`);
