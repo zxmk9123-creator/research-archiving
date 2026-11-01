@@ -81,13 +81,14 @@ async function seedCatalog(db) {
 // mode 'probe': one call per API for the first heading and the latest window, nothing written.
 // mode 'sync': `limit` headings starting at `offset` (item rows for `months`, country rows for 24 months). Returns { done, next } so a caller can loop
 // in several short invocations instead of one that would outlive the function limit.
-async function runTradeSync({ mode = 'sync', months = 36, countryMonths = 24, offset = 0, limit = 6, now = new Date(), call = callTradeApi, db = pool } = {}) {
+async function runTradeSync({ mode = 'sync', months = 36, countryMonths = 24, offset = 0, limit = 6, probeFrom = null, now = new Date(), call = callTradeApi, db = pool } = {}) {
   if (mode === 'probe') {
-    const w = monthWindows(12, now).pop();
+    // probeFrom (YYYYMM) asks about an older 12-month window: how far back the API actually has data
+    const w = probeFrom ? { from: probeFrom, to: `${Number(probeFrom.slice(0, 4))}12` } : monthWindows(12, now).pop();
     const out = {};
     for (const api of ['trade_item', 'trade_item_country', 'trade_country']) {
       const r = await call(api, { from: w.from, to: w.to, hs: api === 'trade_country' ? undefined : HEADINGS[0].hs });
-      out[api] = { ok: r.ok, code: r.code, message: r.message, status: r.status, rows: r.rows.length, fields: r.fields, sample: r.rows[0] ? { period: r.rows[0].period, hsCode: r.rows[0].hsCode, impWgt: r.rows[0].impWgt, impAmt: r.rows[0].impAmt } : null };
+      out[api] = { ok: r.ok, code: r.code, message: r.message, status: r.status, rows: r.rows.length, firstPeriod: r.rows.reduce((a, x) => (!a || x.period < a ? x.period : a), null), fields: r.fields, sample: r.rows[0] ? { period: r.rows[0].period, hsCode: r.rows[0].hsCode, impWgt: r.rows[0].impWgt, impAmt: r.rows[0].impAmt } : null };
     }
     return { mode, window: w, apis: out };
   }

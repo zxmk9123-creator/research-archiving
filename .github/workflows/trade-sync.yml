@@ -16,6 +16,9 @@ on:
       limit:
         description: 'items per call (use 1 for a deep backfill so each call fits the time limit)'
         default: '6'
+      probe_from:
+        description: 'probe only: first month of an older year to test (YYYY01)'
+        default: ''
 
 concurrency:
   group: trade-sync
@@ -33,10 +36,11 @@ jobs:
           MODE: ${{ github.event.inputs.mode || 'sync' }}
           MONTHS: ${{ github.event.inputs.months || '36' }}
           LIMIT: ${{ github.event.inputs.limit || '6' }}
+          PROBE_FROM: ${{ github.event.inputs.probe_from || '' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
           case "$MODE" in probe|sync) ;; *) MODE=sync ;; esac
-          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1&months=$MONTHS&country_months=$MONTHS&limit=$LIMIT" || true; }
+          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1&months=$MONTHS&country_months=$MONTHS&limit=$LIMIT&probe_from=$PROBE_FROM" || true; }
           if [ "$MODE" = "probe" ]; then
             code=$(call 0); echo "HTTP $code"; head -c 3000 out.json; echo
             [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code"; exit 1; }

@@ -60,3 +60,11 @@ test('foldRows keeps HS codes apart and sums the same code/month/country', () =>
   const byCountry = foldRows(rows, true);
   assert.equal(byCountry.length, 1); assert.deepEqual([byCountry[0].countryCode, byCountry[0].impWgt], ['ID', 10]);
 });
+
+test('probe can test an older window and reports the earliest month returned', async () => {
+  const { runTradeSync } = require('../server/lib/tradeSync');
+  const seen = [];
+  const r = await runTradeSync({ mode: 'probe', probeFrom: '198801', call: async (api, p) => { seen.push(p); return parseTradeXml(OK); }, db: { query: async () => { throw new Error('no writes'); } } });
+  assert.deepEqual([seen[0].from, seen[0].to], ['198801', '198812']);
+  assert.equal(r.apis.trade_item.firstPeriod, '202608');
+});

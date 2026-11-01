@@ -201,7 +201,8 @@ function tradeSyncHandler({ run = (opts) => require('./tradeSync').runTradeSync(
     const mode = String((req.query && req.query.mode) || 'sync') === 'probe' ? 'probe' : 'sync';
     const int = (k, lo, hi, dflt) => { const n = Math.floor(Number(req.query && req.query[k])); return Number.isFinite(n) && n >= lo ? Math.min(hi, n) : dflt; };
     // backfill depth and batch size are bounded so one call always fits the function time limit
-    const opts = { mode, offset: int('offset', 0, 1000, 0), months: int('months', 1, 360, 36), countryMonths: int('country_months', 1, 360, 24), limit: int('limit', 1, 10, 6) };
+    const opts = { mode, offset: int('offset', 0, 1000, 0), months: int('months', 1, 600, 36), countryMonths: int('country_months', 1, 600, 24), limit: int('limit', 1, 10, 6) };
+    if (/^\d{4}01$/.test(String(req.query && req.query.probe_from))) opts.probeFrom = String(req.query.probe_from);
     try {
       res.json(await run(opts));
     } catch (err) {
