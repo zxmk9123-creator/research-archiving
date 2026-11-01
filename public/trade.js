@@ -104,7 +104,7 @@
     const flow = q.mode === 'pair' ? 'pair' : ['imp', 'exp', 'net'].includes(q.flow) ? q.flow : 'imp';
     const metric = ['ton', 'usd', 'price'].includes(q.metric) && !(flow === 'net' && q.metric === 'price') ? q.metric : 'ton'; // no unit price of a balance
     const pair = q.mode === 'pair';
-    return { mode: pair ? 'pair' : 'kr', ex: /^\d{1,4}$/.test(q.ex || '') ? q.ex : '360', im: /^\d{1,4}$/.test(q.im || '') ? q.im : '699', hs: q.hs || '15', country: /^[A-Z]{2}$/.test(q.country || '') ? q.country : '', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
+    return { mode: pair ? 'pair' : 'kr', ex: /^\d{1,4}$/.test(q.ex || '') ? q.ex : '0', im: /^\d{1,4}$/.test(q.im || '') ? q.im : '410', hs: q.hs || '15', country: /^[A-Z]{2}$/.test(q.country || '') ? q.country : '', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
   };
   const FLOW_NAME = { imp: '수입', exp: '수출', net: '순수출', pair: '교역' };
   const GRAIN_NAME = { month: '월별', quarter: '분기별', year: '연도별' };
@@ -250,7 +250,7 @@
     const pick = (label, key, other) => el('label', { class: 'tv-seg tv-partner' }, el('span', { class: 'tv-label' }, label),
       el('select', { class: 'tv-select', 'aria-label': label, onchange: (e) => {
         const v = e.target.value;
-        go(state, { [key]: v, ...((v === state[other] || (v === '0' && state[other] === '0')) ? { [other]: state[key] === '0' ? (key === 'ex' ? '360' : '699') : state[key] } : {}) });
+        go(state, { [key]: v, ...((v === state[other] || (v === '0' && state[other] === '0')) ? { [other]: state[key] === '0' ? '410' : state[key] } : {}) });
       } }, [opt(all, state[key]), ...countries.map((c) => opt(c, state[key]))]));
     return el('div', { class: 'tv-row tv-pair-row' }, pick('수출국', 'ex', 'im'),
       el('button', { type: 'button', class: 'tv-swap', 'aria-label': '수출국과 수입국 바꾸기', title: '수출국과 수입국 바꾸기', onclick: () => go(state, { ex: state.im, im: state.ex }) }, '⇄'),
