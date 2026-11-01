@@ -2891,29 +2891,24 @@ async function renderSourceManager(view, query = {}) {
 }
 
 async function renderSources(query = {}) { return renderSourceManager('all', query); }
-// 무역통계: 관세청 수출입실적(월별). 출처 선택은 이후 Kpler 해상 데이터가 들어오면 같은 틀에 추가된다.
+// 무역통계 대시보드는 별도 파일(trade.js)이며 이 탭을 열 때만 불러온다.
+let tradeModulePromise = null;
+function loadTradeModule() {
+  if (window.TradeDashboard) return Promise.resolve();
+  if (!tradeModulePromise) {
+    tradeModulePromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/trade.js';
+      s.onload = resolve;
+      s.onerror = () => { tradeModulePromise = null; reject(new Error('무역통계 화면을 불러오지 못했습니다.')); };
+      document.head.append(s);
+    });
+  }
+  return tradeModulePromise;
+}
 async function renderTrade(query = {}) {
-  const items = (await api('/trade/items')).items || [];
-  const hs = items.some((o) => o.hs === query.hs) ? query.hs : (items[0] && items[0].hs);
-  app.innerHTML = '<p>무역통계를 불러오는 중…</p>';
-  const [ser, cty] = await Promise.all([api(`/trade/series?hs=${hs}&months=24`), api(`/trade/countries?hs=${hs}`)]);
-  const rows = ser.series || [];
-  const label = (p) => `${p.slice(2, 4)}.${p.slice(4)}`;
-  const chips = items.map((o) => `<a class="chip ${o.hs === hs ? 'is-on' : ''}" href="#/trade?hs=${o.hs}">${escapeHtml(o.name)} <small>${o.hs}</small></a>`).join(' ');
-  const empty = '<p class="muted">아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.</p>';
-  const chart = (c) => renderChartHtml(JSON.stringify(c)) || empty;
-  const hasRows = rows.length >= 2;
-  const tonChart = hasRows ? chart({ title: `${ser.name} 월별 수입량`, unit: '톤', type: 'bar', labels: rows.map((r) => label(r.period)), series: [{ name: '수입량', data: rows.map((r) => (r.impTon == null ? null : Math.round(r.impTon))) }] }) : empty;
-  const priceChart = hasRows ? chart({ title: `${ser.name} 수입 단가`, unit: '달러/톤', type: 'line', labels: rows.map((r) => label(r.period)), series: [{ name: '단가', data: rows.map((r) => r.unitPrice) }] }) : empty;
-  // countries under 0.5% are folded into one "기타" bar so the chart shows who actually matters
-  const big = (cty.countries || []).filter((c) => (c.share || 0) >= 0.005).slice(0, 8);
-  const rest = 1 - big.reduce((a, c) => a + (c.share || 0), 0);
-  const cs = rest >= 0.005 && big.length ? [...big, { name: '기타', share: rest }] : big;
-  const through = cty.through ? `, ${cty.through.slice(0, 4)}.${cty.through.slice(4)}까지` : '';
-  const share = cs.length >= 2 ? chart({ title: `${ser.name} 수입 국가 비중 (최근 12개월${through})`, unit: '%', type: 'hbar', labels: cs.map((c) => c.name), series: [{ name: '비중', data: cs.map((c) => Math.round((c.share || 0) * 1000) / 10) }] }) : empty;
-  app.innerHTML = `<section class="section"><div class="section-header"><h2>무역통계</h2></div>
-    <p class="muted">출처: 관세청 수출입무역통계(공공데이터포털). 수입 기준, 단가는 수입금액÷수입중량으로 계산한 값입니다. 최근 월은 잠정치일 수 있습니다.</p>
-    <div class="chip-row">${chips}</div>${tonChart}${priceChart}${share}</section>`;
+  await loadTradeModule();
+  await window.TradeDashboard.render(app, query, { api });
 }
 
 async function renderReference(query = {}) { return renderSourceManager('reference', query); }

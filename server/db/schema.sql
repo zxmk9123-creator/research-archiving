@@ -1399,3 +1399,4 @@ CREATE TABLE IF NOT EXISTS trade_flow (
   PRIMARY KEY (source, hs_code, period, country_code)
 );
 CREATE INDEX IF NOT EXISTS idx_trade_flow_hs_period ON trade_flow(hs_code, period);
+CREATE TABLE IF NOT EXISTS hs_catalog (hs_code TEXT PRIMARY KEY, name TEXT NOT NULL, level SMALLINT NOT NULL);

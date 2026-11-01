@@ -199,8 +199,9 @@ function tradeSyncHandler({ run = (opts) => require('./tradeSync').runTradeSync(
   return async (req, res) => {
     if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const mode = String((req.query && req.query.mode) || 'sync') === 'probe' ? 'probe' : 'sync';
+    const offset = Math.max(0, Math.floor(Number(req.query && req.query.offset)) || 0);
     try {
-      res.json(await run({ mode }));
+      res.json(await run({ mode, offset }));
     } catch (err) {
       res.status(500).json({ error: String(err && err.message).slice(0, 160) });
     }

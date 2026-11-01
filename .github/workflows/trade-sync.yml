@@ -18,7 +18,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 30
     steps:
       - name: Call /api/cron/trade-sync
         env:
@@ -28,7 +28,18 @@ jobs:
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
           case "$MODE" in probe|sync) ;; *) MODE=sync ;; esac
-          code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE" || true)
-          echo "HTTP $code"; head -c 3000 out.json; echo
-          [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code"; exit 1; }
-          if [ "$MODE" = "sync" ] && ! jq -e '.ok == true' out.json >/dev/null 2>&1; then echo "::warning::trade sync finished with errors"; fi
+          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1" || true; }
+          if [ "$MODE" = "probe" ]; then
+            code=$(call 0); echo "HTTP $code"; head -c 3000 out.json; echo
+            [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code"; exit 1; }
+            exit 0
+          fi
+          # sync runs in batches of a few headings per call (each call must finish inside the function limit); the response names the next offset
+          offset=0; errors=0
+          while [ -n "$offset" ] && [ "$offset" != "null" ]; do
+            code=$(call "$offset"); echo "offset $offset: HTTP $code"; head -c 600 out.json; echo
+            [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code at offset $offset"; exit 1; }
+            jq -e '.ok == true' out.json >/dev/null 2>&1 || errors=$((errors + 1))
+            offset=$(jq -r '.next' out.json)
+          done
+          if [ "$errors" -gt 0 ]; then echo "::warning::trade sync finished with $errors batch(es) reporting errors"; fi
