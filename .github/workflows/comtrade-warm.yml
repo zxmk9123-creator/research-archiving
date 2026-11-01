@@ -1,0 +1,42 @@
+name: Comtrade warm-up
+
+# Pre-fills the UN Comtrade cache with the most-opened series (country totals, main item pairs) so first views are already stored.
+# Weekly (Monday 18:30 UTC = Tuesday 03:30 KST) and on demand. Resumable: years already cached cost nothing.
+on:
+  schedule:
+    - cron: '30 18 * * 1'
+  workflow_dispatch:
+    inputs:
+      offset:
+        description: 'first combination index (resume)'
+        default: '0'
+
+concurrency:
+  group: comtrade-warm
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Warm the cache
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+          START: ${{ github.event.inputs.offset || '0' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
+          offset="$START"; fails=0; tries=0
+          while [ -n "$offset" ] && [ "$offset" != "null" ]; do
+            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/comtrade-warm?offset=$offset&limit=4" || true)
+            echo "offset $offset: HTTP $code"; head -c 400 out.json; echo
+            if [ "$code" != "200" ]; then
+              tries=$((tries + 1)); if [ "$tries" -le 2 ]; then sleep 5; continue; fi
+              echo "::warning::skipping offset $offset after HTTP $code"; fails=$((fails + 1)); tries=0; offset=$((offset + 4)); [ "$offset" -ge 100 ] && break; continue
+            fi
+            tries=0
+            jq -e '.ok == true' out.json >/dev/null 2>&1 || fails=$((fails + 1))
+            offset=$(jq -r '.next' out.json)
+          done
+          if [ "$fails" -gt 0 ]; then echo "::warning::warm-up finished with $fails batch(es) reporting errors"; fi

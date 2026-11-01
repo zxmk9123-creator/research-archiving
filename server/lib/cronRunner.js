@@ -211,6 +211,19 @@ function tradeSyncHandler({ run = (opts) => require('./tradeSync').runTradeSync(
   };
 }
 
+// GET /api/cron/comtrade-warm?offset=&limit=: pre-fills the UN Comtrade cache with the common series (see tradeWarm.js). Resumable by offset.
+function comtradeWarmHandler({ run = (opts) => require('./tradeWarm').runWarm(opts) } = {}) {
+  return async (req, res) => {
+    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    const int = (k, lo, hi, d) => { const n = Math.floor(Number(req.query && req.query[k])); return Number.isFinite(n) && n >= lo ? Math.min(hi, n) : d; };
+    try {
+      res.json(await run({ offset: int('offset', 0, 1000, 0), limit: int('limit', 1, 10, 6) }));
+    } catch (err) {
+      res.status(500).json({ error: String(err && err.message).slice(0, 160) });
+    }
+  };
+}
+
 // GET /api/cron/doctor?mode=diagnose|recover (same bearer-secret auth). Default is diagnose: read-only analysis. mode=recover additionally needs
 // DOCTOR_RECOVERY=on in the environment; without it the answer says recovery is not permitted and nothing is executed.
 function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(opts) } = {}) {
@@ -225,4 +238,4 @@ function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(o
   };
 }
 
-module.exports = { tradeSyncHandler, opsDigestHandler, alertTestHandler, aiProbeHandler, doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
+module.exports = { comtradeWarmHandler, tradeSyncHandler, opsDigestHandler, alertTestHandler, aiProbeHandler, doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };

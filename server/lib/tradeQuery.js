@@ -3,6 +3,7 @@ const KG_PER_TON = 1000;
 const LEVELS = [2, 4, 6, 8, 10];
 const nextLevel = (len) => (len < 4 ? 4 : len < 6 ? 6 : len < 10 ? 10 : null);
 
+const { isGroupId } = require('./hsGroups');
 const isPeriod = (v) => /^\d{6}$/.test(v) && Number(v.slice(4)) >= 1 && Number(v.slice(4)) <= 12;
 const addMonths = (period, n) => {
   const y = Number(period.slice(0, 4)); const m = Number(period.slice(4)) - 1 + n;
@@ -17,7 +18,7 @@ const MAX_MONTHS = 480; // a safety cap only; the real limit is the data's own r
 function parseQuery(q, bounds) {
   const b = typeof bounds === 'string' ? { min: '000101', max: bounds } : bounds;
   const hs = String(q.hs || '15').trim();
-  if (!/^\d+$/.test(hs) || !LEVELS.includes(hs.length)) return { ok: false, error: 'invalid_hs' };
+  if (!(/^\d+$/.test(hs) && LEVELS.includes(hs.length)) && !isGroupId(hs)) return { ok: false, error: 'invalid_hs' };
   const flow = q.flow === 'exp' || q.flow === 'net' ? q.flow : 'imp'; // net = exports − imports (positive: net exporter)
   const adjusted = [];
   let to = isPeriod(String(q.to || '')) ? String(q.to) : b.max;

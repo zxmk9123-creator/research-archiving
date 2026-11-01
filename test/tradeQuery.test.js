@@ -60,3 +60,10 @@ test('cleanHsName: tariff legal text becomes a short, consistent item name', () 
   for (const [code, [raw]] of Object.entries(cases)) assert.doesNotMatch(cleanHsName(code, raw), /[一-鿿\[\]]|[A-Za-z]|것$/u, code);
   assert.equal(cleanHsName('151190', '기타'), '기타');
 });
+
+test('parseQuery accepts an item-group id and rejects an unknown one', () => {
+  const b = { min: '199611', max: '202609' };
+  assert.equal(Q.parseQuery({ hs: 'RAPESEED' }, b).value.hs, 'RAPESEED');
+  assert.equal(Q.parseQuery({ hs: 'MUSTARD' }, b).ok, true);
+  assert.equal(Q.parseQuery({ hs: 'NOT_A_GROUP' }, b).error, 'invalid_hs');
+});
