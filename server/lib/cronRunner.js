@@ -194,6 +194,19 @@ function opsDigestHandler({ run = () => require('./opsDigest').runDigest() } = {
   };
 }
 
+// GET /api/cron/trade-sync?mode=probe|sync: fills trade_flow from the Customs open APIs (probe = one read-only call per API, nothing written).
+function tradeSyncHandler({ run = (opts) => require('./tradeSync').runTradeSync(opts) } = {}) {
+  return async (req, res) => {
+    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    const mode = String((req.query && req.query.mode) || 'sync') === 'probe' ? 'probe' : 'sync';
+    try {
+      res.json(await run({ mode }));
+    } catch (err) {
+      res.status(500).json({ error: String(err && err.message).slice(0, 160) });
+    }
+  };
+}
+
 // GET /api/cron/doctor?mode=diagnose|recover (same bearer-secret auth). Default is diagnose: read-only analysis. mode=recover additionally needs
 // DOCTOR_RECOVERY=on in the environment; without it the answer says recovery is not permitted and nothing is executed.
 function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(opts) } = {}) {
@@ -208,4 +221,4 @@ function doctorHandler({ run = (opts) => require('./pipelineDoctor').runDoctor(o
   };
 }
 
-module.exports = { opsDigestHandler, alertTestHandler, aiProbeHandler, doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };
+module.exports = { tradeSyncHandler, opsDigestHandler, alertTestHandler, aiProbeHandler, doctorHandler, healthHandler, isCronAuthorized, summarize, runSteps, runDailyCron, dailyHandler, CHAIN_STEPS };

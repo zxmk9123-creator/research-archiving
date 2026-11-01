@@ -2891,6 +2891,28 @@ async function renderSourceManager(view, query = {}) {
 }
 
 async function renderSources(query = {}) { return renderSourceManager('all', query); }
+// 무역통계: 관세청 수출입실적(월별). 출처 선택은 이후 Kpler 해상 데이터가 들어오면 같은 틀에 추가된다.
+async function renderTrade(query = {}) {
+  const items = (await api('/trade/items')).items || [];
+  const hs = items.some((o) => o.hs === query.hs) ? query.hs : (items[0] && items[0].hs);
+  app.innerHTML = '<p>무역통계를 불러오는 중…</p>';
+  const [ser, cty] = await Promise.all([api(`/trade/series?hs=${hs}&months=24`), api(`/trade/countries?hs=${hs}`)]);
+  const rows = ser.series || [];
+  const label = (p) => `${p.slice(2, 4)}.${p.slice(4)}`;
+  const chips = items.map((o) => `<a class="chip ${o.hs === hs ? 'is-on' : ''}" href="#/trade?hs=${o.hs}">${escapeHtml(o.name)} <small>${o.hs}</small></a>`).join(' ');
+  const empty = '<p class="muted">아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.</p>';
+  const chart = (c) => renderChartHtml(JSON.stringify(c)) || empty;
+  const hasRows = rows.length >= 2;
+  const tonChart = hasRows ? chart({ title: `${ser.name} 월별 수입량`, unit: '톤', type: 'bar', labels: rows.map((r) => label(r.period)), series: [{ name: '수입량', data: rows.map((r) => (r.impTon == null ? null : Math.round(r.impTon))) }] }) : empty;
+  const priceChart = hasRows ? chart({ title: `${ser.name} 수입 단가`, unit: '달러/톤', type: 'line', labels: rows.map((r) => label(r.period)), series: [{ name: '단가', data: rows.map((r) => r.unitPrice) }] }) : empty;
+  const cs = (cty.countries || []).slice(0, 8);
+  const through = cty.through ? `, ${cty.through.slice(0, 4)}.${cty.through.slice(4)}까지` : '';
+  const share = cs.length >= 2 ? chart({ title: `${ser.name} 수입 국가 비중 (최근 12개월${through})`, unit: '%', type: 'hbar', labels: cs.map((c) => c.name), series: [{ name: '비중', data: cs.map((c) => Math.round((c.share || 0) * 1000) / 10) }] }) : empty;
+  app.innerHTML = `<section class="section"><div class="section-header"><h2>무역통계</h2></div>
+    <p class="muted">출처: 관세청 수출입무역통계(공공데이터포털). 수입 기준, 단가는 수입금액÷수입중량으로 계산한 값입니다. 최근 월은 잠정치일 수 있습니다.</p>
+    <div class="chip-row">${chips}</div>${tonChart}${priceChart}${share}</section>`;
+}
+
 async function renderReference(query = {}) { return renderSourceManager('reference', query); }
 
 // 운영 가시성 대시보드: 실패 원인, 소스별 수집량/품질, 미검수 적체량을
@@ -4256,6 +4278,7 @@ async function routeToPage() {
     else if (path === 'latest') { location.hash = '#/archive'; return; }
     else if (path === 'detail') await renderDetail(param);
     else if (path === 'reference') await renderReference(query);
+    else if (path === 'trade') await renderTrade(query);
     else if (path === 'sources') await renderSources(query);
     else if (path === 'review') await renderReview();
     else if (path === 'ops') await renderOps();

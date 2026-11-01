@@ -1385,3 +1385,17 @@ FROM (VALUES
   ('Archive Discovery: niche specialty edible oils market report', 'niche specialty edible oils market report high oleic avocado rice bran olive coconut demand growth outlook')
 ) AS v(name, url)
 WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = v.name);
+
+-- Trade statistics (Korea Customs open API; later also Kpler files). One row per source, HS code, month and country ('' = all countries).
+-- Weights are kg and values USD exactly as published; unit prices are computed on read.
+CREATE TABLE IF NOT EXISTS trade_flow (
+  source TEXT NOT NULL DEFAULT 'customs',
+  hs_code TEXT NOT NULL,
+  period CHAR(6) NOT NULL,
+  country_code TEXT NOT NULL DEFAULT '',
+  country_name TEXT,
+  imp_wgt NUMERIC, imp_amt NUMERIC, exp_wgt NUMERIC, exp_amt NUMERIC,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source, hs_code, period, country_code)
+);
+CREATE INDEX IF NOT EXISTS idx_trade_flow_hs_period ON trade_flow(hs_code, period);

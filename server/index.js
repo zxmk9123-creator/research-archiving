@@ -43,6 +43,7 @@ app.get('/api/cron/diagnose', async (req, res) => {
 
 app.get('/api/cron/daily', require('./lib/cronRunner').dailyHandler());
 app.get('/api/cron/health', require('./lib/cronRunner').healthHandler());
+app.get('/api/cron/trade-sync', require('./lib/cronRunner').tradeSyncHandler());
 app.get('/api/cron/ops-digest', require('./lib/cronRunner').opsDigestHandler());
 app.get('/api/cron/alert-test', require('./lib/cronRunner').alertTestHandler());
 app.get('/api/cron/ai-probe', require('./lib/cronRunner').aiProbeHandler());
@@ -85,6 +86,7 @@ app.use('/api/search', require('./routes/search'));
 app.use('/api/picks', require('./routes/picks'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/headlines', require('./routes/headlines'));
+app.use('/api/trade', require('./routes/trade'));
 app.use('/api/market-data', require('./routes/marketData'));
 app.use('/api/scope-proposals', require('./routes/scopeProposals'));
 app.use('/api', require('./routes/taxonomy'));
