@@ -4133,14 +4133,10 @@ function startHeadlinesTour(replay = false) {
 // read the summary numbers, then the trend, the breakdown and the countries. Replayed from "사용 가이드" while on this tab.
 const TRADE_TOUR_SEEN_KEY = 'ra_trade_tour_seen';
 const TRADE_TOUR_STEPS = [
-  { selector: '.tv-search', title: '품목 찾기', desc: 'HS코드를 몰라도 됩니다. 팜유·콩기름·카놀라·우지·바이오디젤처럼 평소 쓰는 이름을 입력하면 해당 품목이 나와요. 칸을 누르기만 해도 자주 찾는 품목이 보입니다.' },
-  { selector: '.tv-browse > summary', title: '품목 둘러보기', desc: '식물성 기름·동물성 기름·가공 유지·원료(유지종자)·바이오연료로 묶어 놓은 목록에서 고를 수도 있습니다.' },
-  { selector: '.tv-period', title: '기간', desc: '시작월과 종료월을 고르거나 12·24·36개월, 연도 버튼을 누르세요. 자료가 있는 기간 안에서만 고를 수 있고, 범위를 벗어나면 자동으로 맞춰집니다.' },
-  { selector: '.tv-switches', title: '수입·수출과 지표', desc: '수입/수출을 바꾸고, 물량(톤)·금액(달러)·단가(달러/톤) 중 볼 지표를 고릅니다.' },
-  { selector: '.tv-tiles', title: '요약 숫자', desc: '최근 월 값과 전년 동월 대비, 직전 월 대비, 최근 12개월 합계를 먼저 확인합니다. 월별 계절성이 커서 전년 동월 비교가 기준입니다.' },
-  { selector: '.tv-tools', title: '추이 차트', desc: '막대에 마우스를 올리면 그 달의 값이 보입니다. 전년 동월 비교선을 켜고 끄거나, 표로 보거나, CSV로 내려받을 수 있어요.' },
-  { selector: '.tv-cols .tv-card', title: '구성', desc: '선택한 품목을 빠짐없이 나눈 하위 품목입니다(합계 100%). 이름을 누르면 한 단계 더 세부로 들어갑니다.' },
-  { selector: '.tv-cols .tv-card + .tv-card', title: '상대국', desc: '선택 기간 동안 어느 나라와 얼마나 거래했는지 비중으로 보여줍니다.' },
+  { selector: '.tv-search', title: '품목 찾기', desc: 'HS코드를 몰라도 됩니다. 팜유·콩기름·카놀라·우지·바이오디젤처럼 평소 쓰는 이름으로 찾거나, 옆의 "품목 둘러보기"에서 고르세요.' },
+  { selector: '.tv-period', title: '기간·지표', desc: '시작·종료월이나 12·24·36개월 버튼으로 기간을 정하고, 아래에서 수입/수출과 물량·금액·단가를 고릅니다. 자료가 있는 기간 안에서만 고를 수 있어요.' },
+  { selector: '.tv-tiles', title: '요약 숫자', desc: '최근 월 값과 전년 동월·전월 대비, 최근 12개월 합계와 평균 단가입니다. 월별 계절성이 커서 전년 동월 비교가 기준이에요.' },
+  { selector: '.tv-cols .tv-card', title: '구성과 상대국', desc: '선택한 품목을 빠짐없이 나눈 하위 품목(합계 100%)과 상대국 비중입니다. 품목 이름을 누르면 한 단계 더 세부로 들어갑니다.' },
 ];
 function startTradeTour(replay = false) {
   if (replay) localStorage.removeItem(TRADE_TOUR_SEEN_KEY);

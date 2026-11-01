@@ -3,7 +3,7 @@
 // SUM over those rows, which is what makes the HS drill-down a true partition (MECE): a node's children always add up to the node.
 const pool = require('../db/pool');
 const { callTradeApi } = require('./tradeApi');
-const { HEADINGS, HS_NAMES } = require('./hsNames');
+const { HEADINGS, HS_NAMES, cleanHsName } = require('./hsNames');
 
 const ymd = (d) => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 // [from, to] windows of at most 12 months, ending at the last COMPLETED month (the current month is not published yet)
@@ -64,7 +64,7 @@ async function upsertRows(db, rawRows, withCountry) {
          imp_amt = EXCLUDED.imp_amt, exp_wgt = EXCLUDED.exp_wgt, exp_amt = EXCLUDED.exp_amt, fetched_at = now()`,
       [r.hsCode, r.period, r.countryCode, r.countryName, r.impWgt, r.impAmt, r.expWgt, r.expAmt],
     );
-    if (r.name && !names.has(r.hsCode)) names.set(r.hsCode, r.name);
+    if (r.name && !names.has(r.hsCode)) names.set(r.hsCode, cleanHsName(r.hsCode, r.name));
   }
   for (const [code, name] of names) {
     await db.query('INSERT INTO hs_catalog (hs_code, name, level) VALUES ($1,$2,$3) ON CONFLICT (hs_code) DO UPDATE SET name = EXCLUDED.name', [code, name, code.length]);

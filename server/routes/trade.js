@@ -15,10 +15,25 @@ async function periodBounds() {
   const { rows } = await pool.query("SELECT min(period) AS lo, max(period) AS hi FROM trade_flow WHERE source = 'customs' AND country_code = ''");
   return rows[0] && rows[0].hi ? { min: String(rows[0].lo), max: String(rows[0].hi) } : null;
 }
+// Display names: the cleaned catalog name; a bare "기타" reads as "기타 <nearest named ancestor>" so it means something out of context.
+const { cleanHsName, HS_NAMES: SEED_NAMES } = require('../lib/hsNames');
 async function names(codes) {
   if (!codes.length) return new Map();
-  const { rows } = await pool.query('SELECT hs_code, name FROM hs_catalog WHERE hs_code = ANY($1)', [codes]);
-  return new Map(rows.map((r) => [r.hs_code, r.name]));
+  const want = [...new Set(codes.flatMap((c) => [c, ...[2, 4, 6, 8].filter((n) => n < c.length).map((n) => c.slice(0, n))]))];
+  const { rows } = await pool.query('SELECT hs_code, name FROM hs_catalog WHERE hs_code = ANY($1)', [want]);
+  const raw = new Map(rows.map((r) => [r.hs_code, r.name]));
+  const clean = (c) => { const n = SEED_NAMES[c] || raw.get(c); return n ? cleanHsName(c, n) : null; };
+  const label = (c) => {
+    const own = clean(c);
+    if (own && own !== '기타') return own;
+    for (const n of [8, 6, 4, 2]) {
+      if (n >= c.length) continue;
+      const up = clean(c.slice(0, n));
+      if (up && up !== '기타') return own ? `기타 ${up}` : up;
+    }
+    return own;
+  };
+  return new Map(codes.map((c) => [c, label(c)]));
 }
 
 async function loadSeriesRows(hs, flow, from, to) {

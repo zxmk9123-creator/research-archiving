@@ -41,4 +41,36 @@ const GROUPS = [
   ['바이오연료', ['3826']],
 ].map(([name, codes]) => ({ name, codes }));
 
-module.exports = { HEADINGS, HS_NAMES, ALIASES, GROUPS };
+// Customs tariff names are legal text: bracketed conditions, Hanja and English glosses, "...한 것" clauses. People read item names, so they are
+// normalized to short noun phrases. A few clauses no rule can shorten well get a written name (same meaning, plain words).
+const NAME_OVERRIDES = {
+  151800: '화학 변성 유지·비식용 유지 혼합물', 150300: '라드스테아린·라드유·올레오유·탤로우유', 230400: '대두박', 382600: '바이오디젤과 그 혼합물',
+  150600: '그 밖의 동물성 유지', 152000: '글리세롤(조글리세롤·폐액)', 150500: '울그리스·라놀린', 152200: '데그라스·유지 처리 잔유물',
+  150420: '어유(간유 제외)', 150410: '어류 간유', 1504101000: '상어 간유', 1502101010: '산가 2 이하', 1201901000: '착유·탈지대두박용',
+  150710: '대두 조유', 151221: '면실 조유', 120760: '잇꽃씨', 120510: '저에루크산 유채씨',
+};
+const HANJA = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u;
+function cleanHsName(code, raw) {
+  const c = String(code || '');
+  const exact = NAME_OVERRIDES[c] || NAME_OVERRIDES[c.slice(0, 6)];
+  if (exact && (NAME_OVERRIDES[c] || c.endsWith('0000'))) return exact;
+  let t = String(raw || '').replace(/ㆍ/g, '·').replace(/\s+/g, ' ').trim();
+  if (!t) return t;
+  let prev;
+  do { prev = t; t = t.replace(/\[[^\[\]]*\]/g, ''); } while (t !== prev);                 // [conditions]
+  do {
+    prev = t;
+    t = t.replace(/\(([^()]*)\)/g, (m, inner) => (HANJA.test(inner) || /[A-Za-z]/.test(inner) || /상관없|한정|제외|포함|조제/.test(inner) ? '' : m));
+  } while (t !== prev);                                                                       // (粗油) (palm olein) (…에 상관없다)
+  t = t.replace(new RegExp(HANJA.source, 'gu'), '');
+  t = t.replace(/로서 .*$/u, '').replace(/, 따로 분류.*$/u, '');                               // "...로서 조제를 하지 않은 것"
+  if (/^2306/.test(c)) t = t.replace(/^(.+?)에서 나온 것$/u, '$1 유박');
+  t = t.replace(/^(.+?)에서 나온 것$/u, '$1 유래')
+    .replace(/^(\S+)하지 않은 것$/u, '미$1').replace(/^가공하지 않은 (.+)$/u, '미가공 $1')
+    .replace(/^정제한 것$/u, '정제품').replace(/^(.+?)인 것$/u, '$1')
+    .replace(/(\S)나 (\S)/gu, '$1·$2');
+  t = t.replace(/\s+([,·])/g, '$1').replace(/\s{2,}/g, ' ').replace(/^[,·\s]+|[,·\s]+$/g, '').trim();
+  return t || String(raw || '').trim();
+}
+
+module.exports = { HEADINGS, HS_NAMES, ALIASES, GROUPS, cleanHsName };

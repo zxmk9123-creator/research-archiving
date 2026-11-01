@@ -41,3 +41,20 @@ test('buildKpis: latest month, MoM, YoY and trailing 12 vs prior 12', () => {
   assert.equal(k.t12.ton, 24000); assert.equal(k.t12.prevTon, 12000); assert.equal(Math.round(k.t12.changeTon * 100), 100);
   assert.equal(Q.buildKpis([], '202510', '202609'), null);
 });
+
+test('cleanHsName: tariff legal text becomes a short, consistent item name', () => {
+  const { cleanHsName } = require('../server/lib/hsNames');
+  const cases = {
+    3826000000: ['바이오디젤과 그 혼합물[석유나 역청유(瀝靑油)를 함유하지 않거나 중량기준으로 70 퍼센트 미만을 함유한 것으로 한정한다]', '바이오디젤과 그 혼합물'],
+    1511100000: ['조유(粗油)', '조유'],
+    1511901000: ['팜 올레인(palm olein)', '팜 올레인'],
+    120600: ['해바라기씨(부수었는지에 상관없다)', '해바라기씨'],
+    230650: ['야자나 코프라(copra)에서 나온 것', '야자·코프라 유박'],
+    1505001000: ['가공하지 않은 울그리스(wool grease)', '미가공 울그리스'],
+    1516202010: ['야자[코프라(copra)]유와 그 분획물', '야자유와 그 분획물'],
+    150720: ['정제한 것', '정제품'],
+  };
+  for (const [code, [raw, want]] of Object.entries(cases)) assert.equal(cleanHsName(code, raw), want, code);
+  for (const [code, [raw]] of Object.entries(cases)) assert.doesNotMatch(cleanHsName(code, raw), /[一-鿿\[\]]|[A-Za-z]|것$/u, code);
+  assert.equal(cleanHsName('151190', '기타'), '기타');
+});
