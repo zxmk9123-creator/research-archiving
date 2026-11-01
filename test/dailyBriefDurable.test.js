@@ -278,3 +278,12 @@ test('PLACEHOLDER_OUTPUT_RE rejects the prompt example echoed back as content', 
   assert.ok(PLACEHOLDER_OUTPUT_RE.test('"watchpoints":["증설 일정 확정 여부"]'));
   assert.ok(!PLACEHOLDER_OUTPUT_RE.test('{"lead":"세계은행이 2026년 에너지 가격 32% 상승을 전망"}'));
 });
+
+test('softenForecast turns a definite "-ㄹ 것" into "-ㄹ 수 있다" and leaves other endings alone', () => {
+  const { softenForecast } = require('../server/lib/dailyBrief');
+  assert.equal(softenForecast('원자재 가격 급등은 인플레이션에 영향을 미칠 것'), '원자재 가격 급등은 인플레이션에 영향을 미칠 수 있다');
+  assert.equal(softenForecast('공급 규모를 키울 것이다'), '공급 규모를 키울 수 있다');
+  assert.equal(softenForecast('수입업체는 위험 관리를 강화해야 할 필요가 있다'), '수입업체는 위험 관리를 강화해야 할 필요가 있다');
+  assert.equal(softenForecast('가격 변동성이 커진다'), '가격 변동성이 커진다');
+  assert.equal(softenForecast('보험료가 오를 가능성이 있다'), '보험료가 오를 가능성이 있다');
+});
