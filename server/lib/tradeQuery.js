@@ -10,7 +10,7 @@ const addMonths = (period, n) => {
   return `${yy}${String(mm + 1).padStart(2, '0')}`;
 };
 
-const MAX_MONTHS = 120;
+const MAX_MONTHS = 480; // a safety cap only; the real limit is the data's own range
 // Returns { ok, value, adjusted:[...] } | { ok:false, error }. The period never errors: it is clamped to what the data covers
 // (bounds = { min, max }), swapped when reversed and shortened to MAX_MONTHS, and each correction is named so the page can say so.
 // Defaults: HS 15 (all fats and oils), last 24 months, imports.

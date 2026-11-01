@@ -145,7 +145,7 @@
     const latest = b.max;
     const span = (n) => { const f = addMonths(latest, -(n - 1)); return f < b.min ? b.min : f; };
     const year = latest.slice(0, 4); const prevYear = String(Number(year) - 1);
-    const opts = [['12개월', span(12), latest], ['24개월', span(24), latest], ['36개월', span(36), latest], [`${year}년`, `${year}01`, latest], [`${prevYear}년`, `${prevYear}01`, `${prevYear}12`]];
+    const opts = [['1년', span(12), latest], ['3년', span(36), latest], ['5년', span(60), latest], ['10년', span(120), latest], ['전체', b.min, latest], [`${year}년`, `${year}01`, latest], [`${prevYear}년`, `${prevYear}01`, `${prevYear}12`]];
     const btns = opts.map(([text, f, t]) => {
       const reachable = t >= b.min && f <= b.max;
       const on = clamp(f) === data.from && clamp(t) === data.to;
@@ -205,11 +205,12 @@
       const withYear = i < k || p.period.endsWith('01') || pts.slice(Math.max(0, i - k + 1), i).some((q) => q.period.endsWith('01'));
       svg.append(sv('text', { x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'tv-axis' }, withYear ? `${p.period.slice(2, 4)}.${p.period.slice(4)}` : p.period.slice(4)));
     });
-    if (m === 'price') {
+    if (m === 'price' || pts.length > 60) {
       const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
       if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
       svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none' }));
       vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: 'tv-dot' })); });
+      if (m !== 'price' && vals.some((v) => v != null)) svg.prepend(sv('polygon', { points: `${x(vals.findIndex((v) => v != null))},${y(0)} ${path(vals).join(' ')} ${x(vals.length - 1 - [...vals].reverse().findIndex((v) => v != null))},${y(0)}`, class: 'tv-area' }));
     } else {
       const bw = Math.max(3, Math.min(20, step * 0.5));
       vals.forEach((v, i) => {

@@ -10,6 +10,12 @@ on:
       mode:
         description: 'probe or sync'
         default: 'sync'
+      months:
+        description: 'months of history to (re)fetch per item (36 = monthly refresh; up to 360 for a backfill)'
+        default: '36'
+      limit:
+        description: 'items per call (use 1 for a deep backfill so each call fits the time limit)'
+        default: '6'
 
 concurrency:
   group: trade-sync
@@ -18,17 +24,19 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - name: Call /api/cron/trade-sync
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
           MODE: ${{ github.event.inputs.mode || 'sync' }}
+          MONTHS: ${{ github.event.inputs.months || '36' }}
+          LIMIT: ${{ github.event.inputs.limit || '6' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "::error::CRON_SECRET secret is not set"; exit 1; fi
           case "$MODE" in probe|sync) ;; *) MODE=sync ;; esac
-          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1" || true; }
+          call() { curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/trade-sync?mode=$MODE&offset=$1&months=$MONTHS&country_months=$MONTHS&limit=$LIMIT" || true; }
           if [ "$MODE" = "probe" ]; then
             code=$(call 0); echo "HTTP $code"; head -c 3000 out.json; echo
             [ "$code" = "200" ] || { echo "::error::trade sync endpoint answered HTTP $code"; exit 1; }

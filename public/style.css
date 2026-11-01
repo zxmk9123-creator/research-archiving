@@ -1537,7 +1537,7 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .tv-tools { display: flex; gap: 6px; flex-wrap: wrap; }
 .tv-chartwrap { position: relative; } .tv-svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
 .tv-grid { stroke: var(--tv-grid); stroke-width: 1; } .tv-axis { fill: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
-.tv-bar { fill: var(--tv-s1); } .tv-line { stroke: var(--tv-s1); stroke-width: 2; stroke-linejoin: round; } .tv-dot { fill: var(--tv-s1); stroke: var(--surface); stroke-width: 2; }
+.tv-bar { fill: var(--tv-s1); } .tv-area { fill: var(--tv-s1); opacity: .12; } .tv-line { stroke: var(--tv-s1); stroke-width: 2; stroke-linejoin: round; } .tv-dot { fill: var(--tv-s1); stroke: var(--surface); stroke-width: 2; }
 .tv-line-prev { stroke: var(--tv-prev); stroke-width: 1.5; stroke-dasharray: 4 4; } .tv-cross { stroke: var(--text-tertiary); stroke-width: 1; }
 .tv-tip { position: absolute; top: 6px; min-width: 160px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control);
   box-shadow: var(--shadow-card-hover); font-size: 12px; color: var(--text-secondary); pointer-events: none; }

@@ -17,8 +17,8 @@ test('parseQuery: defaults; the period is clamped, swapped or shortened instead 
   assert.deepEqual([bad.value.from, bad.value.to], ['202410', '202609']); assert.ok(bad.adjusted.includes('to_invalid'));
   const outside = Q.parseQuery({ from: '203001', to: '203006' }, b);
   assert.ok(outside.value.from >= b.min && outside.value.to <= b.max && outside.value.from <= outside.value.to);
-  const longB = { min: '200001', max: '202609' };
-  const long = Q.parseQuery({ from: '200101', to: '202609' }, longB);
+  const longB = { min: '195001', max: '202609' };
+  const long = Q.parseQuery({ from: '195001', to: '202609' }, longB);
   assert.equal(long.value.from, Q.addMonths('202609', -(Q.MAX_MONTHS - 1))); assert.ok(long.adjusted.includes('range_shortened'));
   assert.equal(Q.parseQuery({ hs: '1511', flow: 'exp', to: '202606' }, b).value.flow, 'exp');
 });

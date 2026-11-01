@@ -81,7 +81,7 @@ async function seedCatalog(db) {
 // mode 'probe': one call per API for the first heading and the latest window, nothing written.
 // mode 'sync': `limit` headings starting at `offset` (item rows for `months`, country rows for 24 months). Returns { done, next } so a caller can loop
 // in several short invocations instead of one that would outlive the function limit.
-async function runTradeSync({ mode = 'sync', months = 36, offset = 0, limit = 6, now = new Date(), call = callTradeApi, db = pool } = {}) {
+async function runTradeSync({ mode = 'sync', months = 36, countryMonths = 24, offset = 0, limit = 6, now = new Date(), call = callTradeApi, db = pool } = {}) {
   if (mode === 'probe') {
     const w = monthWindows(12, now).pop();
     const out = {};
@@ -98,15 +98,17 @@ async function runTradeSync({ mode = 'sync', months = 36, offset = 0, limit = 6,
     await db.query("DELETE FROM trade_flow WHERE source = 'customs' AND length(hs_code) = 4");
   }
   const itemWindows = monthWindows(months, now);
-  const countryWindows = monthWindows(24, now);
+  const countryWindows = monthWindows(countryMonths, now);
   const batch = HEADINGS.slice(offset, offset + limit);
-  const report = { mode, offset, headings: batch.map((h) => h.hs), items: {}, countries: {}, errors: [] };
+  const report = { mode, offset, months, headings: batch.map((h) => h.hs), items: {}, countries: {}, errors: [], firstPeriod: {} };
   for (const h of batch) {
     let stored = 0;
     for (const w of itemWindows) {
       const r = await call('trade_item', { from: w.from, to: w.to, hs: h.hs });
       if (!r.ok) { report.errors.push(`item ${h.hs} ${w.from}-${w.to}: ${r.code} ${r.message}`); continue; }
       stored += await upsertRows(db, r.rows, false);
+      const firstHere = r.rows.reduce((a, x) => (!a || x.period < a ? x.period : a), null);
+      if (firstHere && (!report.firstPeriod[h.hs] || firstHere < report.firstPeriod[h.hs])) report.firstPeriod[h.hs] = firstHere;
     }
     report.items[h.hs] = stored;
     let cstored = 0;

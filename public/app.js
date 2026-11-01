@@ -4134,7 +4134,7 @@ function startHeadlinesTour(replay = false) {
 const TRADE_TOUR_SEEN_KEY = 'ra_trade_tour_seen';
 const TRADE_TOUR_STEPS = [
   { selector: '.tv-search', title: '품목 찾기', desc: 'HS코드를 몰라도 됩니다. 팜유·콩기름·카놀라·우지·바이오디젤처럼 평소 쓰는 이름으로 찾거나, 옆의 "품목 둘러보기"에서 고르세요.' },
-  { selector: '.tv-period', title: '기간·지표', desc: '시작·종료월이나 12·24·36개월 버튼으로 기간을 정하고, 아래에서 수입/수출과 물량·금액·단가를 고릅니다. 자료가 있는 기간 안에서만 고를 수 있어요.' },
+  { selector: '.tv-period', title: '기간·지표', desc: '시작·종료월이나 1·3·5·10년·전체 버튼으로 기간을 정하고, 아래에서 수입/수출과 물량·금액·단가를 고릅니다. 자료가 있는 기간 안에서만 고를 수 있어요.' },
   { selector: '.tv-tiles', title: '요약 숫자', desc: '최근 월 값과 전년 동월·전월 대비, 최근 12개월 합계와 평균 단가입니다. 월별 계절성이 커서 전년 동월 비교가 기준이에요.' },
   { selector: '.tv-cols .tv-card', title: '구성과 상대국', desc: '선택한 품목을 빠짐없이 나눈 하위 품목(합계 100%)과 상대국 비중입니다. 품목 이름을 누르면 한 단계 더 세부로 들어갑니다.' },
 ];

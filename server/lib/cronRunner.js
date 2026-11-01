@@ -199,9 +199,11 @@ function tradeSyncHandler({ run = (opts) => require('./tradeSync').runTradeSync(
   return async (req, res) => {
     if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const mode = String((req.query && req.query.mode) || 'sync') === 'probe' ? 'probe' : 'sync';
-    const offset = Math.max(0, Math.floor(Number(req.query && req.query.offset)) || 0);
+    const int = (k, lo, hi, dflt) => { const n = Math.floor(Number(req.query && req.query[k])); return Number.isFinite(n) && n >= lo ? Math.min(hi, n) : dflt; };
+    // backfill depth and batch size are bounded so one call always fits the function time limit
+    const opts = { mode, offset: int('offset', 0, 1000, 0), months: int('months', 1, 360, 36), countryMonths: int('country_months', 1, 360, 24), limit: int('limit', 1, 10, 6) };
     try {
-      res.json(await run({ mode, offset }));
+      res.json(await run(opts));
     } catch (err) {
       res.status(500).json({ error: String(err && err.message).slice(0, 160) });
     }
