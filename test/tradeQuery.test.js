@@ -5,7 +5,9 @@ const Q = require('../server/lib/tradeQuery');
 test('parseQuery: defaults; the period is clamped, swapped or shortened instead of failing', () => {
   const b = { min: '202311', max: '202609' };
   const ok = Q.parseQuery({}, b);
-  assert.deepEqual(ok.value, { hs: '15', flow: 'imp', from: '202410', to: '202609' }); assert.deepEqual(ok.adjusted, []);
+  assert.deepEqual(ok.value, { hs: '15', flow: 'imp', from: '202410', to: '202609', country: '' }); assert.deepEqual(ok.adjusted, []);
+  assert.equal(Q.parseQuery({ country: 'ID' }, b).value.country, 'ID');
+  assert.equal(Q.parseQuery({ country: 'id; drop' }, b).value.country, '');
   assert.equal(Q.parseQuery({ hs: '151' }, b).error, 'invalid_hs');
   const late = Q.parseQuery({ from: '202501', to: '203001' }, b);
   assert.deepEqual([late.value.from, late.value.to, late.adjusted], ['202501', '202609', ['to_clamped']]);

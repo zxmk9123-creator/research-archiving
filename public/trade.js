@@ -103,7 +103,7 @@
   const keep = (q) => {
     const flow = ['imp', 'exp', 'net'].includes(q.flow) ? q.flow : 'imp';
     const metric = ['ton', 'usd', 'price'].includes(q.metric) && !(flow === 'net' && q.metric === 'price') ? q.metric : 'ton'; // no unit price of a balance
-    return { hs: q.hs || '15', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
+    return { hs: q.hs || '15', country: /^[A-Z]{2}$/.test(q.country || '') ? q.country : '', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
   };
   const FLOW_NAME = { imp: '수입', exp: '수출', net: '순수출' };
   const GRAIN_NAME = { month: '월별', quarter: '분기별', year: '연도별' };
@@ -233,6 +233,15 @@
       select(start);
     });
     return box;
+  }
+
+  // Partner country: a native select (keyboard and screen-reader friendly, like the other tabs' filters), largest partners first.
+  function partnerPicker(state, partners) {
+    const sel = el('select', { class: 'tv-select', 'aria-label': '상대국', onchange: (e) => go(state, { country: e.target.value }) },
+      el('option', { value: '' }, '전체 국가'),
+      partners.map((p) => el('option', { value: p.code, selected: p.code === state.country || null }, `${p.name}${p.impTon >= 1 || p.expTon >= 1 ? ` · ${p.impTon >= p.expTon ? `수입 ${compactTon(p.impTon)}` : `수출 ${compactTon(p.expTon)}`}` : ''}`)));
+    if (state.country && !partners.some((p) => p.code === state.country)) sel.append(el('option', { value: state.country, selected: true }, state.country));
+    return el('label', { class: 'tv-seg tv-partner' }, el('span', { class: 'tv-label' }, '상대국'), sel);
   }
 
   // The picker can only reach months the data covers (min/max); the server clamps too, so a typed or shared bad range still renders.
@@ -414,7 +423,7 @@
     const body = el('tbody');
     for (const r of rows) {
       const label = linkFor && r.code ? el('a', { href: linkFor(r) }, r.name || '이름 없는 품목', ' ', el('small', { class: 'tv-code' }, r.code)) : el('span', { class: r.code ? '' : 'tv-muted' }, r.name || r.code);
-      body.append(el('tr', {}, el('th', { scope: 'row' }, label, el('span', { class: 'tv-bar-track' }, el('span', { class: `tv-bar-fill${net && r.ton < 0 ? ' tv-bar-fill-neg' : ''}`, style: `width:${Math.max(1, ((r.share || 0) / top) * 100)}%` }))), el('td', { class: 'tv-num' }, r.share == null ? '–' : `${(r.share * 100).toFixed(1)}%`), el('td', { class: 'tv-num' }, net ? signed(r.ton, '') : nf(r.ton))));
+      body.append(el('tr', { class: r.selected ? 'is-selected' : null }, el('th', { scope: 'row' }, label, el('span', { class: 'tv-bar-track' }, el('span', { class: `tv-bar-fill${net && r.ton < 0 ? ' tv-bar-fill-neg' : ''}`, style: `width:${Math.max(1, ((r.share || 0) / top) * 100)}%` }))), el('td', { class: 'tv-num' }, r.share == null ? '–' : `${(r.share * 100).toFixed(1)}%`), el('td', { class: 'tv-num' }, net ? signed(r.ton, '') : nf(r.ton))));
     }
     t.append(body); card.append(t);
     return card;
@@ -454,7 +463,10 @@
     const policyWasOpen = Boolean(prev && prev.querySelector('.tv-policy[open]'));
     if (prev) { prev.classList.add('is-updating'); prev.setAttribute('aria-busy', 'true'); } else { app.textContent = ''; app.append(el('section', { class: 'tv-root' }, skeleton())); }
     const qs = new URLSearchParams({ hs: state.hs, flow: state.flow }); if (state.from) qs.set('from', state.from); if (state.to) qs.set('to', state.to);
-    let data; try { data = await api(`/trade/dashboard?${qs}`); } catch (_) { data = { error: 'network' }; }
+    if (state.country) qs.set('country', state.country);
+    let data; let partners;
+    try { [data, partners] = await Promise.all([api(`/trade/dashboard?${qs}`), api(`/trade/partners?hs=${state.hs}`).catch(() => ({ partners: [] }))]); } catch (_) { data = { error: 'network' }; }
+    partners = (partners && partners.partners) || [];
     const root = el('section', { class: `tv-root ${prev && prev.classList.contains('tv-root') && prev.querySelector('.tv-tiles, .tv-filters') ? 'is-swap' : 'is-enter'}` });
     // built off-page and swapped in whole: attaching it empty would shorten the page and lose the scroll position
     const commit = () => app.replaceChildren(root);
@@ -468,10 +480,16 @@
       el('div', { class: 'tv-row' }, periodControls(data, state)),
       el('div', { class: 'tv-row tv-switches' },
         segmented('구분', [['imp', '수입'], ['exp', '수출'], ['net', '순수출']], state.flow, (v) => go(state, { flow: v })),
-        segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가', state.flow === 'net' ? '순수출(수출−수입)에는 단가를 계산하지 않습니다' : null]], state.metric, (v) => go(state, { metric: v })))));
+        segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가', state.flow === 'net' ? '순수출(수출−수입)에는 단가를 계산하지 않습니다' : null]], state.metric, (v) => go(state, { metric: v })),
+        partnerPicker(state, partners))));
     if (data.adjusted && data.adjusted.length) root.append(el('p', { class: 'tv-notice', role: 'status' }, `${data.adjusted.map((a) => ADJUST_TEXT[a] || a).join(' · ')}.`));
 
-    root.append(el('div', { class: 'tv-selected' }, el('h3', {}, data.name || '이름 없는 품목'), el('span', { class: 'tv-badge' }, LEVEL_LABEL[data.hs.length] || ''), el('span', { class: 'tv-code' }, `HS ${data.hs}`)));
+    root.append(el('div', { class: 'tv-selected' }, el('h3', {}, data.name || '이름 없는 품목'), el('span', { class: 'tv-badge' }, LEVEL_LABEL[data.hs.length] || ''), el('span', { class: 'tv-code' }, `HS ${data.hs}`),
+      data.country ? el('a', { class: 'tv-country-chip', href: href(state, { country: '' }), title: '전체 국가로 돌아가기' }, el('span', { class: 'tv-muted' }, '상대국 '), data.countryName || data.country, el('span', { class: 'tv-x', 'aria-hidden': 'true' }, '×'), el('span', { class: 'tv-sr' }, ' 해제')) : null));
+    if (data.country) {
+      const what = { imp: `${data.countryName}에서 들여온 수입`, exp: `${data.countryName}(으)로 보낸 수출`, net: `${data.countryName}와(과)의 수출 − 수입` }[state.flow];
+      root.append(el('p', { class: 'tv-context' }, `${what} 기준입니다.${data.seriesHs !== data.hs ? ` 국가별 통계는 세부 품목(HS 6자리)까지 제공되어 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
+    }
     root.append(kpiStrip(data, state));
 
     const csv = `/api/trade/export.csv?${qs}`;
@@ -492,10 +510,10 @@
     const nextName = { 4: '품목군', 6: '세부 품목', 10: '최종 품목' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
     const cols = el('div', { class: 'tv-cols' },
       nl.length ? rankList(`구성 — ${nextName}별`, net ? '하위 품목별 순수출(＋)·순수입(−)입니다. 비중은 무역수지 규모 기준이며, 이름을 누르면 한 단계 더 들어갑니다.' : '선택한 품목을 빠짐없이 나눈 구성입니다(합계 100%). 이름을 누르면 한 단계 더 들어갑니다.', foldSmall(nl, 'item'), (r) => href(state, { hs: r.code }), net)
-        : el('section', { class: 'tv-card' }, el('h3', {}, '구성'), el('p', { class: 'tv-muted' }, '가장 세부 단계의 품목입니다.')),
+        : el('section', { class: 'tv-card' }, el('h3', {}, '구성'), el('p', { class: 'tv-muted' }, data.country ? '국가별 통계는 세부 품목(HS 6자리)까지만 나눠 볼 수 있습니다.' : '가장 세부 단계의 품목입니다.')),
       rankList(net ? '상대국별 순수출' : `${state.flow === 'exp' ? '수출 상대국' : '수입 원산지'} 비중`,
-        data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
-        foldSmall(data.countries), null, net));
+        data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다. 국가를 누르면 그 나라와의 교역만 봅니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다. 국가를 누르면 그 나라와의 교역만 봅니다.` : '국가를 누르면 그 나라와의 교역만 봅니다.'),
+        foldSmall(data.countries.map((c) => ({ ...c, selected: c.code === data.country }))), (r) => href(state, { country: r.code === data.country ? '' : r.code }), net));
     root.append(cols, el('p', { class: 'tv-source' }, '출처: 관세청 수출입무역통계(공공데이터포털). 최근 월은 잠정치이며, 자세한 기준은 위 "무역통계 운영 방침"에 있습니다.'));
     commit();
   }

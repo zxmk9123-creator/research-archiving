@@ -30,7 +30,9 @@ function parseQuery(q, bounds) {
   if (from > b.max) { from = addMonths(b.max, -23) < b.min ? b.min : addMonths(b.max, -23); adjusted.push('from_clamped'); }
   if (to < b.min) { to = b.max; adjusted.push('to_clamped'); }
   if (addMonths(from, MAX_MONTHS - 1) < to) { from = addMonths(to, -(MAX_MONTHS - 1)); adjusted.push('range_shortened'); }
-  return { ok: true, value: { hs, flow, from, to }, adjusted };
+  // partner country (ISO 2 letters as the Customs API sends it); empty = all countries
+  const country = /^[A-Z]{2}$/.test(String(q.country || '')) ? String(q.country) : '';
+  return { ok: true, value: { hs, flow, from, to, country }, adjusted };
 }
 
 const pctChange = (cur, prev) => (cur == null || prev == null || prev === 0 ? null : (cur - prev) / prev);

@@ -1661,3 +1661,17 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   .tv-browse-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: var(--sp-2); }
   .tv-browse-nav button { flex: none; } .tv-browse-body { max-height: none; }
 }
+
+/* partner country */
+.tv-partner { gap: 8px; }
+.tv-select { height: 28px; max-width: 260px; padding: 0 28px 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%), linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 12px, calc(100% - 10px) 12px; background-size: 4px 4px; background-repeat: no-repeat; transition: border-color .16s ease-out; }
+.tv-select:hover { border-color: var(--text-tertiary); } .tv-select:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
+.tv-country-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px 0 10px; border-radius: 999px; background: var(--text); color: #fff; font-size: 12.5px; font-weight: 600; text-decoration: none; transition: opacity .14s ease-out; }
+.tv-country-chip .tv-muted { color: rgba(255, 255, 255, .65); font-weight: 500; } .tv-country-chip:hover { opacity: .85; }
+.tv-x { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 2px; border-radius: 50%; background: rgba(255, 255, 255, .18); font-size: 12px; line-height: 1; }
+.tv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tv-context { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); font-size: 13px; color: var(--text-secondary); }
+.tv-rank tr.is-selected th, .tv-rank tr.is-selected td { background: var(--surface-sunken); } .tv-rank tr.is-selected a { font-weight: 700; }

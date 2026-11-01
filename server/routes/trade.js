@@ -41,12 +41,14 @@ async function names(codes) {
   return new Map(codes.map((c) => [c, label(c)]));
 }
 
-async function loadSeriesRows(hs, flow, from, to) {
+// With a partner country the per-country rows are read; they exist down to HS 6 digits, so a finer item answers at its HS6 parent.
+const countryHs = (hs) => (hs.length > 6 ? hs.slice(0, 6) : hs);
+async function loadSeriesRows(hs, flow, from, to, country = '') {
   const c = col(flow);
   const { rows } = await pool.query(
     `SELECT period, sum(${c.wgt}) AS wgt, sum(${c.amt}) AS amt FROM trade_flow
-      WHERE source = 'customs' AND country_code = '' AND hs_code LIKE $1 AND period BETWEEN $2 AND $3 GROUP BY period ORDER BY period`,
-    [like(hs), Q.addMonths(from, -36), to]);
+      WHERE source = 'customs' AND country_code = $4 AND hs_code LIKE $1 AND period BETWEEN $2 AND $3 GROUP BY period ORDER BY period`,
+    [like(country ? countryHs(hs) : hs), Q.addMonths(from, -36), to, country]);
   return rows.map((r) => ({ period: String(r.period), wgt: num(r.wgt), amt: num(r.amt) }));
 }
 
@@ -59,28 +61,29 @@ router.get('/dashboard', async (req, res) => {
     const latest = bounds.max;
     const parsed = Q.parseQuery(req.query, bounds);
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-    const { hs, flow, from, to } = parsed.value;
+    const { hs, flow, from, to, country } = parsed.value;
     const c = col(flow);
-    const rows = await loadSeriesRows(hs, flow, from, to);
+    const rows = await loadSeriesRows(hs, flow, from, to, country);
     const opts = { noPrice: flow === 'net' };
     const series = Q.buildSeries(rows, from, to, opts);
     const kpis = Q.buildKpis(rows, from, to, opts);
 
     // children = the next HS level under the selection; they partition it, so shares add up to 100%
-    const nl = Q.nextLevel(hs.length);
+    // children: by item rows (to HS10), or for one partner by its per-country rows (to HS6 only)
+    const nl = country ? (hs.length < 4 ? 4 : hs.length < 6 ? 6 : null) : Q.nextLevel(hs.length);
     let children = [];
     if (nl) {
       const r = await pool.query(
         `SELECT left(hs_code, $2) AS code, sum(${c.wgt}) AS wgt, sum(${c.amt}) AS amt FROM trade_flow
-          WHERE source = 'customs' AND country_code = '' AND hs_code LIKE $1 AND period BETWEEN $3 AND $4
-          GROUP BY 1 HAVING ${rankBy(flow, `sum(${c.wgt})`)} > 0 ORDER BY ${rankBy(flow, `sum(${c.wgt})`)} DESC LIMIT 30`, [like(hs), nl, from, to]);
+          WHERE source = 'customs' AND country_code = $5 AND hs_code LIKE $1 AND period BETWEEN $3 AND $4
+          GROUP BY 1 HAVING ${rankBy(flow, `sum(${c.wgt})`)} > 0 ORDER BY ${rankBy(flow, `sum(${c.wgt})`)} DESC LIMIT 30`, [like(hs), nl, from, to, country]);
       const total = r.rows.reduce((a, x) => a + Math.abs(Number(x.wgt)), 0); // net: share of the total balance moved, sign kept on the value
       const nm = await names(r.rows.map((x) => x.code));
       children = r.rows.map((x) => ({ code: x.code, name: nm.get(x.code) || null, ton: Number(x.wgt) / 1000, usd: num(x.amt), share: total ? Math.abs(Number(x.wgt)) / total : null }));
     }
 
     // countries: stored at HS6, so a finer selection answers at its HS6 parent (flagged in `countryScope`)
-    const cs = hs.length > 6 ? hs.slice(0, 6) : hs;
+    const cs = countryHs(hs);
     const cr = await pool.query(
       `SELECT country_code, max(country_name) AS name, sum(${c.wgt}) AS wgt, sum(${c.amt}) AS amt, min(period) AS pmin, max(period) AS pmax FROM trade_flow
         WHERE source = 'customs' AND country_code <> '' AND hs_code LIKE $1 AND period BETWEEN $2 AND $3
@@ -94,7 +97,8 @@ router.get('/dashboard', async (req, res) => {
     const cn = await names(chain);
     res.set('Cache-Control', 'private, max-age=60');
     res.json({
-      hs, flow, from, to, latest, bounds, adjusted: parsed.adjusted, name: cn.get(hs) || null,
+      hs, flow, from, to, country, countryName: country ? ((cr.rows.find((x) => x.country_code === country) || {}).name || await partnerName(country)) : null, seriesHs: country ? cs : hs,
+      latest, bounds, adjusted: parsed.adjusted, name: cn.get(hs) || null,
       breadcrumb: chain.map((code) => ({ code, name: cn.get(code) || null })),
       kpis, series, children, countries, countryScope: cs, countryCoverage: covered,
     });
@@ -181,16 +185,42 @@ router.get('/export.csv', async (req, res) => {
     const bounds = await periodBounds();
     const parsed = bounds ? Q.parseQuery(req.query, bounds) : { ok: false, error: 'no_data' };
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-    const { hs, flow, from, to } = parsed.value;
-    const series = Q.buildSeries(await loadSeriesRows(hs, flow, from, to), from, to, { noPrice: flow === 'net' });
+    const { hs, flow, from, to, country } = parsed.value;
+    const series = Q.buildSeries(await loadSeriesRows(hs, flow, from, to, country), from, to, { noPrice: flow === 'net' });
     const f = (v, d = 0) => (v == null ? '' : Number(v).toFixed(d));
     const lines = [`월,${flow === 'net' ? '순수출 ' : ''}물량(톤),${flow === 'net' ? '순수출 ' : ''}금액(USD),단가(USD/톤),물량 전년비,금액 전년비,단가 전년비`];
     for (const p of series) lines.push([p.period, f(p.ton, 1), f(p.usd), f(p.price), f(p.yoyTon, 4), f(p.yoyUsd, 4), f(p.yoyPrice, 4)].join(','));
     res.set('Content-Type', 'text/csv; charset=utf-8');
-    res.set('Content-Disposition', `attachment; filename="trade_${hs}_${flow}_${from}-${to}.csv"`);
+    res.set('Content-Disposition', `attachment; filename="trade_${hs}${country ? `_${country}` : ''}_${flow}_${from}-${to}.csv"`);
     res.send(`\uFEFF${lines.join('\n')}\n`);
   } catch (err) {
     console.error('GET /api/trade/export failed:', err.message);
+    res.status(500).json({ error: 'trade_unavailable' });
+  }
+});
+
+async function partnerName(code) {
+  const { rows } = await pool.query("SELECT max(country_name) AS name FROM trade_flow WHERE source = 'customs' AND country_code = $1", [code]);
+  return (rows[0] && rows[0].name) || code;
+}
+
+// Partner countries for the picker: everyone that traded the item (HS6 rows) in the last 36 months, largest total trade first.
+router.get('/partners', async (req, res) => {
+  const hs = String(req.query.hs || '15');
+  if (!/^\d+$/.test(hs) || !Q.LEVELS.includes(hs.length)) return res.status(400).json({ error: 'invalid_hs' });
+  try {
+    await ensureTable(pool);
+    const bounds = await periodBounds();
+    if (!bounds) return res.json({ partners: [] });
+    const { rows } = await pool.query(
+      `SELECT country_code AS code, max(country_name) AS name, sum(coalesce(imp_wgt, 0)) AS imp, sum(coalesce(exp_wgt, 0)) AS exp FROM trade_flow
+        WHERE source = 'customs' AND country_code <> '' AND hs_code LIKE $1 AND period >= $2
+        GROUP BY country_code HAVING sum(coalesce(imp_wgt, 0) + coalesce(exp_wgt, 0)) > 0
+        ORDER BY sum(coalesce(imp_wgt, 0) + coalesce(exp_wgt, 0)) DESC LIMIT 200`, [like(countryHs(hs)), Q.addMonths(bounds.max, -35)]);
+    res.set('Cache-Control', 'private, max-age=300');
+    res.json({ partners: rows.map((r) => ({ code: r.code, name: r.name || r.code, impTon: Number(r.imp) / 1000, expTon: Number(r.exp) / 1000 })) });
+  } catch (err) {
+    console.error('GET /api/trade/partners failed:', err.message);
     res.status(500).json({ error: 'trade_unavailable' });
   }
 });
