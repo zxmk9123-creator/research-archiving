@@ -8,6 +8,40 @@
   const LEVEL_LABEL = { 2: '대분류', 4: '품목군', 6: '세부 품목', 8: '세부 품목', 10: '최종 품목' };
   const METRICS = { ton: ['물량', '톤'], usd: ['금액', '달러'], price: ['단가', '달러/톤'] };
   let api = (p) => fetch(`/api${p}`).then((r) => r.json());
+  const calm = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const shown = new Map(); // last value each KPI showed, so a change counts from there instead of from zero
+
+  // Counts a number to its new value (ease-out, ~0.45 s). Text only changes inside the number span; the unit stays put.
+  function countTo(node, key, to, format) {
+    const from = shown.has(key) ? shown.get(key) : to * 0.85;
+    shown.set(key, to);
+    if (calm() || from === to || !Number.isFinite(from)) { node.textContent = format(to); return; }
+    const t0 = performance.now(); const dur = 450;
+    const tick = (now) => {
+      const k = Math.min(1, (now - t0) / dur); const e = 1 - (1 - k) ** 3;
+      node.textContent = format(from + (to - from) * e);
+      if (k < 1 && node.isConnected) requestAnimationFrame(tick);
+    };
+    node.textContent = format(from);
+    requestAnimationFrame(tick);
+  }
+  // number + quieter unit, e.g. 53,647 톤 / $1,156 /톤 / $63.4 M
+  function figure(key, kind, v) {
+    if (v == null) return el('span', { class: 'tv-fig' }, '–');
+    const parts = kind === 'ton' ? ['', (x) => nf(x), '톤'] : kind === 'price' ? ['$', (x) => nf(x), '/톤']
+      : v >= 1e6 ? ['$', (x) => nf(x / 1e6, 1), 'M'] : ['$', (x) => nf(x / 1e3), 'K'];
+    const num = el('span', { class: 'tv-fig-n' });
+    countTo(num, key, v, parts[1]);
+    return el('span', { class: 'tv-fig', 'aria-label': fmtOf[kind](v) }, parts[0] ? el('span', { class: 'tv-fig-p' }, parts[0]) : null, num, el('span', { class: 'tv-fig-u' }, parts[2]));
+  }
+  // first paint: the page's own shape in quiet blocks, so nothing jumps when the numbers arrive
+  function skeleton() {
+    const b = (cls) => el('div', { class: `tv-skel ${cls}` });
+    return el('div', { class: 'tv-skeleton', 'aria-hidden': 'true' },
+      b('tv-skel-h1'), b('tv-skel-line'), b('tv-skel-bar'),
+      el('div', { class: 'tv-tiles' }, b('tv-skel-tile'), b('tv-skel-tile'), b('tv-skel-tile')),
+      b('tv-skel-chart'));
+  }
 
   const el = (tag, attrs, ...kids) => {
     const n = document.createElement(tag);
@@ -176,16 +210,17 @@
     const prev = i > 0 ? valueOf(data.series[i - 1], m) : null;
     const mom = cur != null && prev ? (cur - prev) / prev : null;
     return el('div', { class: 'tv-tiles' },
-      tile(`${ym(k.period)} ${flowName} ${METRICS[m][0]}`, fmtOf[m](cur),
+      tile(`${ym(k.period)} ${flowName} ${METRICS[m][0]}`, figure('cur', m, cur),
         el('span', { class: 'tv-subs' }, el('span', {}, '전년 동월 ', delta(yoy)), el('span', {}, '전월 ', delta(mom)))),
-      tile(`최근 12개월 ${flowName}량`, t12 ? fmtTon(t12.ton) : '–', t12 ? el('span', {}, '직전 12개월 대비 ', delta(t12.changeTon)) : el('span', { class: 'tv-muted' }, '12개월치 자료가 쌓이면 표시됩니다')),
-      tile('최근 12개월 평균 단가', t12 ? fmtPrice(t12.price) : '–', el('span', { class: 'tv-muted' }, '금액 ÷ 중량')));
+      tile(`최근 12개월 ${flowName}량`, figure('t12', 'ton', t12 ? t12.ton : null), t12 ? el('span', {}, '직전 12개월 대비 ', delta(t12.changeTon)) : el('span', { class: 'tv-muted' }, '12개월치 자료가 쌓이면 표시됩니다')),
+      tile('최근 12개월 평균 단가', figure('t12p', 'price', t12 ? t12.price : null), el('span', { class: 'tv-muted' }, '금액 ÷ 중량')));
   }
 
   // The main chart: bars for volume/value, a line for unit price; optional prior-year line; crosshair snaps to the month; tooltip lists both values.
   function trendChart(data, state) {
     const m = state.metric; const pts = data.series; const avail = (document.getElementById('app') || document.body).clientWidth - 76;
     const W = Math.round(Math.max(300, Math.min(1080, avail))); const H = W < 560 ? 200 : 240; const L = W < 560 ? 44 : 58; const R = 8; const T = 10; const B = 26;
+    const bars = []; // bar elements by month index, for hover focus
     const vals = pts.map((p) => valueOf(p, m)); const prevs = state.yoy === '1' ? pts.map((p) => valueOf(p, m, true)) : [];
     const finite = [...vals, ...prevs].filter((v) => v != null);
     const wrap = el('div', { class: 'tv-chartwrap' });
@@ -208,7 +243,7 @@
     if (m === 'price' || pts.length > 60) {
       const path = (arr) => arr.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean);
       if (prevs.length) svg.append(sv('polyline', { points: path(prevs).join(' '), class: 'tv-line-prev', fill: 'none' }));
-      svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none' }));
+      svg.append(sv('polyline', { points: path(vals).join(' '), class: 'tv-line', fill: 'none', pathLength: '1' }));
       vals.forEach((v, i) => { if (v != null && pts.length <= 40) svg.append(sv('circle', { cx: x(i), cy: y(v), r: 3, class: 'tv-dot' })); });
       if (m !== 'price' && vals.some((v) => v != null)) svg.prepend(sv('polygon', { points: `${x(vals.findIndex((v) => v != null))},${y(0)} ${path(vals).join(' ')} ${x(vals.length - 1 - [...vals].reverse().findIndex((v) => v != null))},${y(0)}`, class: 'tv-area' }));
     } else {
@@ -216,32 +251,35 @@
       vals.forEach((v, i) => {
         if (v == null) return;
         const h = Math.max(1, y(0) - y(v)); const r = Math.min(3, bw / 2, h); // rounded data end, flat on the baseline
-        svg.append(sv('path', { d: `M${x(i) - bw / 2},${y(0)} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z`, class: 'tv-bar' }));
+        bars[i] = sv('path', { d: `M${x(i) - bw / 2},${y(0)} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z`, class: 'tv-bar', style: `--d:${Math.min(i * 14, 420)}ms` });
+        svg.append(bars[i]);
       });
       if (prevs.length) svg.append(sv('polyline', { points: prevs.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean).join(' '), class: 'tv-line-prev', fill: 'none' }));
     }
-    const cross = sv('line', { y1: T, y2: H - B, class: 'tv-cross', visibility: 'hidden' });
+    const cross = sv('line', { x1: 0, x2: 0, y1: T, y2: H - B, class: 'tv-cross' });
     const hit = sv('rect', { x: L, y: T, width: W - L - R, height: H - T - B, fill: 'transparent', tabindex: '0', 'aria-label': '월별 값 보기: 방향키로 이동' });
     svg.append(cross, hit);
-    const tip = el('div', { class: 'tv-tip', hidden: true, role: 'status' });
+    const tip = el('div', { class: 'tv-tip', role: 'status' });
     const show = (i) => {
       const p = pts[i]; if (!p) return;
-      cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+      cross.style.transform = `translateX(${x(i)}px)`; svg.classList.add('is-hover');
+      bars.forEach((b, j) => b && b.classList.toggle('is-active', j === i));
       tip.textContent = '';
       tip.append(el('div', { class: 'tv-tip-h' }, ym(p.period)),
         el('div', { class: 'tv-tip-r' }, el('i', { class: 'tv-key' }), el('b', {}, fmtOf[m](valueOf(p, m))), ' ', METRICS[m][0]),
         state.yoy === '1' ? el('div', { class: 'tv-tip-r tv-muted' }, el('i', { class: 'tv-key tv-key-prev' }), fmtOf[m](valueOf(p, m, true)), ' 전년 동월') : null,
         el('div', { class: 'tv-tip-r tv-muted' }, `전년 대비 ${fmtPct(yoyOf(p, m))}`));
-      tip.hidden = false;
       const rect = svg.getBoundingClientRect(); const px = (x(i) / W) * rect.width;
-      tip.style.left = `${Math.min(rect.width - 170, Math.max(4, px + 10))}px`;
+      const left = px + 14 + 170 > rect.width ? px - 14 - 170 : px + 14; // flips to the left near the right edge
+      tip.style.transform = `translateX(${Math.max(0, left)}px)`; tip.classList.add('is-on');
     };
     const idxAt = (e) => { const r = svg.getBoundingClientRect(); const px = ((e.clientX - r.left) / r.width) * W; return Math.max(0, Math.min(pts.length - 1, Math.floor((px - L) / step))); };
     let cur = pts.length - 1;
     hit.addEventListener('pointermove', (e) => { cur = idxAt(e); show(cur); });
-    hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+    const hide = () => { svg.classList.remove('is-hover'); tip.classList.remove('is-on'); };
+    hit.addEventListener('pointerleave', hide);
     hit.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') cur = Math.max(0, cur - 1); else if (e.key === 'ArrowRight') cur = Math.min(pts.length - 1, cur + 1); else return; e.preventDefault(); show(cur); });
-    hit.addEventListener('blur', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+    hit.addEventListener('blur', hide);
     wrap.append(svg, tip);
     return wrap;
   }
@@ -277,7 +315,7 @@
   }
 
   // 운영 방침: how the numbers get here and what they do and do not claim (same collapsed-by-default pattern as the other tabs' explainers)
-  function policySection(bounds) {
+  function policySection(bounds, open) {
     const items = [
       ['출처', '관세청 수출입무역통계를 공공데이터포털 Open API(품목별·품목별 국가별·국가별 수출입실적)로 받습니다. 수치는 공표값 그대로이며, 비어 있는 달을 추정치로 채우지 않습니다.'],
       ['범위', '동식물성 유지 전 품목(HS 15류), 유지종자(대두·유채씨·해바라기씨 등), 유박(대두박 등), 바이오디젤(HS 3826)의 28개 품목군입니다. 국내 수입·수출 통관 기준입니다.'],
@@ -288,7 +326,7 @@
       ['장애 시', '화면은 플랫폼 데이터베이스에 저장된 값만 읽습니다. 관세청 API에 장애가 있어도 마지막으로 받은 값은 그대로 보이며, 동기화 실패는 운영 알림으로 확인합니다.'],
       ['예정', '선박 단위 해상 물동량(Kpler, 2017~2026년)을 같은 화면 구조에 추가할 예정입니다. 통관 기준(관세청)과 선적 기준(Kpler)은 시점이 달라 합산하지 않고 나란히 비교합니다.'],
     ];
-    return el('details', { class: 'section tv-policy' }, el('summary', {}, '무역통계 운영 방침'),
+    return el('details', { class: 'section tv-policy', open: open || null }, el('summary', {}, '무역통계 운영 방침'),
       el('dl', { class: 'tv-policy-list' }, items.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
   }
 
@@ -296,7 +334,7 @@
   function foldSmall(rows, kind = 'country') {
     const big = rows.filter((r) => (r.share || 0) >= 0.005).slice(0, 8);
     const rest = rows.filter((r) => !big.includes(r));
-    if (!rest.length) return big;
+    if (rest.length <= 1) return [...big, ...rest]; // folding a single row only hides its name
     const name = kind === 'item' ? `그 밖의 ${rest.length}개 품목` : `그 밖의 ${rest.length}개국`;
     return [...big, { name, share: rest.reduce((a, r) => a + (r.share || 0), 0), ton: rest.reduce((a, r) => a + (r.ton || 0), 0) }];
   }
@@ -304,16 +342,17 @@
   async function render(app, query, deps) {
     if (deps && deps.api) api = deps.api;
     const state = keep(query);
-    app.textContent = '';
-    app.append(el('p', { class: 'tv-muted' }, '무역통계를 불러오는 중…'));
+    const prev = app.querySelector('.tv-root');
+    const policyWasOpen = Boolean(prev && prev.querySelector('.tv-policy[open]'));
+    if (prev) { prev.classList.add('is-updating'); prev.setAttribute('aria-busy', 'true'); } else { app.textContent = ''; app.append(el('section', { class: 'tv-root' }, skeleton())); }
     const qs = new URLSearchParams({ hs: state.hs, flow: state.flow }); if (state.from) qs.set('from', state.from); if (state.to) qs.set('to', state.to);
     let data; try { data = await api(`/trade/dashboard?${qs}`); } catch (_) { data = { error: 'network' }; }
-    app.textContent = '';
-    const root = el('section', { class: 'tv-root' });
-    app.append(root);
-    root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다. 품목은 이름으로 찾고 기간과 지표를 골라 보세요.'), policySection(data && data.bounds)));
-    if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); return; }
-    if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); return; }
+    const root = el('section', { class: `tv-root ${prev && prev.classList.contains('tv-root') && prev.querySelector('.tv-tiles, .tv-filters') ? 'is-swap' : 'is-enter'}` });
+    // built off-page and swapped in whole: attaching it empty would shorten the page and lose the scroll position
+    const commit = () => app.replaceChildren(root);
+    root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다. 품목은 이름으로 찾고 기간과 지표를 골라 보세요.'), policySection(data && data.bounds, policyWasOpen)));
+    if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); commit(); return; }
+    if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); commit(); return; }
 
     root.append(el('div', { class: 'tv-filters' },
       el('div', { class: 'tv-row tv-row-search' }, searchBox(state), await browsePanel(state)),
@@ -345,6 +384,7 @@
         data.countryScope !== data.hs ? '국가별 통계는 세부 품목(HS 6자리) 단위까지만 제공되어 상위 세부 품목 기준입니다.' : (data.countryCoverage && (data.countryCoverage.from > data.from || data.countryCoverage.to < data.to) ? `국가별 자료는 ${ym(data.countryCoverage.from)}~${ym(data.countryCoverage.to)}만 포함합니다.` : '선택 기간 기준.'),
         foldSmall(data.countries), null));
     root.append(cols, el('p', { class: 'tv-source' }, '출처: 관세청 수출입무역통계(공공데이터포털). 최근 월은 잠정치이며, 자세한 기준은 위 "무역통계 운영 방침"에 있습니다.'));
+    commit();
   }
 
   window.TradeDashboard = { render };

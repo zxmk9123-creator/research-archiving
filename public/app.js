@@ -4273,8 +4273,12 @@ async function router() {
   }
 }
 
+// Filter changes inside 무역통계 are hash changes too; they must not throw the reader back to the top.
+let lastRoutedPath = null;
 async function routeToPage() {
   const { path, param, query } = parseHash();
+  const stayingOnTrade = path === 'trade' && lastRoutedPath === 'trade';
+  lastRoutedPath = path;
   trackPageview(path, param);
   cancelActiveSpotlightTour();
   updateActiveNavTab(path);
@@ -4309,7 +4313,7 @@ async function routeToPage() {
     // earlier), always opens at its own top instead. Suppressed just this
     // once for a month-sidebar jump — see skipNextScrollReset above.
     if (skipNextScrollReset) skipNextScrollReset = false;
-    else window.scrollTo(0, 0);
+    else if (!stayingOnTrade) window.scrollTo(0, 0);
   } catch (err) {
     app.innerHTML = `<p>오류: ${err.message}</p>`;
   }

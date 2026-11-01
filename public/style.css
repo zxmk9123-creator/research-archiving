@@ -1555,3 +1555,58 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .tv-bar-track { display: block; height: 4px; margin-top: 5px; background: var(--tv-grid); border-radius: 2px; } .tv-bar-fill { display: block; height: 4px; background: var(--tv-s1); border-radius: 2px; }
 .tv-source { margin-top: var(--sp-3); font-size: 12px; color: var(--text-tertiary); line-height: 1.6; }
 @media (max-width: 640px) { .tv-filters { position: relative; } .tv-tile-value { font-size: 20px; } .tv-cols { grid-template-columns: 1fr; } .tv-hint { flex-basis: 100%; } }
+
+/* ---- 무역통계: motion & finish ----
+   Motion explains change and never decorates: entrances rise 6px and fade (staggered 45 ms), data grows from its baseline, numbers count to
+   their new value, the crosshair/tooltip glide. Ease-out (cubic-bezier(.2,.7,.2,1)), 120–500 ms. A filter change keeps the old view (dimmed)
+   until the new one is ready, so the page never flashes blank. Everything is off under prefers-reduced-motion. */
+.tv-root { --tv-ease: cubic-bezier(.2, .7, .2, 1); }
+@keyframes tv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes tv-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tv-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes tv-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes tv-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes tv-pop { from { opacity: 0; transform: translateY(-4px) scale(.99); } to { opacity: 1; transform: none; } }
+@keyframes tv-shimmer { from { background-position: -320px 0; } to { background-position: 320px 0; } }
+
+.tv-root.is-enter > * { animation: tv-rise .42s var(--tv-ease) both; }
+.tv-root.is-enter > :nth-child(2) { animation-delay: 45ms; } .tv-root.is-enter > :nth-child(3) { animation-delay: 90ms; }
+.tv-root.is-enter > :nth-child(4) { animation-delay: 135ms; } .tv-root.is-enter > :nth-child(5) { animation-delay: 180ms; }
+.tv-root.is-enter > :nth-child(6) { animation-delay: 225ms; } .tv-root.is-enter > :nth-child(n+7) { animation-delay: 270ms; }
+.tv-root.is-swap > :not(.tv-head):not(.tv-filters) { animation: tv-fade .24s ease-out both; }
+.tv-root.is-updating > :not(.tv-head):not(.tv-filters) { opacity: .5; transition: opacity .18s ease-out; pointer-events: none; }
+
+/* skeleton */
+.tv-skel { border-radius: var(--radius-control); background: linear-gradient(90deg, var(--surface-sunken) 0, #eef0f3 50%, var(--surface-sunken) 100%) 0 0 / 640px 100%; animation: tv-shimmer 1.2s linear infinite; }
+.tv-skel-h1 { width: 160px; height: 34px; margin: 4px 0 10px; } .tv-skel-line { width: min(520px, 90%); height: 16px; margin-bottom: 28px; }
+.tv-skel-bar { height: 42px; margin-bottom: 24px; } .tv-skel-tile { height: 92px; border-radius: var(--radius-card); } .tv-skel-chart { height: 300px; border-radius: var(--radius-card); }
+
+/* figures: the number leads, the unit stays quiet */
+.tv-fig { display: inline-flex; align-items: baseline; gap: 1px; font-variant-numeric: tabular-nums; }
+.tv-fig-p { font-size: .72em; font-weight: 600; color: var(--text-secondary); margin-right: 1px; }
+.tv-fig-u { font-size: .58em; font-weight: 600; color: var(--text-tertiary); margin-left: 3px; letter-spacing: 0; }
+.tv-tile { transition: border-color .2s ease-out; } .tv-tile:hover { border-color: var(--border-strong); }
+.tv-tile-value { font-size: 24px; letter-spacing: -.025em; }
+.tv-delta { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border-radius: 6px; background: var(--surface-sunken); font-size: 12px; }
+
+/* chart motion */
+.tv-bar { transform-box: fill-box; transform-origin: 50% 100%; animation: tv-grow .5s var(--tv-ease) both; animation-delay: var(--d, 0ms); transition: opacity .14s ease-out; }
+.tv-svg.is-hover .tv-bar { opacity: .38; } .tv-svg.is-hover .tv-bar.is-active { opacity: 1; }
+.tv-line { stroke-dasharray: 1; animation: tv-draw .8s var(--tv-ease) both; }
+.tv-area, .tv-line-prev, .tv-dot { animation: tv-fade .5s ease-out .25s both; }
+.tv-cross { opacity: 0; transition: transform .09s ease-out, opacity .12s ease-out; }
+.tv-svg.is-hover .tv-cross { opacity: 1; }
+.tv-tip { left: 0; opacity: 0; transform: translateX(0); transition: transform .09s ease-out, opacity .12s ease-out; will-change: transform; }
+.tv-tip.is-on { opacity: 1; }
+
+/* lists & popovers */
+.tv-bar-fill { transform-origin: 0 50%; animation: tv-fill .6s var(--tv-ease) .1s both; }
+.tv-rank tbody tr { transition: background .12s ease-out; }
+.tv-suggest:not([hidden]), .tv-browse[open] .tv-browse-grid { animation: tv-pop .16s var(--tv-ease) both; }
+.tv-chip, .tv-seg button, .tv-browse > summary { transition: background .16s ease-out, border-color .16s ease-out, color .16s ease-out, transform .1s ease-out; }
+.tv-chip:active:not(:disabled), .tv-seg button:active { transform: scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-root *, .tv-root { animation: none !important; transition: none !important; }
+}
+@media (max-width: 640px) { .tv-tile-value { font-size: 21px; } .tv-skel-chart { height: 220px; } }
