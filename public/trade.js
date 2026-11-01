@@ -101,11 +101,12 @@
 
   // ---- state in the URL ----
   const keep = (q) => {
-    const flow = ['imp', 'exp', 'net'].includes(q.flow) ? q.flow : 'imp';
+    const flow = q.mode === 'pair' ? 'pair' : ['imp', 'exp', 'net'].includes(q.flow) ? q.flow : 'imp';
     const metric = ['ton', 'usd', 'price'].includes(q.metric) && !(flow === 'net' && q.metric === 'price') ? q.metric : 'ton'; // no unit price of a balance
-    return { hs: q.hs || '15', country: /^[A-Z]{2}$/.test(q.country || '') ? q.country : '', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
+    const pair = q.mode === 'pair';
+    return { mode: pair ? 'pair' : 'kr', ex: /^\d{1,4}$/.test(q.ex || '') ? q.ex : '360', im: /^\d{1,4}$/.test(q.im || '') ? q.im : '699', hs: q.hs || '15', country: /^[A-Z]{2}$/.test(q.country || '') ? q.country : '', from: q.from || '', to: q.to || '', flow, metric, grain: ['month', 'quarter', 'year'].includes(q.grain) ? q.grain : 'month', yoy: q.yoy === '0' ? '0' : '1', view: q.view === 'table' ? 'table' : 'chart' };
   };
-  const FLOW_NAME = { imp: '수입', exp: '수출', net: '순수출' };
+  const FLOW_NAME = { imp: '수입', exp: '수출', net: '순수출', pair: '교역' };
   const GRAIN_NAME = { month: '월별', quarter: '분기별', year: '연도별' };
   const href = (state, over) => {
     const s = { ...state, ...over };
@@ -233,6 +234,20 @@
       select(start);
     });
     return box;
+  }
+
+  function modeSwitch(state) {
+    return el('div', { class: 'tv-row tv-modes' }, segmented('조회 방식', [['kr', '한국 기준'], ['pair', '두 나라 사이']], state.mode, (v) => go(state, { mode: v, flow: v === 'pair' ? 'pair' : 'imp', country: '' })));
+  }
+
+  // Two-country mode: exporter and importer from the fixed country list (native selects), with a swap button.
+  function pairPickers(state, countries) {
+    const opt = (c, cur) => el('option', { value: String(c.code), selected: String(c.code) === cur || null }, c.name);
+    const pick = (label, key, other) => el('label', { class: 'tv-seg tv-partner' }, el('span', { class: 'tv-label' }, label),
+      el('select', { class: 'tv-select', 'aria-label': label, onchange: (e) => go(state, { [key]: e.target.value, ...(e.target.value === state[other] ? { [other]: state[key] } : {}) }) }, countries.map((c) => opt(c, state[key]))));
+    return el('div', { class: 'tv-row tv-pair-row' }, pick('수출국', 'ex', 'im'),
+      el('button', { type: 'button', class: 'tv-swap', 'aria-label': '수출국과 수입국 바꾸기', title: '수출국과 수입국 바꾸기', onclick: () => go(state, { ex: state.im, im: state.ex }) }, '⇄'),
+      pick('수입국', 'im', 'ex'));
   }
 
   // Partner country: a native select (keyboard and screen-reader friendly, like the other tabs' filters), largest partners first.
@@ -449,6 +464,7 @@
       ['품목 분류', '가장 세부 단위(HS 10자리)로 저장하고 상위 분류는 합계로 계산합니다. 그래서 하위 품목을 모두 더하면 상위 품목과 정확히 같습니다. 국가별 통계는 관세청이 HS 6자리까지만 제공하므로 그보다 세부 품목을 고르면 상위 6자리 기준으로 보여 줍니다.'],
       ['조회 기간', `${bounds ? `현재 ${ym(bounds.min)}부터 ${ym(bounds.max)}까지 조회할 수 있습니다. ` : ''}적재를 시작한 달부터 매월 한 달씩 늘어나며, 기간 입력은 이 범위 안에서만 고를 수 있습니다. 범위를 벗어나거나 시작·종료가 바뀐 주소로 열면 자동으로 범위 안으로 맞추고 그 사실을 화면에 알립니다.`],
       ['장애 시', '화면은 플랫폼 데이터베이스에 저장된 값만 읽습니다. 관세청 API에 장애가 있어도 마지막으로 받은 값은 그대로 보이며, 동기화 실패는 운영 알림으로 확인합니다.'],
+      ['두 나라 사이', '"두 나라 사이"는 UN Comtrade(유엔 공공 무역통계)로 한국이 끼지 않는 교역도 볼 수 있습니다. 수출국이 신고한 수출 통계를 먼저 쓰고, 신고가 없으면 수입국이 신고한 수입 통계로 대체하며 어느 쪽인지 화면에 표시합니다. 수출은 FOB, 수입은 CIF 기준이라 두 값이 다를 수 있습니다. 처음 조회하는 조합은 그때 받아 저장하므로 첫 로딩이 느리고, 국가별 신고가 늦어 최근 몇 달은 비어 있을 수 있습니다. HS 6자리까지 지원합니다.'],
       ['예정', '선박 단위 해상 물동량(Kpler, 2017~2026년)을 같은 화면 구조에 추가할 예정입니다. 통관 기준(관세청)과 선적 기준(Kpler)은 시점이 달라 합산하지 않고 나란히 비교합니다.'],
     ];
     return el('details', { class: 'section tv-policy', open: open || null }, el('summary', {}, '무역통계 운영 방침'),
@@ -467,33 +483,51 @@
   async function render(app, query, deps) {
     if (deps && deps.api) api = deps.api;
     const state = keep(query);
+    const pairMode = state.mode === 'pair';
     const prev = app.querySelector('.tv-root');
     const policyWasOpen = Boolean(prev && prev.querySelector('.tv-policy[open]'));
     if (prev) { prev.classList.add('is-updating'); prev.setAttribute('aria-busy', 'true'); } else { app.textContent = ''; app.append(el('section', { class: 'tv-root' }, skeleton())); }
     const qs = new URLSearchParams({ hs: state.hs, flow: state.flow }); if (state.from) qs.set('from', state.from); if (state.to) qs.set('to', state.to);
     if (state.country) qs.set('country', state.country);
-    let data; let partners;
-    try { [data, partners] = await Promise.all([api(`/trade/dashboard?${qs}`), api(`/trade/partners?hs=${state.hs}`).catch(() => ({ partners: [] }))]); } catch (_) { data = { error: 'network' }; }
+    let data; let partners; let countryList = [];
+    try {
+      if (pairMode) {
+        const pq = new URLSearchParams({ hs: state.hs, ex: state.ex, im: state.im }); if (state.from) pq.set('from', state.from); if (state.to) pq.set('to', state.to);
+        const [d, c] = await Promise.all([api(`/trade/pair?${pq}`), api('/trade/countries-list').catch(() => ({ countries: [] }))]);
+        data = d; countryList = (c && c.countries) || [];
+      } else {
+        [data, partners] = await Promise.all([api(`/trade/dashboard?${qs}`), api(`/trade/partners?hs=${state.hs}`).catch(() => ({ partners: [] }))]);
+      }
+    } catch (_) { data = { error: 'network' }; }
     partners = (partners && partners.partners) || [];
     const root = el('section', { class: `tv-root ${prev && prev.classList.contains('tv-root') && prev.querySelector('.tv-tiles, .tv-filters') ? 'is-swap' : 'is-enter'}` });
     // built off-page and swapped in whole: attaching it empty would shorten the page and lose the scroll position
     const commit = () => app.replaceChildren(root);
     root.append(el('div', { class: 'tv-head' }, el('h1', {}, '무역통계'), el('p', { class: 'page-lede' }, '유지·원료 품목의 월별 수출입 물량과 가격, 주요 상대국을 확인합니다. 품목은 이름으로 찾고 기간과 지표를 골라 보세요.'), policySection(data && data.bounds, policyWasOpen)));
     if (data.empty) { root.append(el('p', { class: 'tv-muted' }, '아직 적재된 데이터가 없습니다. 첫 동기화 후 표시됩니다.')); commit(); return; }
+    if (pairMode && data.disabled) { root.append(el('div', { class: 'tv-filters' }, modeSwitch(state)), el('p', { class: 'tv-muted' }, '두 나라 조회는 UN Comtrade 인증 키(UN_CONTRADE)가 설정되면 사용할 수 있습니다.')); commit(); return; }
     if (data.error) { root.append(el('p', { class: 'tv-muted' }, data.error === 'invalid_hs' ? 'HS코드는 2·4·6·8·10자리 숫자여야 합니다.' : '데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.')); commit(); return; }
 
     root.append(el('div', { class: 'tv-filters' },
+      modeSwitch(state),
       el('div', { class: 'tv-row tv-row-search' }, searchBox(state), await browsePanel(state)),
+      pairMode ? pairPickers(state, countryList) : null,
       breadcrumb(data, state),
       el('div', { class: 'tv-row' }, periodControls(data, state)),
       el('div', { class: 'tv-row tv-switches' },
-        segmented('구분', [['imp', '수입'], ['exp', '수출'], ['net', '순수출']], state.flow, (v) => go(state, { flow: v })),
+        pairMode ? null : segmented('구분', [['imp', '수입'], ['exp', '수출'], ['net', '순수출']], state.flow, (v) => go(state, { flow: v })),
         segmented('지표', [['ton', '물량'], ['usd', '금액'], ['price', '단가', state.flow === 'net' ? '순수출(수출−수입)에는 단가를 계산하지 않습니다' : null]], state.metric, (v) => go(state, { metric: v })),
-        partnerPicker(state, partners))));
+        pairMode ? null : partnerPicker(state, partners))));
     if (data.adjusted && data.adjusted.length) root.append(el('p', { class: 'tv-notice', role: 'status' }, `${data.adjusted.map((a) => ADJUST_TEXT[a] || a).join(' · ')}.`));
 
     root.append(el('div', { class: 'tv-selected' }, el('h3', {}, data.name || '이름 없는 품목'), el('span', { class: 'tv-badge' }, LEVEL_LABEL[data.hs.length] || ''), el('span', { class: 'tv-code' }, `HS ${data.hs}`),
+      pairMode ? el('span', { class: 'tv-route' }, data.exporter.name, el('span', { class: 'tv-route-arrow', 'aria-hidden': 'true' }, '→'), data.importer.name) : null,
       data.country ? el('a', { class: 'tv-country-chip', href: href(state, { country: '' }), title: '전체 국가로 돌아가기' }, el('span', { class: 'tv-muted' }, '상대국 '), data.countryName || data.country, el('span', { class: 'tv-x', 'aria-hidden': 'true' }, '×'), el('span', { class: 'tv-sr' }, ' 해제')) : null));
+    if (pairMode) {
+      const src = { exporter_report: `${data.exporter.name}가 신고한 수출 통계`, importer_report: `${data.importer.name}가 신고한 수입 통계(수출국 신고가 없어 대체)`, none: '' }[data.source];
+      root.append(el('p', { class: 'tv-context' }, data.source === 'none' ? '선택한 기간에 두 나라의 신고 자료가 없습니다.' : `${src} 기준입니다.${data.seriesHs !== data.hs ? ` 두 나라 조회는 HS 6자리까지 지원하여 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
+      if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.apiError ? `UN Comtrade에서 일부 기간을 받지 못했습니다(${data.apiError.code}). 받은 기간까지만 표시하며, 잠시 후 다시 열면 이어서 받습니다.` : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
+    }
     if (data.country) {
       const what = { imp: `${data.countryName}에서 들여온 수입`, exp: `${data.countryName}(으)로 보낸 수출`, net: `${data.countryName}와(과)의 수출 − 수입` }[state.flow];
       root.append(el('p', { class: 'tv-context' }, `${what} 기준입니다.${data.seriesHs !== data.hs ? ` 국가별 통계는 세부 품목(HS 6자리)까지 제공되어 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
@@ -510,10 +544,11 @@
           el('span', { class: 'tv-tools-sep', 'aria-hidden': 'true' }),
           el('button', { type: 'button', class: 'tv-chip', 'aria-pressed': String(state.yoy === '1'), onclick: () => go(state, { yoy: state.yoy === '1' ? '0' : '1' }) }, state.grain === 'year' ? '전년 비교' : '전년 동기 비교'),
           el('button', { type: 'button', class: 'tv-chip', 'aria-pressed': String(state.view === 'table'), onclick: () => go(state, { view: state.view === 'table' ? 'chart' : 'table' }) }, '표로 보기'),
-          el('a', { class: 'tv-chip', href: csv, download: '' }, 'CSV 받기'))),
+          pairMode ? null : el('a', { class: 'tv-chip', href: csv, download: '' }, 'CSV 받기'))),
       state.view === 'table' ? seriesTable(pts, state) : el('div', {}, legend(state), trendChart(data, state, pts)),
       pts.some((p) => p.partial) ? el('p', { class: 'tv-note tv-muted' }, '옅은 막대는 자료가 다 차지 않은 기간(조회 범위의 앞뒤 또는 아직 공표 전)입니다. 전년 비교는 같은 달끼리만 합니다.') : null));
 
+    if (pairMode) { root.append(el('p', { class: 'tv-source' }, '출처: UN Comtrade. 수출국이 신고한 수출은 FOB, 수입국이 신고한 수입은 CIF 기준이라 같은 교역도 두 값이 다를 수 있으며, 국가별 신고 시점에 따라 최근 월이 비어 있을 수 있습니다. 자세한 기준은 위 "무역통계 운영 방침"에 있습니다.')); commit(); return; }
     const nl = data.children;
     const nextName = { 4: '품목군', 6: '세부 품목', 10: '최종 품목' }[(data.hs.length < 4 ? 4 : data.hs.length < 6 ? 6 : data.hs.length < 10 ? 10 : 0)];
     const cols = el('div', { class: 'tv-cols' },

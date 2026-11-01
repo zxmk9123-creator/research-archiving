@@ -225,6 +225,41 @@ router.get('/partners', async (req, res) => {
   }
 });
 
+// Two-country view (UN Comtrade): exporter -> importer for an HS heading. Both countries come from the fixed list; the period is clamped like the
+// Korea-based view, and a pair that is still being fetched answers with what is cached so far (incomplete: true).
+const { COUNTRIES, countryByCode, isCountry } = require('../lib/countries');
+const { loadPair, latestMonth } = require('../lib/tradePair');
+const { comtradeKey } = require('../lib/comtradeApi');
+router.get('/countries-list', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.json({ countries: COUNTRIES.map((c) => ({ code: c.code, iso: c.iso, name: c.ko })), enabled: Boolean(comtradeKey()) });
+});
+router.get('/pair', async (req, res) => {
+  const ex = Number(req.query.ex); const im = Number(req.query.im);
+  if (!isCountry(ex) || !isCountry(im)) return res.status(400).json({ error: 'invalid_country' });
+  if (ex === im) return res.status(400).json({ error: 'same_country' });
+  if (!comtradeKey()) return res.json({ disabled: true });
+  try {
+    const now = new Date();
+    const max = latestMonth(now); const min = `${now.getUTCFullYear() - 30}01`;
+    const parsed = Q.parseQuery({ hs: req.query.hs, from: req.query.from, to: req.query.to, flow: 'imp' }, { min, max });
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const { hs, from, to } = parsed.value;
+    const r = await loadPair({ ex, im, hs, from, to });
+    const chain = [2, 4, 6].filter((n) => n <= hs.length).map((n) => hs.slice(0, n));
+    const cn = await names(chain.concat(hs.length > 6 ? [hs] : []));
+    res.set('Cache-Control', 'private, max-age=60');
+    res.json({
+      mode: 'pair', hs, flow: 'pair', from, to, latest: max, bounds: { min, max }, adjusted: parsed.adjusted, name: cn.get(hs) || null, seriesHs: r.cmd,
+      breadcrumb: chain.map((code) => ({ code, name: cn.get(code) || null })), exporter: { code: ex, name: countryByCode(ex).ko }, importer: { code: im, name: countryByCode(im).ko },
+      source: r.source, incomplete: r.incomplete, apiError: r.error, kpis: r.kpis, series: r.series, children: [], countries: [],
+    });
+  } catch (err) {
+    console.error('GET /api/trade/pair failed:', err.message);
+    res.status(500).json({ error: 'trade_unavailable' });
+  }
+});
+
 router.get('/status', requireAuth, (req, res) => res.json({ keys: tradeKeysStatus() }));
 
 module.exports = router;

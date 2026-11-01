@@ -1400,3 +1400,13 @@ CREATE TABLE IF NOT EXISTS trade_flow (
 );
 CREATE INDEX IF NOT EXISTS idx_trade_flow_hs_period ON trade_flow(hs_code, period);
 CREATE TABLE IF NOT EXISTS hs_catalog (hs_code TEXT PRIMARY KEY, name TEXT NOT NULL, level SMALLINT NOT NULL);
+
+-- Two-country trade (UN Comtrade), fetched on demand: one row per reporter/partner/flow/HS heading/month, plus a coverage row per year
+CREATE TABLE IF NOT EXISTS trade_bilateral (
+  reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, period CHAR(6) NOT NULL,
+  net_wgt NUMERIC, value NUMERIC, fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (reporter, partner, flow, cmd, period)
+);
+CREATE TABLE IF NOT EXISTS trade_bilateral_cov (
+  reporter INTEGER NOT NULL, partner INTEGER NOT NULL, flow CHAR(1) NOT NULL, cmd TEXT NOT NULL, year INTEGER NOT NULL,
+  rows INTEGER NOT NULL DEFAULT 0, fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (reporter, partner, flow, cmd, year)
+);

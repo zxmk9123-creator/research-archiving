@@ -1676,3 +1676,13 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .tv-context { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); font-size: 13px; color: var(--text-secondary); }
 .tv-rank tr.is-selected th, .tv-rank tr.is-selected td { background: var(--surface-sunken); } .tv-rank tr.is-selected a { font-weight: 700; }
 .tv-neg .tv-line { stroke: var(--tv-neg); } .tv-neg .tv-area { fill: var(--tv-neg); } .tv-dot-neg { fill: var(--tv-neg); }
+
+/* two-country mode */
+.tv-modes { margin-bottom: 2px; }
+.tv-pair-row { align-items: center; gap: var(--sp-2) var(--sp-3); }
+.tv-pair-row .tv-select { max-width: 200px; }
+.tv-swap { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--text-secondary); font-size: 14px; cursor: pointer;
+  transition: background .16s ease-out, border-color .16s ease-out, transform .25s var(--tv-ease); }
+.tv-swap:hover { border-color: var(--text-tertiary); color: var(--text); transform: rotate(180deg); }
+.tv-route { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); border: 1px solid var(--border); font-size: 12.5px; font-weight: 600; color: var(--text); }
+.tv-route-arrow { color: var(--text-tertiary); }
