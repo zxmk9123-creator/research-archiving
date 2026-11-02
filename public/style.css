@@ -1706,3 +1706,32 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .ops-index button:hover, .ops-index button:focus-visible { background: var(--surface-sunken); color: var(--text); }
 @media (min-width: 1460px) { .ops-index { display: flex; } }
 @media (prefers-reduced-motion: reduce) { .ops-fold > .section-header::after { transition: none; } }
+
+/* ---------------------------------------------------------------------
+   Polish layer (restrained): the parts the browser would otherwise draw with its own defaults, one shared state vocabulary, calmer type.
+   Everything is :where() / low specificity so every component rule above still wins. No new colors, no decoration, no new motion.
+------------------------------------------------------------------------ */
+:root { color-scheme: light; accent-color: var(--action); }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 88px; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+::selection { background: var(--action-soft); color: var(--text); }
+:where(input, textarea, select) { caret-color: var(--action); }
+::placeholder { color: var(--text-tertiary); opacity: 1; }
+/* one focus ring everywhere, visible for keyboard use only */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: var(--radius-sm); }
+:where(a, button, input, select, textarea, summary):focus:not(:focus-visible) { outline: none; }
+/* calmer type: balanced headings, no orphans in short prose, even underlines */
+:where(h1, h2, h3) { text-wrap: balance; }
+:where(p, li, .page-lede) { text-wrap: pretty; }
+:where(a) { text-underline-offset: 3px; text-decoration-thickness: 1px; }
+/* numbers line up in every table and figure */
+:where(table td, table th, .count, .meta) { font-variant-numeric: tabular-nums; }
+:where(table th) { color: var(--text-secondary); font-weight: 600; }
+:where(table tbody tr, table tr):hover > :where(td) { background-color: var(--surface-sunken); }
+/* quiet scrollbars for inner scrollers (page scrollbar left alone) */
+:where(.ops-triage-table-wrap, .tv-browse-panel, .archive-month-nav, [class*="-scroll"]) { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* feedback the eye can trust: short, ease-out, state only */
+:where(a, button, .btn, .chip, .card, summary) { transition: color .15s ease-out, background-color .15s ease-out, border-color .15s ease-out, box-shadow .15s ease-out, opacity .15s ease-out; }
+:where(button, .btn):active:not(:disabled) { transform: translateY(.5px); }
+:where(button, .btn):disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
