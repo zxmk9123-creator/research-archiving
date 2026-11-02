@@ -4,8 +4,8 @@
 //  2. DEADLINE: by 10:00 KST a headline exists even if collection is still running (built from what is collected; refreshed when more
 //     items are published or collection completes) — see dailyBrief.ensureDailyBrief().
 //  3. WATCHDOG: a stalled pipeline fails the cron response loudly, which turns the GitHub Actions run red (email notification).
-// Vercel answers 508 (loop detected) to any request a hop makes to another Vercel deployment once the chain is 4 hops deep (seen in production: depth 4 hops failed every AI call and hop 5 was refused), so a chain stops at depth 3; the 10-minute schedule starts the next chain from depth 0.
-const MAX_CHAIN_DEPTH = 3;
+// Vercel answers 508 (loop detected) to any request a hop makes to another Vercel deployment once the chain is 4 hops deep (seen in production: depth 4 hops failed every AI call and hop 5 was refused), so a chain stops at depth 2 (one hop of margin); the 10-minute schedule starts the next chain from depth 0.
+const MAX_CHAIN_DEPTH = 2;
 const WATCHDOG_STALL_HOUR_KST = 9;      // started late / no progress by 09:00 KST is an incident
 const BRIEF_GRACE_MS = 30 * 60 * 1000;
 const GENERATION_LEASE_MS = 6 * 60 * 1000; // same lease dailyBrief.js uses to reclaim a stuck generation  // collection done, headline still missing after 30 minutes
