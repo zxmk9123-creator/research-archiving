@@ -23,7 +23,8 @@ async function runWarm({ offset = 0, limit = 6, now = new Date(), call = (p) => 
   const y1 = now.getUTCFullYear(); const list = Array.from({ length: years }, (_, i) => y1 - i);
   const ctx = { calls: 0, deadline: Date.now() + 240000, error: null, failed: false };
   const errors = [];
-  if (offset === 0) await drainRetries({ db, call, now, limit: 10, force: true }).catch((e) => errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`)); // failed years first
+  let retry = null;
+  if (offset === 0) retry = await drainRetries({ db, call, now, limit: 30, force: true }).catch((e) => { errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`); return null; }); // failed years first
   for (const base of COMBOS.slice(offset, offset + limit)) {
     for (const cmds of BATCHES) {
       const tasks = await planYears(db, now, base, cmds, list);
@@ -32,7 +33,7 @@ async function runWarm({ offset = 0, limit = 6, now = new Date(), call = (p) => 
     }
   }
   const next = offset + limit < COMBOS.length ? offset + limit : null;
-  return { offset, next, done: next === null, calls: ctx.calls, combos: COMBOS.length, errors, ok: errors.length === 0 };
+  return { offset, next, done: next === null, calls: ctx.calls, combos: COMBOS.length, errors, ok: errors.length === 0, ...(retry ? { retry } : {}) };
 }
 
 module.exports = { runWarm, COMBOS, BATCHES, LIMITS };
