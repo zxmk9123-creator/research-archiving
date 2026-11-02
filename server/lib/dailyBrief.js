@@ -17,6 +17,7 @@ const REPAIR_EVIDENCE_ITEMS = 12;
 // well under this), so a row silent for longer than this has lost its worker (the host ended the function): reclaim it quickly.
 const GENERATION_STALE_AFTER_MINUTES = 6;
 const MAX_AUTOMATIC_RETRIES = 5;
+const BRIEF_MAX_TOKENS = 12000;
 // One cron invocation may run for at most 300 s on the host. Retries stop (and the row is released as 'failed' so the NEXT call picks
 // it up at once) when the next one would not fit, instead of sleeping until the host kills the function and leaves the row 'generating'.
 const INVOCATION_BUDGET_MS = 230_000;
@@ -266,6 +267,7 @@ async function countEvidenceCandidates(briefDate) {
 // The model sometimes answers with the format description instead of content (`"item_id":int`, `"developments":[...]`). That is not
 // parseable JSON and, unlike a random glitch, repeats on an identical prompt — so it is recognised and the next attempt says why.
 const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b|A사가 B 공장|증설 소식으로 원료 수급이 빠듯|A사가 연 10만 톤|증설 일정 확정 여부/;
+const TRUNCATED_HINT = '\n\n[재시도 안내] 직전 응답은 생각·해설을 길게 쓰다가 중간에 잘려 JSON이 완성되지 않았다. 해설·사고 과정 없이 곧바로 JSON 객체만 출력하고, 항목은 짧게 쓴다.';
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
 async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null } = {}) {
@@ -331,9 +333,11 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead는 앞쪽 자료를 중심으로 쓰고 market_summary는 developments 전체를 아우른다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
     'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
   ].join('\n');
-  const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint ? REPAIR_HINT : ''}`;
+  const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint === 'short' ? TRUNCATED_HINT : repairHint ? REPAIR_HINT : ''}`;
 
-  const text = await provider.callProvider({ system, user }, cancelled && cancelled.signal ? { signal: cancelled.signal } : undefined);
+  // The brief is a small JSON object, but the router's `auto` lane can land on a reasoning model that spends the default 6000 tokens thinking and
+  // cuts the answer off (the most frequent failure so far), so it gets a larger budget; FREELLMAPI_BRIEF_MODEL pins a non-reasoning model if set.
+  const text = await provider.callProvider({ system, user }, { ...(cancelled && cancelled.signal ? { signal: cancelled.signal } : {}), maxTokens: BRIEF_MAX_TOKENS, model: (process.env.FREELLMAPI_BRIEF_MODEL || '').trim() || undefined });
   // the start of an unusable answer is kept in the attempt log: without it the cause of a repeated failure cannot be told from the message
   const withHead = (message) => `${message} | head=${String(text || '').replace(/\s+/g, ' ').slice(0, 120)}`;
   let raw;
@@ -413,7 +417,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
         [briefDate, budgetSpent ? `call_budget_exhausted: ${message}`.slice(0, 500) : outOfTime ? `retry_deferred: ${message}`.slice(0, 500) : message, final]
       ).catch((updateErr) => console.error(`daily_brief retry state update failed: ${updateErr.message}`));
       if (final) return;
-      repairHint = repairHint || /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message);
+      repairHint = repairHint || (/brief_truncated_by_max_tokens/.test(message) ? 'short' : /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message)); // a cut-off answer is retried with less input and the short-answer hint
       await sleep(delayMs);
     }
   }

@@ -130,12 +130,12 @@ function laneLabel(lane) {
   return lane === 'chat' && (process.env.FREELLMAPI_CHAT_API_KEY || '').trim() ? 'chat' : 'shared';
 }
 
-async function callFreeLLMAPI({ system, user }, { signal, lane } = {}) {
+async function callFreeLLMAPI({ system, user }, { signal, lane, maxTokens, model: modelOverride } = {}) {
   const apiKey = apiKeyFor(lane);
   if (!apiKey) throw new Error('FREELLMAPI_API_KEY is not configured');
   const baseUrl = process.env.FREELLMAPI_BASE_URL;
   if (!baseUrl) throw new Error('FREELLMAPI_BASE_URL is not configured');
-  const model = process.env.FREELLMAPI_MODEL || 'auto';
+  const model = modelOverride || process.env.FREELLMAPI_MODEL || 'auto';
 
   // FreeLLMAPI itself cascades through several free-tier upstream models on
   // failure (Groq -> OpenRouter -> Google -> ...) before answering, which
@@ -175,7 +175,7 @@ async function callFreeLLMAPI({ system, user }, { signal, lane } = {}) {
       // cap mid-sentence — see appendTruncationNoticeIfNeeded's own
       // comment for how that went undetected. Raised from 4000; still
       // bounded, not unlimited.
-      max_tokens: 6000,
+      max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 6000, // a caller whose answer is structured (the daily brief) may ask for more room: reasoning models spend part of it thinking
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -185,14 +185,16 @@ async function callFreeLLMAPI({ system, user }, { signal, lane } = {}) {
 
   const data = JSON.parse(await readResponseText(res, 4 * 1024 * 1024, 'AI provider response'));
   const choice = data && data.choices && data.choices[0];
-  const text = choice && choice.message && choice.message.content;
+  const rawText = choice && choice.message && choice.message.content;
+  // a reasoning model may inline its thinking; only what follows it is the answer
+  const text = typeof rawText === 'string' ? rawText.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim() : rawText;
   requireNonEmptyText(text, 'freellmapi');
   requireNonDegenerateText(text, 'freellmapi');
   return appendTruncationNoticeIfNeeded(text, choice && choice.finish_reason);
 }
 
-async function callProvider(promptMessages, { signal } = {}) {
-  return callFreeLLMAPI(promptMessages, signal ? { signal } : undefined);
+async function callProvider(promptMessages, { signal, maxTokens, model } = {}) {
+  return callFreeLLMAPI(promptMessages, { ...(signal ? { signal } : {}), ...(maxTokens ? { maxTokens } : {}), ...(model ? { model } : {}) });
 }
 
 // --- Streaming path (AI Research Search's perceived-latency fix) ---

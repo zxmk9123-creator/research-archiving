@@ -287,3 +287,18 @@ test('softenForecast turns a definite "-ㄹ 것" into "-ㄹ 수 있다" and leav
   assert.equal(softenForecast('가격 변동성이 커진다'), '가격 변동성이 커진다');
   assert.equal(softenForecast('보험료가 오를 가능성이 있다'), '보험료가 오를 가능성이 있다');
 });
+
+test('a cut-off answer (reasoning ate the token budget) is retried with less input and a "JSON only" hint, and asks for the larger budget', async () => {
+  const h = harness(['Here\'s a thinking process: 1. **Analyze** ...\n\n⚠ 답변이 길이 제한으로 인해 중간에 잘렸습니다.', GOOD]);
+  const opts = [];
+  const prev = provider.callProvider;
+  provider.callProvider = async (m, o) => { opts.push(o); return prev(m, o); };
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.equal(h.state.ready, true);
+    assert.match(h.state.attempts[0], /brief_truncated_by_max_tokens/);
+    assert.match(h.state.prompts[1], /JSON 객체만 출력하고/);
+    assert.equal(opts[0].maxTokens, 12000);
+    assert.equal(h.state.limits[1], 12, 'less evidence on the retry');
+  } finally { h.restore(); }
+});
