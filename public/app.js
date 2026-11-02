@@ -3167,48 +3167,8 @@ function renderEvalHtml(data) {
   </section>`;
 }
 
-// Overview: one verdict, three category cards, and the list of every check behind them. Everything is derived from the same stats the tables below use.
-const OPS_BACKLOG_WARN = 100;
-function opsChecks(stats) {
-  const { backlog, aiFailureReasons, sourceErrors, perSource, today, basis } = stats;
-  const mk = (cat, name, ok, value, okText, warnText) => ({ cat, name, state: ok === null ? 'unknown' : ok ? 'ok' : 'warn', result: ok === null ? '불러오지 못했습니다' : ok ? okText : warnText, value });
-  const failed = aiFailureReasons.ok ? aiFailureReasons.rows.reduce((n, r) => n + Number(r.cnt || 0), 0) : null;
-  const win = perSource.ok ? perSource.rows.reduce((n, r) => n + r.collected, 0) : null;
-  return [
-    mk('수집', '금일 수집량 (KST)', today.ok ? today.collected > 0 : null, today.ok ? `${today.collected}건` : '-', '오늘 저장된 자료가 있습니다', '오늘 저장된 자료가 아직 없습니다'),
-    mk('수집', `최근 ${basis.collectionWindow.days}일 수집량`, win === null ? null : win > 0, win === null ? '-' : `${win}건`, '정상적으로 수집되고 있습니다', '기간 내 수집된 자료가 없습니다'),
-    mk('AI 처리', '미검수(Draft) 적체량', backlog.ok ? backlog.total <= OPS_BACKLOG_WARN : null, backlog.ok ? `${backlog.total}건` : '-', '적체가 많지 않습니다', `적체가 ${OPS_BACKLOG_WARN}건을 넘었습니다`),
-    mk('AI 처리', 'AI 생성 실패', failed === null ? null : failed === 0, failed === null ? '-' : `${failed}건`, '실패한 Draft가 없습니다', '실패한 Draft를 확인해 주세요'),
-    mk('소스', '수집 오류 중인 소스', sourceErrors.ok ? sourceErrors.rows.length === 0 : null, sourceErrors.ok ? `${sourceErrors.rows.length}곳` : '-', '모든 소스가 정상입니다', '오류 상태의 소스가 있습니다'),
-  ];
-}
-const OPS_ICON = { ok: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10" cy="10" r="8"/><path d="M6.5 10.2l2.4 2.4 4.6-4.9"/></svg>', warn: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10" cy="10" r="8"/><path d="M10 6v4.6M10 13.4v.1"/></svg>' };
-const OPS_STATE_LABEL = { ok: '정상', warn: '확인 필요', unknown: '확인 불가' };
-function renderOpsOverviewHtml(stats) {
-  const checks = opsChecks(stats);
-  const warn = checks.filter((c) => c.state === 'warn').length; const unknown = checks.filter((c) => c.state === 'unknown').length; const ok = checks.length - warn - unknown;
-  const tone = warn ? 'warn' : unknown ? 'unknown' : 'ok';
-  const title = warn ? `확인이 필요한 항목 ${warn}건` : unknown ? '일부 항목을 불러오지 못했습니다' : '정상 운영 중';
-  const cats = ['수집', 'AI 처리', '소스'].map((cat) => {
-    const rows = checks.filter((c) => c.cat === cat);
-    return `<div class="ops-cat"><h3>${cat}</h3>${rows.map((c) => `<div class="ops-cat-row"><span class="ops-dot is-${c.state}" aria-hidden="true"></span><span class="ops-cat-name">${c.name}<small>${c.value}</small></span><span class="ops-pill is-${c.state}">${OPS_STATE_LABEL[c.state]}</span></div>`).join('')}</div>`;
-  }).join('');
-  const rows = checks.map((c) => `<tr><td><span class="ops-pill is-${c.state}">${OPS_STATE_LABEL[c.state]}</span></td><td><span class="ops-tag">${c.cat}</span></td><td>${c.name}</td><td>${c.value}</td><td>${c.result}</td></tr>`).join('');
-  return `
-    <div class="ops-hero is-${tone}" role="status">
-      <span class="ops-hero-icon">${OPS_ICON[tone === 'ok' ? 'ok' : 'warn']}</span>
-      <div class="ops-hero-text"><strong>${title}</strong><span>점검 ${checks.length}개 항목 기준</span></div>
-      <div class="ops-hero-nums"><div><b>${warn}</b><span>확인 필요</span></div><div><b>${ok}</b><span>정상</span></div><div><b>${checks.length}</b><span>점검 항목</span></div></div>
-    </div>
-    <div class="ops-cats">${cats}</div>
-    <div class="section">
-      <div class="section-header"><h2>전체 점검 항목</h2><span class="count">${checks.length}개 점검</span></div>
-      <table><tr><th>상태</th><th>분류</th><th>점검</th><th>수치</th><th>결과</th></tr>${rows}</table>
-    </div>`;
-}
-
 function renderOpsHtml(stats, triage, scope, isAdmin) {
-  const { basis, backlog, aiFailureReasons, sourceErrors, perSource } = stats;
+  const { basis, backlog, aiFailureReasons, sourceErrors, perSource, today } = stats;
 
   const backlogRows = backlog.ok
     ? Object.entries(backlog.byAiStatus).map(([k, v]) => `<tr><td>${k === 'null' ? '요청 안 함' : k}</td><td>${v}</td></tr>`).join('')
@@ -3237,6 +3197,8 @@ function renderOpsHtml(stats, triage, scope, isAdmin) {
       <td>${s.ai_failed}</td>
     </tr>`).join('');
 
+  const windowCollected = perSource.ok ? perSource.rows.reduce((sum, s) => sum + s.collected, 0) : '-';
+  const sourceErrorCount = sourceErrors.ok ? sourceErrors.rows.length : '-';
 
   return `
     <h1>운영 현황</h1>
@@ -3252,7 +3214,12 @@ function renderOpsHtml(stats, triage, scope, isAdmin) {
       </p>
     </details>
 
-    ${renderOpsOverviewHtml(stats)}
+    <div class="ops-stats-row">
+      <div class="ops-stat"><span class="ops-stat-value">${backlog.ok ? backlog.total : '-'}</span><span class="ops-stat-label">미검수(Draft) 적체량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${sourceErrorCount}</span><span class="ops-stat-label">현재 오류 상태 소스</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${windowCollected}</span><span class="ops-stat-label">최근 ${basis.collectionWindow.days}일 수집량</span></div>
+      <div class="ops-stat"><span class="ops-stat-value">${today.ok ? today.collected : '-'}</span><span class="ops-stat-label">금일 수집량 (KST)</span></div>
+    </div>
 
     <div class="section">
       <div class="section-header"><h2>미검수 적체량 (ai_status별, 상호 배타적)</h2></div>
