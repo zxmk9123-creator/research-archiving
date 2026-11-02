@@ -1695,7 +1695,6 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 .tv-retry:disabled { opacity: .7; cursor: progress; }
 
 /* ops page: folding sections + right-hand index */
-.ops-fold { scroll-margin-top: 88px; } /* clears the sticky top bar when the index jumps here */
 .ops-fold > .section-header { cursor: pointer; user-select: none; }
 .ops-fold > .section-header::after { content: ''; width: 7px; height: 7px; margin-left: 10px; border: solid var(--text-secondary); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform .2s ease; flex: none; align-self: center; }
 .ops-fold.is-folded > .section-header::after { transform: rotate(-45deg); }
@@ -1712,7 +1711,7 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
    Everything is :where() / low specificity so every component rule above still wins. No new colors, no decoration, no new motion.
 ------------------------------------------------------------------------ */
 :root { color-scheme: light; accent-color: var(--action); }
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: 88px; }
+html { -webkit-text-size-adjust: 100%; }
 body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 ::selection { background: var(--action-soft); color: var(--text); }
 :where(input, textarea, select) { caret-color: var(--action); }
