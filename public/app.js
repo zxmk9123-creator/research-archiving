@@ -3120,6 +3120,30 @@ function renderAiUsageHtml(u) {
   </section>`;
 }
 
+// Admin-only panel: the Pipeline Doctor's last stored report (verdict, time, recovery activity, human-required warnings) from /stats/doctor. Read-only.
+const DOCTOR_VERDICT_LABELS = { ok: '정상', attention: '주의', human_required: '사람 확인 필요', unknown: '확인 불가' };
+function renderDoctorHtml(d) {
+  const head = (extra) => `<section class="section ai-usage"><div class="section-header"><h2>Pipeline Doctor</h2><span class="count">${extra}관리자 전용</span></div>`;
+  if (!d || typeof d.verdict !== 'string') return `${head('')}<p class="meta">Doctor 요약을 불러오지 못했습니다.</p></section>`;
+  if (!d.available) return `${head('')}<p class="meta">기록된 Doctor 실행이 없습니다.</p></section>`;
+  const l = d.latest;
+  const kst = (iso) => { const date = iso ? new Date(iso) : null; return date && Number.isFinite(date.getTime()) ? escapeHtml(new Date(date.getTime() + 9 * 3600000).toISOString().slice(0, 16).replace('T', ' ')) + ' KST' : '-'; };
+  const list = (v) => (v && v.length ? v.map(escapeHtml).join(', ') : '없음');
+  const warnings = (d.humanRequired || []).map((h) => `<li>${kst(h.at)} · ${escapeHtml(h.outcome || '-')}${h.causes.length ? ` — ${h.causes.map(escapeHtml).join(', ')}` : ''}</li>`).join('');
+  const recent = ((d.recovery && d.recovery.recent) || []).map((r) => `<li>${kst(r.at)} · ${escapeHtml(r.outcome || '-')} — ${r.actions.map((x) => escapeHtml(x.action) + (x.error ? ` (오류: ${escapeHtml(x.error)})` : '')).join(', ')}</li>`).join('');
+  return `${head(d.stale ? '36시간 넘게 갱신 없음 · ' : '')}
+    <div class="ai-usage-kpis">
+      <div><strong>${(DOCTOR_VERDICT_LABELS[d.verdict] || '확인 불가') + (d.stale ? ' (오래된 기록)' : '')}</strong><span>최근 판정 (마지막 보고서 기준)</span></div>
+      <div><strong>${kst(l.at)}</strong><span>진단 시각 · 모드 ${escapeHtml(l.mode || '-')} · 결과 ${escapeHtml(l.outcome || '-')}</span></div>
+      <div><strong>${d.recovery.withActions}/${d.recovery.reports}</strong><span>복구 동작이 있었던 보고서 (최근 ${d.recovery.reports}건)</span></div>
+    </div>
+    <p class="meta">점검 실패 항목: 진단 전 ${list(l.before)} · 진단 후 ${l.after ? list(l.after) : '재점검 없음'}</p>
+    <p class="meta">사람 확인 필요 경고${warnings ? '' : ': 없음'}</p>${warnings ? `<ul class="meta">${warnings}</ul>` : ''}
+    <p class="meta">최근 복구 활동${recent ? '' : ': 없음'}</p>${recent ? `<ul class="meta">${recent}</ul>` : ''}
+    <p class="meta">저장된 Doctor 보고서만 읽어 보여줍니다. 이 화면은 진단·복구를 실행하거나 승인을 만들지 않습니다.</p>
+  </section>`;
+}
+
 // Admin-only panel: accuracy on the golden set (cases a human already judged), trend over the last runs and the failing cases.
 function renderEvalHtml(data) {
   const runs = data && Array.isArray(data.runs) ? data.runs : [];
@@ -3252,7 +3276,7 @@ async function renderOps() {
   const body = stats ? renderOpsHtml(stats, triage, scope, isAdmin) : `<h1>운영 현황</h1>${renderOpsTriageHtml(triage)}`;
   // AI search usage: admin sessions only (the endpoint itself also requires the admin session)
   let usageHtml = '';
-  if (isAdmin) usageHtml = renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null)) + renderEvalHtml(await api('/eval/latest?n=8').catch(() => null));
+  if (isAdmin) usageHtml = renderDoctorHtml(await api('/stats/doctor').catch(() => null)) + renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null)) + renderEvalHtml(await api('/eval/latest?n=8').catch(() => null));
   app.innerHTML = banner + body + usageHtml;
 }
 
