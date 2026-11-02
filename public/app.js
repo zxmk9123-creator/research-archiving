@@ -3221,6 +3221,7 @@ function renderOpsHtml(stats, triage, scope, isAdmin) {
       <div class="ops-stat"><span class="ops-stat-value">${today.ok ? today.collected : '-'}</span><span class="ops-stat-label">금일 수집량 (KST)</span></div>
     </div>
 
+    <div class="ops-pair">
     <div class="section">
       <div class="section-header"><h2>미검수 적체량 (ai_status별, 상호 배타적)</h2></div>
       <table><tr><th>AI 처리 상태</th><th>건수</th></tr>${backlogRows}</table>
@@ -3229,6 +3230,7 @@ function renderOpsHtml(stats, triage, scope, isAdmin) {
     <div class="section">
       <div class="section-header"><h2>AI 생성 실패 원인 (현재 Draft+failed만)</h2></div>
       <table><tr><th>원인</th><th>건수</th></tr>${failureRows}</table>
+    </div>
     </div>
 
     ${renderOpsTriageHtml(triage)}

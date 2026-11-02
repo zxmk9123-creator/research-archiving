@@ -1735,3 +1735,16 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 :where(button, .btn):active:not(:disabled) { transform: translateY(.5px); }
 :where(button, .btn):disabled { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+
+/* ops layout: one quiet summary strip instead of four cards, short tables side by side, clear rhythm between groups */
+#app .ops-stats-row { gap: 0; margin: 0 0 var(--sp-7, 40px); padding: 0; border: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 0; background: none; flex-wrap: wrap; }
+#app .ops-stats-row .ops-stat { flex: 1 1 140px; padding: var(--sp-4) var(--sp-4) var(--sp-4) 0; border: 0; border-radius: 0; background: none; }
+#app .ops-stats-row .ops-stat + .ops-stat { padding-left: var(--sp-4); border-left: 1px solid var(--border); }
+#app .ops-stats-row .ops-stat-value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ops-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-7, 40px); align-items: start; }
+.ops-pair > .section { margin-bottom: 0; }
+#app .ops-fold { margin-top: var(--sp-6); }
+#app .ops-fold > .section-header h2 { font-size: 16px; }
+@media (max-width: 760px) { .ops-pair { grid-template-columns: 1fr; } #app .ops-stats-row .ops-stat + .ops-stat { border-left: 0; padding-left: 0; } }
+#app .ops-pair { margin-bottom: var(--sp-6); }
+#app .ops-pair > .ops-fold { margin-top: 0; }
