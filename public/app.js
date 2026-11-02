@@ -3296,10 +3296,16 @@ function enhanceOpsPage() {
     head.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); fold(!sec.classList.contains('is-folded')); } });
     fold(opsFolded.has(title));
     const a = document.createElement('button'); a.type = 'button'; a.textContent = title;
-    a.addEventListener('click', () => { if (sec.classList.contains('is-folded')) fold(false); sec.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); });
+    a.addEventListener('click', () => {
+      if (sec.classList.contains('is-folded')) fold(false);
+      // the sticky top bar must never cover the heading: scroll so the section starts just below the bar's real height
+      const bar = document.querySelector('.topbar'); const gap = (bar ? bar.getBoundingClientRect().height : 76) + 12;
+      const top = sec.getBoundingClientRect().top + window.scrollY - gap;
+      window.scrollTo({ top: Math.max(0, top), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    });
     nav.append(a);
   });
-  if (sections.length > 1) app.append(nav);
+  if (sections.length > 1) app.prepend(nav);
 }
 
 
