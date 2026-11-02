@@ -3278,6 +3278,28 @@ async function renderOps() {
   let usageHtml = '';
   if (isAdmin) usageHtml = renderDoctorHtml(await api('/stats/doctor').catch(() => null)) + renderAiUsageHtml(await api('/stats/ai-search-usage?days=14').catch(() => null)) + renderEvalHtml(await api('/eval/latest?n=8').catch(() => null));
   app.innerHTML = banner + body + usageHtml;
+  enhanceOpsPage();
+}
+
+// Each ops table section folds by its heading, and a slim right-hand index jumps to any of them (state lives only for this visit).
+const opsFolded = new Set();
+function enhanceOpsPage() {
+  const sections = [...app.querySelectorAll('.section')].filter((sec) => sec.querySelector(':scope > .section-header > h2'));
+  const nav = document.createElement('nav');
+  nav.className = 'ops-index'; nav.setAttribute('aria-label', '운영 현황 목차');
+  sections.forEach((sec, i) => {
+    const head = sec.querySelector(':scope > .section-header'); const title = head.querySelector('h2').textContent.replace(/\s*\(.*$/, '').trim();
+    sec.id = `ops-sec-${i}`; sec.classList.add('ops-fold');
+    const fold = (on) => { sec.classList.toggle('is-folded', on); head.setAttribute('aria-expanded', String(!on)); if (on) opsFolded.add(title); else opsFolded.delete(title); };
+    head.setAttribute('role', 'button'); head.tabIndex = 0;
+    head.addEventListener('click', (e) => { if (e.target.closest('button, a, input, select')) return; fold(!sec.classList.contains('is-folded')); });
+    head.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); fold(!sec.classList.contains('is-folded')); } });
+    fold(opsFolded.has(title));
+    const a = document.createElement('button'); a.type = 'button'; a.textContent = title;
+    a.addEventListener('click', () => { if (sec.classList.contains('is-folded')) fold(false); sec.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); });
+    nav.append(a);
+  });
+  if (sections.length > 1) app.append(nav);
 }
 
 

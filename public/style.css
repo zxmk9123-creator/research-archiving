@@ -1693,3 +1693,15 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
 @media (prefers-reduced-motion: reduce) { .tv-spin { animation: none; } }
 .tv-retry { margin-left: 4px; gap: 6px; display: inline-flex; align-items: center; vertical-align: middle; }
 .tv-retry:disabled { opacity: .7; cursor: progress; }
+
+/* ops page: folding sections + right-hand index */
+.ops-fold > .section-header { cursor: pointer; user-select: none; }
+.ops-fold > .section-header::after { content: ''; width: 7px; height: 7px; margin-left: 10px; border: solid var(--text-secondary); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform .2s ease; flex: none; align-self: center; }
+.ops-fold.is-folded > .section-header::after { transform: rotate(-45deg); }
+.ops-fold.is-folded > .section-header { margin-bottom: 0; }
+.ops-fold.is-folded > :not(.section-header) { display: none; }
+.ops-index { position: fixed; right: 16px; top: 120px; width: 150px; display: none; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font-size: 12px; z-index: 5; }
+.ops-index button { text-align: left; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.ops-index button:hover, .ops-index button:focus-visible { background: var(--surface-sunken); color: var(--text); }
+@media (min-width: 1460px) { .ops-index { display: flex; } }
+@media (prefers-reduced-motion: reduce) { .ops-fold > .section-header::after { transition: none; } }
