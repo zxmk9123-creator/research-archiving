@@ -321,4 +321,43 @@ router.patch('/draft-triage/:id', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/stats/doctor — admin only, read-only. A summary of the Pipeline Doctor's STORED reports (scheduler_jobs 'ops_doctor', the same row the
+// daily digest reads). It runs no health check, no diagnosis and no recovery, and never touches the lease, counters or approval stored beside the
+// reports. The verdict is derived from the last report: human_required > attention (a check was still failing after the run) > ok; no report = unknown.
+const DOCTOR_STALE_MS = 36 * 3600000;
+function summarizeDoctor(doc, now = Date.now()) {
+  const reports = Array.isArray(doc && doc.reports) ? doc.reports : [];
+  const shape = (r) => {
+    const before = Array.isArray(r.before) ? r.before : [];
+    const after = Array.isArray(r.after) ? r.after : null;
+    const findings = (Array.isArray(r.findings) ? r.findings : []).map((f) => ({ key: String(f.key), classification: String(f.classification), confidence: String(f.confidence) }));
+    const actions = (Array.isArray(r.actions) ? r.actions : []).map((a) => ({ action: String(a.action), error: a.error ? String(a.error).slice(0, 160) : null }));
+    const failing = after || before;
+    return { at: r.at || null, mode: r.mode || null, outcome: r.outcome || null, humanNeeded: !!r.humanNeeded, approval: r.approval || null, before, after, findings, actions,
+      verdict: r.humanNeeded ? 'human_required' : failing.length ? 'attention' : 'ok' };
+  };
+  const all = reports.map(shape);
+  const latest = all.length ? all[all.length - 1] : null;
+  const ageMs = latest && latest.at ? now - new Date(latest.at).getTime() : null;
+  const recovery = all.filter((r) => r.actions.length);
+  return {
+    available: !!latest,
+    verdict: latest ? latest.verdict : 'unknown',
+    latest,
+    stale: ageMs !== null && Number.isFinite(ageMs) ? ageMs > DOCTOR_STALE_MS : null,
+    humanRequired: all.filter((r) => r.humanNeeded).slice(-5).reverse().map((r) => ({ at: r.at, outcome: r.outcome, causes: r.findings.filter((f) => f.classification === 'needs_human').map((f) => f.key) })),
+    recovery: { reports: all.length, withActions: recovery.length, recent: recovery.slice(-5).reverse().map((r) => ({ at: r.at, outcome: r.outcome, actions: r.actions })) },
+  };
+}
+
+router.get('/doctor', requireAuth, async (req, res) => {
+  try {
+    const row = (await pool.query("SELECT last_totals FROM scheduler_jobs WHERE job_name = 'ops_doctor'")).rows[0];
+    res.json({ ...summarizeDoctor(row && row.last_totals), generatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('GET /api/stats/doctor failed:', err.message);
+    res.status(500).json({ error: 'Doctor 요약을 불러오지 못했습니다.' });
+  }
+});
+
 module.exports = router;
