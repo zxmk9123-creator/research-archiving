@@ -410,18 +410,50 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       await pool.query(
         `UPDATE daily_briefs
             SET attempt_count = attempt_count + 1,
-                status = CASE WHEN $3::boolean THEN 'failed' ELSE 'generating' END,
+                status = CASE WHEN $3::boolean THEN (CASE WHEN COALESCE(brief->>'degraded', '') = 'true' THEN 'ready' ELSE 'failed' END) ELSE 'generating' END,
                 error = $2, updated_at = now(),
                 completed_at = CASE WHEN $3::boolean THEN now() ELSE completed_at END
           WHERE brief_date = $1 AND status = 'generating'`,
         [briefDate, budgetSpent ? `call_budget_exhausted: ${message}`.slice(0, 500) : outOfTime ? `retry_deferred: ${message}`.slice(0, 500) : message, final]
       ).catch((updateErr) => console.error(`daily_brief retry state update failed: ${updateErr.message}`));
+      if (exhausted) await publishFallbackBrief(briefDate, message).catch((e) => console.error(`daily_brief fallback failed: ${e.message}`));
       if (final) return;
       repairHint = repairHint || (/brief_truncated_by_max_tokens/.test(message) ? 'short' : /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message)); // a cut-off answer is retried with less input and the short-answer hint
       await sleep(delayMs);
     }
   }
 }
+
+
+// GUARDRAIL (root cause: the headline hung on ONE free-tier model call we do not control: which model the router picks, its quota, its
+// latency, the host's hop limits; the only answer to a failure was "try the same call again", so every outage became a missing headline).
+// When the model path is exhausted the day still gets a headline, built WITHOUT a model from the items' own stored summary/insight (the
+// same honest top-up validateBrief uses). It is marked degraded: the page says so, the health check warns, and later passes try the model
+// again and replace it (a failed upgrade keeps the degraded brief on screen).
+async function publishFallbackBrief(briefDate, reason) {
+  const { rows: items } = await pool.query(
+    `SELECT i.id, i.title, i.published_at, COALESCE(i.summary, i.ai_summary, '') AS summary, COALESCE(i.insight, i.ai_insight, '') AS insight
+       FROM items i WHERE ${EVIDENCE_WHERE} ORDER BY i.published_at DESC, i.collected_at DESC, i.id DESC LIMIT $5`,
+    [...evidenceWindow(briefDate), MAX_EVIDENCE_ITEMS]);
+  const developments = [];
+  for (const e of items) {
+    if (developments.length >= MAX_DEVELOPMENTS) break;
+    const summary = compactSentence(e.summary || e.title, SUMMARY_MAX);
+    const significance = e.insight ? compactSentence(e.insight, SIGNIFICANCE_MAX) : ''; // no stored insight: show the fact, say nothing about why
+    if (summary) developments.push({ item_id: Number(e.id), summary, significance });
+  }
+  if (!developments.length) return false; // nothing honest to show: leave the row as it is
+  const strip = (t) => String(t).replace(/[.。]+$/u, '');
+  const lead = developments.slice(0, 2).map((d) => strip(d.summary)).join(' · ').slice(0, 150);
+  const brief = { lead, market_summary: developments.map((d) => `${strip(d.summary)}.`).join(' ').slice(0, 1000), developments, watchpoints: [], degraded: true };
+  const { rowCount } = await pool.query(
+    `UPDATE daily_briefs SET status = 'ready', brief = $2, item_count = $3, source_item_ids = $4, error = $5, updated_at = now(), completed_at = now()
+      WHERE brief_date = $1 AND status IN ('generating', 'failed')`,
+    [briefDate, JSON.stringify(brief), items.length, JSON.stringify(items.map((i) => Number(i.id))), `fallback: ${String(reason || '').slice(0, 300)}`]);
+  if (rowCount) console.error(`daily_brief fallback published date=${briefDate} reason=${String(reason || '').slice(0, 120)}`);
+  return rowCount > 0;
+}
+const isDegradedSql = "COALESCE(daily_briefs.brief->>'degraded', '') = 'true'";
 
 // Claims the KST report date in Postgres before starting work, so a daily
 // cron retry, an in-process scheduler tick, and a manual retry cannot all
@@ -445,6 +477,7 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
           NOT $5::boolean
           AND daily_briefs.attempt_count < $7
           AND (daily_briefs.status = 'failed'
+            OR (daily_briefs.status = 'ready' AND ${isDegradedSql} AND daily_briefs.updated_at < now() - interval '30 minutes')
             OR (daily_briefs.status = 'generating'
                 AND daily_briefs.updated_at < now() - ($4::text || ' minutes')::interval))
        ) OR (
@@ -475,7 +508,7 @@ async function queueDailyBriefGeneration(now = new Date(), { force = false } = {
     .catch(async (err) => {
       console.error(`daily_brief generation failed date=${briefDate}: ${err.message}`);
       await pool.query(
-        `UPDATE daily_briefs SET status = 'failed', error = $2, updated_at = now(), completed_at = now()
+        `UPDATE daily_briefs SET status = CASE WHEN COALESCE(brief->>'degraded', '') = 'true' THEN 'ready' ELSE 'failed' END, error = $2, updated_at = now(), completed_at = now()
           WHERE brief_date = $1 AND status = 'generating'`,
         [briefDate, String(err.message || 'generation_failed').slice(0, 500)]
       ).catch((updateErr) => console.error(`daily_brief failure state update failed: ${updateErr.message}`));
@@ -507,12 +540,17 @@ async function ensureDailyBrief(now = new Date(), { discoveryDone = false } = {}
   if (deadline && deadline - Date.now() < TYPICAL_ATTEMPT_MS) return { ran: false, reason: 'insufficient_time' };
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false }).format(now)) % 24;
   if (!discoveryDone && hour < BRIEF_DEADLINE_HOUR_KST) return { ran: false, reason: 'collection_running' };
-  const { rows } = await pool.query('SELECT status FROM daily_briefs WHERE brief_date = $1', [briefDate]);
+  const { rows } = await pool.query("SELECT status, error, COALESCE(brief->>'degraded', '') = 'true' AS degraded FROM daily_briefs WHERE brief_date = $1", [briefDate]);
   const cur = rows[0];
-  if (!cur || cur.status === 'failed' || cur.status === 'generating') {
-    // non-force claim: starts when missing or failed, reclaims a generation stuck past its lease, leaves a live one alone
+  if (!cur || cur.status === 'failed' || cur.status === 'generating' || (cur.status === 'ready' && cur.degraded)) {
+    // non-force claim: starts when missing or failed, reclaims a generation stuck past its lease, upgrades a degraded brief, leaves a live one alone
     const r = await queueDailyBriefGeneration(now);
-    return { ran: r.started, reason: r.started ? 'generated' : r.reason };
+    // the model path cannot start again today (daily attempt cap) and nothing is on screen: show the model-free headline instead of a failure
+    if (!r.started && cur && cur.status === 'failed' && r.reason === 'already_running_or_not_retryable') {
+      const shown = await publishFallbackBrief(briefDate, cur.error || 'attempts_exhausted').catch(() => false);
+      return { ran: shown, reason: shown ? 'fallback' : r.reason };
+    }
+    return { ran: r.started, reason: r.started ? (cur && cur.degraded ? 'upgrade' : 'generated') : r.reason };
   }
   return { ran: false, reason: 'up_to_date' };
 }
@@ -537,6 +575,7 @@ async function getLatestDailyBrief(now = new Date()) {
   const todayKst = kstDate(now);
   const latestDate = brief.brief_date instanceof Date ? brief.brief_date.toISOString().slice(0, 10) : String(brief.brief_date).slice(0, 10);
   if (latestDate < todayKst) return pendingBriefFor(todayKst, latestDate);
+  if (brief.status === 'generating' && brief.brief && brief.brief.degraded) brief.status = 'ready'; // an upgrade attempt is running: keep the fallback on screen
   if (brief.brief && typeof brief.brief === 'object') {
     brief.brief.lead = String(brief.brief.lead || '').trim().replace(/[.。]+$/u, '');
     if (Array.isArray(brief.brief.developments)) {
@@ -565,4 +604,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { softenForecast, countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, runWithCallBudget, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { publishFallbackBrief, softenForecast, countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, runWithCallBudget, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

@@ -78,6 +78,7 @@ function headlineCheck(input, discovery, now) {
       if (evidenceCandidates > 0) return check('headline', 'fail', `empty headline although ${evidenceCandidates} eligible item(s) exist`);
       return check('headline', 'pass', 'valid zero-item headline: no eligible item today');
     }
+    if (brief.degraded) return check('headline', 'warn', `headline is the model-free fallback (the AI path failed${errorBit}); later passes retry it`);
     const doneAt = ms(brief.completed_at);
     const lateMin = doneAt ? minutesOfDayKst(doneAt) - BRIEF_TARGET_MINUTES_KST : 0;
     if (doneAt && kst(doneAt).toISOString().slice(0, 10) === kst(now).toISOString().slice(0, 10) && lateMin > 0) {
@@ -159,7 +160,7 @@ async function collectHealthInput(now = new Date()) {
   const input = {};
   const safe = async (fn, fallback) => { try { return await fn(); } catch (err) { console.error('pipeline health read failed:', err.message); return fallback; } };
   input.discovery = await safe(() => dailyDiscovery.getDailyDiscoveryStatus(now), null);
-  input.brief = await safe(async () => (await pool.query('SELECT status, attempt_count, error, updated_at, completed_at, item_count FROM daily_briefs WHERE brief_date = $1', [date])).rows[0] || null, undefined);
+  input.brief = await safe(async () => (await pool.query('SELECT status, attempt_count, error, updated_at, completed_at, item_count, (brief->>\'degraded\') IS NOT DISTINCT FROM \'true\' AS degraded FROM daily_briefs WHERE brief_date = $1', [date])).rows[0] || null, undefined);
   if (input.brief === undefined) { input.brief = null; input.briefUnreadable = true; }
   input.evidenceCandidates = await safe(() => dailyBrief.countEvidenceCandidates(date), null);
   input.attemptsToday = await safe(async () => {

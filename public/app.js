@@ -3329,6 +3329,7 @@ function renderHeadlineBrief(data) {
   return `<div class="headlines-page">
     <header class="headlines-header"><div><h1>헤드라인</h1><p class="headlines-subtitle">금일 아카이빙된 기사와 보고서에서 시장 판단에 필요한 변화를 추렸습니다.</p></div><span class="headlines-date">${date}</span></header>
     <p class="page-lede headlines-basis">오늘 수집된 기사와 최근 7일 이내 발행된 신규 소식 중 주목할 변화를 요약합니다. · ${Number(data.item_count) || 0}건</p>
+    ${brief.degraded ? '<p class="stale">AI 요약이 일시적으로 실패해 각 자료의 저장된 요약으로 대신 구성했습니다. 잠시 후 자동으로 다시 생성됩니다.</p>' : ''}
     <section class="headline-lead"><h2>${escapeHtml(brief.lead || '')}</h2><p>${escapeHtml(brief.market_summary || '')}</p></section>
     <div class="headlines-columns">
       <section class="section headline-panel"><div class="section-header headline-panel-heading"><h2>주목할 자료</h2><span>${developments.length}건</span></div>${stories || '<p class="headline-empty">표시할 주요 자료가 없습니다.</p>'}</section>

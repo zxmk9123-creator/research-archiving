@@ -69,14 +69,14 @@ test('retries do not outlive the invocation: when the next delay + attempt canno
   } finally { h.restore(); }
 });
 
-test('with time to spare it keeps retrying up to the automatic limit and then ends failed (never ready)', async () => {
+test('with time to spare it keeps retrying up to the automatic limit; the model path then ends failed and the guardrail shows the model-free brief', async () => {
   const h = harness([new Error('invalid_brief_json')]);
   try {
     await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
     assert.equal(h.state.updates.length, 6);
     assert.equal(h.state.updates.slice(0, 5).every((u) => u.status === 'generating'), true);
     assert.equal(h.state.updates[5].status, 'failed');
-    assert.equal(h.state.ready, false);
+    assert.equal(h.state.ready, true, 'the degraded fallback is published after the last attempt');
   } finally { h.restore(); }
 });
 
@@ -301,4 +301,20 @@ test('a cut-off answer (reasoning ate the token budget) is retried with less inp
     assert.equal(opts[0].maxTokens, 12000);
     assert.equal(h.state.limits[1], 12, 'less evidence on the retry');
   } finally { h.restore(); }
+});
+
+test('guardrail: when every model attempt fails, a model-free degraded brief from stored summaries is published instead of a failure', async () => {
+  const h = harness([new Error('AI provider request failed (508)')]);
+  const writes = [];
+  const q = pool.query;
+  pool.query = async (text, params) => {
+    if (/SET status = 'ready', brief = \$2, item_count = \$3, source_item_ids = \$4, error = \$5/.test(text)) { writes.push(JSON.parse(params[1])); return { rowCount: 1, rows: [] }; }
+    return q(text, params);
+  };
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {}, budgetMs: 1e9, attemptMs: 0 });
+    assert.equal(writes.length, 1, 'fallback written once, after the attempts ran out');
+    assert.equal(writes[0].degraded, true);
+    assert.ok(writes[0].developments.length >= 1 && writes[0].lead.length > 0);
+  } finally { pool.query = q; h.restore(); }
 });
