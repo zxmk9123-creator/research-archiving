@@ -1735,3 +1735,11 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 :where(button, .btn):active:not(:disabled) { transform: translateY(.5px); }
 :where(button, .btn):disabled { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+/* ops fold headers: title on the left, actions then the chevron on the right, all actions one size */
+.ops-fold > .section-header { justify-content: flex-start; align-items: center; gap: var(--sp-2); }
+.ops-fold > .section-header > h2 { margin-right: auto; }
+.ops-fold > .section-header::after { margin-left: var(--sp-2); }
+.ops-fold > .section-header .btn, .ops-fold > .section-header button:not(.ops-index button) { box-sizing: border-box; height: 30px; min-height: 30px; padding: 0 12px; font-size: 12px; line-height: 1; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
+.ops-fold > .section-header .ops-triage-tools { margin-left: auto; margin-right: 0; }
+.ops-fold > .section-header > h2 + .ops-triage-tools { margin-left: auto; }
+.ops-fold > .section-header > h2 { margin-top: 0; margin-bottom: 0; line-height: 30px; }
