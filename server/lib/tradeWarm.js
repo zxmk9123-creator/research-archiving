@@ -21,7 +21,7 @@ const COMBOS = [
 async function runWarm({ offset = 0, limit = 6, now = new Date(), call = (p) => callComtrade(p), db = pool, years = 4 } = {}) {
   await ensureTables(db);
   const y1 = now.getUTCFullYear(); const list = Array.from({ length: years }, (_, i) => y1 - i);
-  const ctx = { calls: 0, deadline: Date.now() + 240000, error: null, failed: false };
+  const ctx = { calls: 0, deadline: Date.now() + 240000, error: null, failed: false, split: true };
   const errors = [];
   let retry = null;
   if (offset === 0) retry = await drainRetries({ db, call, now, limit: 30, force: true }).catch((e) => { errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`); return null; }); // failed years first

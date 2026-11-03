@@ -57,41 +57,59 @@ async function planYears(db, now, base, cmds, years) {
     .filter((t) => t.cmds.length && `${t.year}01` <= last);
 }
 
+// Fetch the given items of one year in one call and store them. Returns { ok, calls, error }; stores nothing on failure.
+async function storeYear(db, call, now, base, year, cmds, timeoutMs) {
+  const last = latestMonth(now);
+  const periods = Array.from({ length: 12 }, (_, i) => `${year}${String(i + 1).padStart(2, '0')}`).filter((p) => p <= last);
+  const r = await call({ freq: 'M', reporter: base.reporter, partner: base.partner, flow: base.flow, cmd: cmds.join(','), periods, ...(timeoutMs ? { timeoutMs } : {}) });
+  if (!r.ok) return { ok: false, calls: Math.max(1, r.calls || 1), error: { code: r.code, message: r.message } };
+  const counts = new Map(cmds.map((c) => [c, 0]));
+  for (const x of r.rows) {
+    if (!counts.has(x.cmd)) continue;
+    counts.set(x.cmd, counts.get(x.cmd) + 1);
+    await db.query(
+      `INSERT INTO trade_bilateral (reporter, partner, flow, cmd, period, net_wgt, value) VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (reporter, partner, flow, cmd, period) DO UPDATE SET net_wgt = EXCLUDED.net_wgt, value = EXCLUDED.value, fetched_at = now()`,
+      [base.reporter, base.partner, base.flow, x.cmd, x.period, x.wgtKg, x.usd]);
+  }
+  for (const [cmd, rows] of counts) {
+    await db.query(
+      `INSERT INTO trade_bilateral_cov (reporter, partner, flow, cmd, year, rows) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (reporter, partner, flow, cmd, year) DO UPDATE SET rows = EXCLUDED.rows, fetched_at = now()`, [base.reporter, base.partner, base.flow, cmd, year, rows]);
+  }
+  await db.query('DELETE FROM trade_bilateral_retry WHERE reporter=$1 AND partner=$2 AND flow=$3 AND year=$4 AND cmd = ANY($5::text[])',
+    [base.reporter, base.partner, base.flow, year, cmds]).catch(() => {});
+  return { ok: true, calls: Math.max(1, r.calls || 1) };
+}
+
 // Fetch one year for several items in one call and store it. Never throws; an API failure records nothing so the year is asked again next time.
-function fetchTask(db, call, now, base, task) {
+// split (background and retry runs only): a combined call that timed out (error 'network', the same request would just time out again) is retried one item
+// at a time with a longer timeout, so a heavy reporter/year is fetched in smaller pieces instead of failing the same way every time.
+function fetchTask(db, call, now, base, task, { split = false } = {}) {
   const key = `${base.reporter}|${base.partner}|${base.flow}|${task.cmds.join(',')}|${task.year}`;
   return once(key, async () => {
-    const last = latestMonth(now);
-    const periods = Array.from({ length: 12 }, (_, i) => `${task.year}${String(i + 1).padStart(2, '0')}`).filter((p) => p <= last);
-    const r = await call({ freq: 'M', reporter: base.reporter, partner: base.partner, flow: base.flow, cmd: task.cmds.join(','), periods });
-    if (!r.ok) {
-      // remember the failure so the year is retried later (backoff 2, 4, 8 ... up to 360 minutes); best effort, never blocks the answer
+    let r = await storeYear(db, call, now, base, task.year, task.cmds);
+    let failedCmds = r.ok ? [] : task.cmds; let calls = r.calls; let error = r.error;
+    if (!r.ok && split && r.error && r.error.code === 'network') {
+      failedCmds = [];
       for (const cmd of task.cmds) {
+        const one = await storeYear(db, call, now, base, task.year, [cmd], 55000);
+        calls += one.calls;
+        if (!one.ok) { failedCmds.push(cmd); error = one.error; if (one.error && one.error.code === 'rate_limited') break; }
+      }
+    }
+    if (failedCmds.length) {
+      // remember the failure so the year is retried later (backoff 2, 4, 8 ... up to 360 minutes); best effort, never blocks the answer
+      for (const cmd of failedCmds) {
         await db.query(
           `INSERT INTO trade_bilateral_retry (reporter, partner, flow, cmd, year, last_error, next_at) VALUES ($1,$2,$3,$4,$5,$6, now() + interval '2 minutes')
            ON CONFLICT (reporter, partner, flow, cmd, year) DO UPDATE SET attempts = trade_bilateral_retry.attempts + 1, last_error = EXCLUDED.last_error,
              next_at = now() + make_interval(mins => LEAST(360, power(2, LEAST(trade_bilateral_retry.attempts + 1, 9))::int))`,
-          [base.reporter, base.partner, base.flow, cmd, task.year, String(r.code).slice(0, 40)]).catch(() => {});
+          [base.reporter, base.partner, base.flow, cmd, task.year, String(error && error.code).slice(0, 40)]).catch(() => {});
       }
-      return { ok: false, calls: Math.max(1, r.calls || 1), error: { code: r.code, message: r.message } };
+      return { ok: false, calls, error: { code: error && error.code, message: error && error.message } };
     }
-    const counts = new Map(task.cmds.map((c) => [c, 0]));
-    for (const x of r.rows) {
-      if (!counts.has(x.cmd)) continue;
-      counts.set(x.cmd, counts.get(x.cmd) + 1);
-      await db.query(
-        `INSERT INTO trade_bilateral (reporter, partner, flow, cmd, period, net_wgt, value) VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (reporter, partner, flow, cmd, period) DO UPDATE SET net_wgt = EXCLUDED.net_wgt, value = EXCLUDED.value, fetched_at = now()`,
-        [base.reporter, base.partner, base.flow, x.cmd, x.period, x.wgtKg, x.usd]);
-    }
-    for (const [cmd, rows] of counts) {
-      await db.query(
-        `INSERT INTO trade_bilateral_cov (reporter, partner, flow, cmd, year, rows) VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (reporter, partner, flow, cmd, year) DO UPDATE SET rows = EXCLUDED.rows, fetched_at = now()`, [base.reporter, base.partner, base.flow, cmd, task.year, rows]);
-    }
-    await db.query('DELETE FROM trade_bilateral_retry WHERE reporter=$1 AND partner=$2 AND flow=$3 AND year=$4 AND cmd = ANY($5::text[])',
-      [base.reporter, base.partner, base.flow, task.year, task.cmds]).catch(() => {});
-    return { ok: true, calls: Math.max(1, r.calls || 1) };
+    return { ok: true, calls };
   });
 }
 
@@ -109,7 +127,7 @@ async function drainRetries({ db = pool, call = (p) => callComtrade(p), now = ne
     const g = groups.get(k) || { base: { reporter: Number(x.reporter), partner: Number(x.partner), flow: x.flow }, task: { year: Number(x.year), cmds: [] } };
     g.task.cmds.push(x.cmd); groups.set(k, g);
   }
-  const ctx = { calls: 0, deadline: Date.now() + 120000, error: null, failed: false };
+  const ctx = { calls: 0, deadline: Date.now() + 120000, error: null, failed: false, split: true };
   const picked = [...groups.values()].slice(0, limit);
   for (const g of picked) { if (ctx.limited) break; await runTasks(db, call, ctx, now, g.base, [g.task], { maxCalls: 1000 }); }
   return { tasks: picked.length, calls: ctx.calls, left: groups.size - picked.length, failed: ctx.failed };
@@ -121,7 +139,7 @@ async function runTasks(db, call, ctx, now, base, tasks, { maxCalls = LIMITS.max
   const now_ = tasks.slice(0, take); const left = tasks.slice(take);
   await mapLimit(now_, LIMITS.concurrency, async (t) => {
     if (Date.now() > ctx.deadline || ctx.limited) { left.push(t); return; } // rate limited: stop asking, the rest stays uncovered and is retried later
-    const r = await fetchTask(db, call, now, base, t);
+    const r = await fetchTask(db, call, now, base, t, { split: Boolean(ctx.split) });
     ctx.calls += r.calls;
     if (!r.ok) { ctx.error = r.error; ctx.failed = true; if (r.error && r.error.code === 'rate_limited') ctx.limited = true; }
   });
@@ -192,7 +210,7 @@ async function loadPair(q, { call = (p) => callComtrade(p), db = pool, now = new
 
   // the rest of the fill, to run after the response; it also decides the mirror once the exporter's years are all in
   const continueLoading = async () => {
-    const bg = { calls: 0, deadline: Date.now() + 250000, error: null, failed: false };
+    const bg = { calls: 0, deadline: Date.now() + 250000, error: null, failed: false, split: true };
     for (const d of deferred.splice(0)) await runTasks(db, call, bg, now, d.base, d.tasks, { maxCalls: LIMITS.backgroundCalls });
     if (mirrorWanted || (scope === 'pair' && xKey && !(await readRows(db, xKey, cmds, lo, q.to)).length)) {
       const t = await planYears(db, now, mKey, cmds, years);

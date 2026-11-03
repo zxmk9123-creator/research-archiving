@@ -48,7 +48,7 @@ async function callComtrade(params, { fetchImpl = fetch, env = process.env, batc
     let res; let body; let text = '';
     try {
       calls++;
-      res = await fetchImpl(`${BASE}/${params.freq}/HS?${q}`, { headers: { 'Ocp-Apim-Subscription-Key': key, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await fetchImpl(`${BASE}/${params.freq}/HS?${q}`, { headers: { 'Ocp-Apim-Subscription-Key': key, Accept: 'application/json' }, signal: AbortSignal.timeout(params.timeoutMs || TIMEOUT_MS) });
       text = await res.text();
       try { body = JSON.parse(text); } catch (_) { body = null; }
     } catch (err) {

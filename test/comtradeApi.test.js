@@ -227,3 +227,15 @@ test('a failed year is queued, retried by drainRetries when due, and leaves the 
   const again = await loadPair(q, { call: okCall(calls), db, now: NOW });
   assert.equal(again.incomplete, false);
 });
+
+test('a combined call that timed out is retried one item at a time in background runs; items that succeed are stored and only the failing one stays queued', async () => {
+  const { drainRetries } = require('../server/lib/tradePair');
+  const db = fakeDb(); const q = { ex: 360, im: 0, hs: 'RAPESEED', cmds: ['151411', '151419'], from: '202601', to: '202609' };
+  await loadPair(q, { call: async () => ({ ok: false, code: 'network', calls: 1, message: 't' }), db, now: NOW });
+  assert.ok(db.retry.size >= 2);
+  const seen = [];
+  const slowFor419 = async (p) => { seen.push(`${p.cmd}|${p.timeoutMs || ''}`); return p.cmd.includes(',') ? { ok: false, code: 'network', calls: 1 } : p.cmd === '151419' ? { ok: false, code: 'network', calls: 1 } : { ok: true, code: 'ok', calls: 1, rows: answer(p, 1000) }; };
+  await drainRetries({ db, call: slowFor419, now: NOW, force: true, limit: 5 });
+  assert.ok(seen.some((s) => s === '151411|55000'), 'single item retried with the longer timeout');
+  assert.ok([...db.retry.keys()].every((k) => k.includes('151419')), 'only the item that still fails stays queued');
+});
