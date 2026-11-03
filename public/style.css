@@ -1757,3 +1757,5 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 /* archive: page buttons under the list, group totals in the dividers */
 .archive-pager { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: var(--sp-6) 0 var(--sp-4); }
 .archive-month-total { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+/* buttons drawn as links (the archive pager) carry no underline, in any state */
+a.btn, a.btn:hover, a.btn:focus-visible { text-decoration: none; }
