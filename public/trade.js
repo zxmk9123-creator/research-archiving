@@ -197,10 +197,13 @@
     return sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'tv-spark', 'aria-hidden': 'true' }, sv('polyline', { points: pts, fill: 'none' }), sv('circle', { cx: xs(last), cy: ys(vals[last]), r: 2 }));
   }
   function groupItems(g, state) {
+    const pair = state.mode === 'pair'; // UN Comtrade: the customs volumes and trails do not apply, so the panel only lists what can be opened
     return el('ul', { class: 'tv-browse-items' }, g.items.map((it) => el('li', {},
       el('a', { href: href(state, { hs: it.code }), class: state.hs === it.code || state.hs.startsWith(it.code) ? 'is-on' : '' },
-        el('span', { class: 'tv-bi-top' }, el('span', { class: 'tv-bi-name' }, it.name), it.expTon > it.impTon && it.expTon > 0 ? el('span', { class: 'tv-side' }, '순수출') : null),
-        el('span', { class: 'tv-bi-bottom' }, el('span', { class: 'tv-bi-vol' }, it.impTon == null ? '자료 없음' : `수입 ${compactTon(it.impTon)}`), sparkline(it.trail))))));
+        el('span', { class: 'tv-bi-top' }, el('span', { class: 'tv-bi-name' }, it.name), !pair && it.expTon > it.impTon && it.expTon > 0 ? el('span', { class: 'tv-side' }, '순수출') : null),
+        pair
+          ? el('span', { class: 'tv-bi-bottom' }, el('span', { class: 'tv-bi-vol' }, it.comtrade === false ? '관세청에서만 조회' : (it.codeLabel || (/^\d+$/.test(it.code) ? `HS ${it.code}` : ''))))
+          : el('span', { class: 'tv-bi-bottom' }, el('span', { class: 'tv-bi-vol' }, it.impTon == null ? '자료 없음' : `수입 ${compactTon(it.impTon)}`), sparkline(it.trail))))));
   }
   async function browsePanel(state) {
     const box = el('details', { class: 'tv-browse' }, el('summary', {}, '품목 둘러보기'));
@@ -230,7 +233,7 @@
         onkeydown: (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); select((gi + (e.key === 'ArrowDown' ? 1 : -1) + groups.length) % groups.length, true); } },
       }, el('span', {}, g.name), el('span', { class: 'tv-browse-count' }, String(g.items.length)))));
       const start = Math.max(0, groups.findIndex((g) => g.items.some((it) => state.hs.startsWith(it.code))));
-      panel.replaceChildren(nav, body, el('p', { class: 'tv-browse-foot' }, `수입량·추세선은 최근 12개월 기준${res.through ? ` (${ym(res.through)}까지)` : ''} · "순수출"은 수출이 수입보다 많은 품목`));
+      panel.replaceChildren(nav, body, el('p', { class: 'tv-browse-foot' }, state.mode === 'pair' ? 'UN Comtrade는 HS 6자리까지 제공하며, 고른 수출국·수입국 기준으로 조회합니다. 수입량·추세선 미리보기는 관세청 기준이라 이 모드에서는 보이지 않습니다.' : `수입량·추세선은 최근 12개월 기준${res.through ? ` (${ym(res.through)}까지)` : ''} · "순수출"은 수출이 수입보다 많은 품목`));
       select(start);
     });
     return box;

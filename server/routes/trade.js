@@ -230,7 +230,7 @@ router.get('/groups', async (req, res) => {
         name: g.name,
         items: g.codes.map((c) => {
           const s = stats.get(c); const gr = groupById(c);
-          return { code: c, name: gr ? gr.name : (HS_NAMES[c] || c), codeLabel: gr ? `HS ${gr.parent} 중` : null, impTon: s ? s.imp / 1000 : null, expTon: s ? s.exp / 1000 : null, trail: s ? months.map((p) => s.trail[p] ?? null) : [] };
+          return { code: c, name: gr ? gr.name : (HS_NAMES[c] || c), codeLabel: gr ? `HS ${gr.parent} 중` : null, comtrade: gr ? Boolean(gr.comtrade) : true, impTon: s ? s.imp / 1000 : null, expTon: s ? s.exp / 1000 : null, trail: s ? months.map((p) => s.trail[p] ?? null) : [] };
         }),
       })),
     });
