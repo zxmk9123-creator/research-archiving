@@ -1493,7 +1493,7 @@ async function finalizeAnswer(rawText, candidates, signal, required = [], questi
   const ensured = requestCompliance.ensureChartPresent(completed.text, req);
   const visualText = await ensureVisual(ensured.text, req, signal);
   if (ensured.built) console.log('ai-search request_compliance chart_built_from_table');
-  const text = visualText;
+  const text = numberCheck.purgeUnverifiedMarkers(visualText); // an unverifiable figure is removed, never printed as a warning
   // Citation links are built from the DB rows we actually sent, never from
   // whatever the model's text claims — the model can't fabricate a URL.
   // Which candidates become `sources` is further narrowed to only the ones

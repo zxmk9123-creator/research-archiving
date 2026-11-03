@@ -255,4 +255,31 @@ function unitMultiplier(unitText) {
   return probe ? { mult: probe.value, cls: probe.cls } : null;
 }
 
-module.exports = { MARK_UNVERIFIED, toTons, DENSITY_T_PER_M3, unitMultiplier, extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };
+// HARD GUARANTEE: the "⚠원문 수치 확인 필요" tag is an internal marker, never answer text. guardLine/tableCheck use it to flag a figure that could not
+// be grounded; this removes every trace before the answer leaves the server: a table cell becomes "—", a bullet/sentence that carried an
+// ungrounded figure is dropped (the other sentences, and other comma-separated clauses of a single sentence, stay), and an empty bullet is removed.
+const MARK_RE = /⚠\s*원문\s*수치\s*확인\s*필요/;
+const MARK_G = /⚠\s*원문\s*수치\s*확인\s*필요/g;
+function purgeUnverifiedMarkers(text) {
+  if (!MARK_RE.test(String(text || ''))) return text;
+  const out = [];
+  let inFence = false;
+  for (const line of String(text).split('\n')) {
+    if (/^\s*```/.test(line)) { inFence = !inFence; out.push(line); continue; }
+    if (!MARK_RE.test(line)) { out.push(line); continue; }
+    if (inFence) { out.push(line.replace(MARK_G, '').replace(/[(（]\s*[)）]/g, '')); continue; } // chart/diagram source: just remove the tag
+    if (/^\s*\|/.test(line)) { out.push(line.replace(MARK_G, '—')); continue; } // table cell
+    const prefix = (line.match(/^\s*(?:[-*•]|\d+[.)])\s+/) || [''])[0];
+    const body = line.slice(prefix.length);
+    const sentences = body.split(/(?<=[.!?。])\s+(?=\S)/);
+    const kept = sentences.filter((sn) => !MARK_RE.test(sn));
+    if (kept.length) { out.push(prefix + kept.join(' ')); continue; }
+    // one sentence/bullet: drop only the clause that carries the figure when the rest still says something
+    const clauses = body.split(/(?<=[,，;；])\s*/).filter((c) => !MARK_RE.test(c));
+    const rest = clauses.join(' ').replace(/[,，;；]\s*$/, '').trim();
+    if (rest.replace(/\[\d+\]/g, '').replace(/[*_`\s:：.]/g, '').length >= 6) out.push(`${prefix}${rest}${/[.!?。]$/.test(rest) ? '' : /다$|요$/.test(rest) ? '.' : ''}`);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+module.exports = { purgeUnverifiedMarkers, MARK_UNVERIFIED, toTons, DENSITY_T_PER_M3, unitMultiplier, extractQuantities, guardLine, guardAnswerNumbers, guardChartNumbers, isGrounded, findSlipMatch, TOLERANCE };

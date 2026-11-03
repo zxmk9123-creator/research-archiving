@@ -1412,6 +1412,8 @@ function renderBulletTree(lines, sources, rootClass = 'ai-answer-list') {
 }
 
 function renderAnswerHtml(rawAnswer, sources) {
+  // answers saved before the server stopped emitting the internal marker may still carry it
+  rawAnswer = String(rawAnswer || '').replace(/\s*[(（][^()（）\n]*⚠\s*원문\s*수치\s*확인\s*필요[^()（）\n]*[)）]/g, '').replace(/⚠\s*원문\s*수치\s*확인\s*필요/g, '');
   // Split out chart fences first; an unfinished fence (mid-stream) is hidden.
   const text = String(rawAnswer || '').replace(/```(?:chart|diagram)[^\n]*\n?(?![\s\S]*```)[\s\S]*$/, '');
   if (/```(?:chart|diagram)/.test(text)) {
