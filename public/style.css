@@ -1750,3 +1750,6 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
   .ops-index { position: sticky; top: 76px; right: auto; width: auto; flex-direction: row; overflow-x: auto; margin: 0 0 var(--sp-4); scrollbar-width: none; }
   .ops-index button { white-space: nowrap; }
 }
+/* trade: more room around the source sentence and the notice under it */
+.tv-root .tv-context { margin: var(--sp-2) 0 var(--sp-4); line-height: 1.6; }
+.tv-root .tv-notice { margin: 0 0 var(--sp-5); padding: 10px 14px; line-height: 1.6; }
