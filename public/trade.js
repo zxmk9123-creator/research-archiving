@@ -560,7 +560,7 @@
           : data.source === 'importer_report' ? `${im}가 신고한 수입 통계(${ex}의 수출 신고가 없어 대체)` : `${ex}가 신고한 수출 통계`;
       const none = data.scope === 'pair' ? '선택한 기간에 두 나라의 신고 자료가 없습니다.' : `선택한 기간에 ${data.scope === 'exporter_total' ? ex : im}의 신고 자료가 없습니다.`;
       root.append(el('p', { class: 'tv-context' }, data.source === 'none' ? none : `${src} 기준입니다.${data.itemNote ? ` ${data.itemNote}` : data.seriesHs !== data.hs && !data.codeLabel ? ` UN Comtrade는 HS 6자리까지 지원하여 상위 품목 HS ${data.seriesHs} 기준으로 보여 줍니다.` : ''}`));
-      if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.pending ? el('span', {}, el('span', { class: 'tv-spin', 'aria-hidden': 'true' }), '처음 조회하는 조합이라 나머지 기간을 받는 중입니다. 화면이 자동으로 갱신됩니다.') : data.apiError ? el('span', {}, `UN Comtrade에서 일부 기간을 받지 못했습니다(${data.apiError.code}). 받은 기간까지만 표시합니다. 빠진 기간만 다시 받아 볼 수 있으며, 최대 1분 정도 걸릴 수 있습니다. `, retryButton(app, query, deps)) : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
+      if (data.incomplete) root.append(el('p', { class: 'tv-notice', role: 'status' }, data.pending ? el('span', {}, el('span', { class: 'tv-spin', 'aria-hidden': 'true' }), '처음 조회하는 조합이라 나머지 기간을 받는 중입니다. 화면이 자동으로 갱신됩니다.') : data.apiError ? el('span', {}, `UN Comtrade에서 일부 기간을 받지 못했습니다. 받은 기간까지만 표시합니다. 빠진 기간만 다시 받아 볼 수 있으며, 최대 1분 정도 걸릴 수 있습니다. `, retryButton(app, query, deps)) : '처음 조회하는 조합이라 일부 기간을 아직 받는 중입니다. 잠시 후 다시 열면 나머지가 채워집니다.'));
     }
     if (data.country) {
       const what = { imp: `${data.countryName}에서 들여온 수입`, exp: `${data.countryName}(으)로 보낸 수출`, net: `${data.countryName}와(과)의 수출 − 수입` }[state.flow];
