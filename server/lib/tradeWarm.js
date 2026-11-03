@@ -24,7 +24,7 @@ async function runWarm({ offset = 0, limit = 6, now = new Date(), call = (p) => 
   const ctx = { calls: 0, deadline: Date.now() + 240000, error: null, failed: false, split: true };
   const errors = [];
   let retry = null;
-  if (offset === 0) retry = await drainRetries({ db, call, now, limit: 30, force: true }).catch((e) => { errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`); return null; }); // failed years first
+  if (offset === 0) retry = await drainRetries({ db, call, now, limit: 30, force: true, ignoreBackoff: true }).catch((e) => { errors.push(`retry queue: ${String(e && e.message).slice(0, 60)}`); return null; }); // failed years first
   for (const base of COMBOS.slice(offset, offset + limit)) {
     for (const cmds of BATCHES) {
       const tasks = await planYears(db, now, base, cmds, list);

@@ -116,11 +116,11 @@ function fetchTask(db, call, now, base, task, { split = false } = {}) {
 // Retry failed years that are due. Called after a request is answered (so traffic itself drives the retries; at most once a minute per process)
 // and at the start of the daily warm-up. Stops at the first rate limit. Returns { tasks, calls, left }.
 let lastDrain = 0;
-async function drainRetries({ db = pool, call = (p) => callComtrade(p), now = new Date(), limit = 2, force = false } = {}) {
+async function drainRetries({ db = pool, call = (p) => callComtrade(p), now = new Date(), limit = 2, force = false, ignoreBackoff = false } = {}) {
   if (!force && Date.now() - lastDrain < 60000) return { tasks: 0, calls: 0, left: 0, skipped: true };
   lastDrain = Date.now();
   await ensureTables(db);
-  const { rows } = await db.query('SELECT reporter, partner, flow, cmd, year FROM trade_bilateral_retry WHERE next_at <= now() ORDER BY next_at LIMIT 40');
+  const { rows } = await db.query('SELECT reporter, partner, flow, cmd, year FROM trade_bilateral_retry WHERE ($1::boolean OR next_at <= now()) ORDER BY next_at LIMIT 40', [Boolean(ignoreBackoff)]);
   const groups = new Map();
   for (const x of rows) {
     const k = `${x.reporter}|${x.partner}|${x.flow}|${x.year}`;
