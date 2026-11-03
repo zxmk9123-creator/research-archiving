@@ -4328,11 +4328,12 @@ async function router() {
 
 // Filter changes inside 무역통계 are hash changes too; they must not throw the reader back to the top.
 let lastRoutedPath = null;
+let authRerender = false; // a re-render caused by logging in/out is not a page view
 async function routeToPage() {
   const { path, param, query } = parseHash();
   const stayingOnTrade = path === 'trade' && lastRoutedPath === 'trade';
   lastRoutedPath = path;
-  trackPageview(path, param);
+  if (!authRerender) trackPageview(path, param);
   cancelActiveSpotlightTour();
   updateActiveNavTab(path);
   // Leaving Home (or re-rendering it) must stop its carousels' setInterval
@@ -4414,11 +4415,22 @@ async function adminLogin() {
     return;
   }
   await refreshAdminAuthUi();
+  await rerenderCurrentTab();
 }
 
 async function adminLogout() {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   await refreshAdminAuthUi();
+  await rerenderCurrentTab();
+}
+
+// Admin-only parts of a page (the ops panels, run buttons, delete buttons) are decided when the page is drawn, so logging in or out
+// redraws the tab you are on, in place: same tab, same scroll position, no reload.
+async function rerenderCurrentTab() {
+  const y = window.scrollY;
+  authRerender = true;
+  try { await router(); } finally { authRerender = false; }
+  window.scrollTo(0, y);
 }
 
 // Page-wide safety net for the Home carousel drag-reorder feature: a fast
