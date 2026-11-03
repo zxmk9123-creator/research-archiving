@@ -2163,7 +2163,7 @@ async function renderArchive(query = {}) {
   const monthTotals = new Map(monthCounts.map((r) => [r.month_key ? `${Number(r.month_key.slice(0, 4))}-${Number(r.month_key.slice(5)) - 1}` : 'unknown', Number(r.count)]));
   const pageHref = (o) => '#/archive?' + toQuery({ ...query, offset: o || '', scrollTo: '' }).slice(1);
   const archivePagerHtml = (offset > 0 || itemsPage.hasMore)
-    ? `<nav class="archive-pager" aria-label="목록 페이지 이동">${offset > 0 ? `<a class="btn" href="${pageHref(Math.max(0, offset - 100))}">← 이전 100개</a>` : '<span></span>'}<span class="meta">${offset + 1}–${offset + items.length}번째</span>${itemsPage.hasMore ? `<a class="btn" href="${pageHref(offset + 100)}">다음 100개 →</a>` : '<span></span>'}</nav>`
+    ? `<nav class="archive-pager" aria-label="목록 페이지 이동">${offset > 0 ? `<a class="btn" href="${pageHref(Math.max(0, offset - 100))}">← 이전</a>` : '<span></span>'}<span class="meta">${offset + 1}–${offset + items.length}번째</span>${itemsPage.hasMore ? `<a class="btn" href="${pageHref(offset + 100)}">다음 →</a>` : '<span></span>'}</nav>`
     : '';
   const monthNavHtml = monthCounts.length
     ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthCounts.map((r) => {
