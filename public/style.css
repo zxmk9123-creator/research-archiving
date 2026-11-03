@@ -1753,3 +1753,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 /* trade: more room around the source sentence and the notice under it */
 .tv-root .tv-context { margin: var(--sp-2) 0 var(--sp-4); line-height: 1.6; }
 .tv-root .tv-notice { margin: 0 0 var(--sp-5); padding: 10px 14px; line-height: 1.6; }
+
+/* archive: page buttons under the list, group totals in the dividers */
+.archive-pager { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: var(--sp-6) 0 var(--sp-4); }
+.archive-month-total { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }

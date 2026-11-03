@@ -2159,6 +2159,12 @@ async function renderArchive(query = {}) {
   // it (computed from the cumulative counts, same ORDER BY the list query
   // itself uses) and then scrolls once that page has rendered.
   let cumulativeBeforeThisMonth = 0;
+  // the list is one page of 100 at a time: without these buttons everything after the first page (the whole "날짜 미확인" group included) was unreachable
+  const monthTotals = new Map(monthCounts.map((r) => [r.month_key ? `${Number(r.month_key.slice(0, 4))}-${Number(r.month_key.slice(5)) - 1}` : 'unknown', Number(r.count)]));
+  const pageHref = (o) => '#/archive?' + toQuery({ ...query, offset: o || '', scrollTo: '' }).slice(1);
+  const archivePagerHtml = (offset > 0 || itemsPage.hasMore)
+    ? `<nav class="archive-pager" aria-label="목록 페이지 이동">${offset > 0 ? `<a class="btn" href="${pageHref(Math.max(0, offset - 100))}">← 이전 100개</a>` : '<span></span>'}<span class="meta">${offset + 1}–${offset + items.length}번째</span>${itemsPage.hasMore ? `<a class="btn" href="${pageHref(offset + 100)}">다음 100개 →</a>` : '<span></span>'}</nav>`
+    : '';
   const monthNavHtml = monthCounts.length
     ? `<nav class="archive-month-nav" aria-label="연-월 바로가기">${monthCounts.map((r) => {
         // Matches groupByMonth()'s own key scheme (0-based month, 'unknown'
@@ -2170,7 +2176,7 @@ async function renderArchive(query = {}) {
         const [y, m] = r.month_key ? r.month_key.split('-').map(Number) : [null, null];
         const groupKey = r.month_key ? `${y}-${m - 1}` : 'unknown';
         const label = r.month_key ? `${y}년 ${m}월` : '날짜 미확인';
-        const targetOffset = Math.floor(cumulativeBeforeThisMonth / 100) * 100;
+        const targetOffset = cumulativeBeforeThisMonth; // start exactly at this group's first item (a page boundary used to cut a group off after its first item)
         cumulativeBeforeThisMonth += r.count;
         const href = '#/archive?' + toQuery({ ...query, offset: targetOffset || '', scrollTo: groupKey }).slice(1);
         return `<a class="archive-month-nav-item" href="${href}">
@@ -2235,9 +2241,10 @@ async function renderArchive(query = {}) {
           }개</span></div>
           ${emptyState}
           ${monthGroups.map((g) => `
-            <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}</div>
+            <div class="archive-month-divider" id="archive-month-${g.key}">${g.label}${monthTotals.get(g.key) ? ` <span class="archive-month-total">· 전체 ${monthTotals.get(g.key)}건</span>` : ''}</div>
             <div class="grid">${g.items.map((it) => itemCard(it, importantIds, savedIds, teamPicksByItem)).join('')}</div>
           `).join('')}
+          ${archivePagerHtml}
         </div>
       </div>
     </div>
