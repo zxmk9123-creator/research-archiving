@@ -15,7 +15,7 @@ const MAX_EVIDENCE_ITEMS = 24;
 const REPAIR_EVIDENCE_ITEMS = 12;
 // A live generation refreshes updated_at at every attempt (one attempt is bounded by the router's ~135 s cascade plus the retry delay, so
 // well under this), so a row silent for longer than this has lost its worker (the host ended the function): reclaim it quickly.
-const GENERATION_STALE_AFTER_MINUTES = 6;
+const GENERATION_STALE_AFTER_MINUTES = 3;
 const MAX_AUTOMATIC_RETRIES = 5;
 const BRIEF_MAX_TOKENS = 12000;
 // One cron invocation may run for at most 300 s on the host. Retries stop (and the row is released as 'failed' so the NEXT call picks
