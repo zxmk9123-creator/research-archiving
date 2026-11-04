@@ -81,7 +81,7 @@ test('with time to spare it keeps retrying up to the automatic limit; the model 
 });
 
 test('reclaim policy: a silent generation is reclaimed after minutes (not 25), and automatic claims are capped per day', async () => {
-  assert.ok(dailyBrief.GENERATION_STALE_AFTER_MINUTES <= 6);
+  assert.equal(dailyBrief.GENERATION_STALE_AFTER_MINUTES, 3);
   const origQuery = pool.query;
   let seen;
   pool.query = async (text, params) => { if (/INSERT INTO daily_briefs/.test(text)) seen = { text, params }; return { rows: [] }; };
