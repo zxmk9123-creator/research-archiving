@@ -50,7 +50,7 @@ async function runSteps(steps, { started, budgetMs, isChain = false, chainSteps 
   return results;
 }
 
-async function runDailyCron(chainDepth) {
+async function runDailyCron(chainDepth, { forceHeadline = false } = {}) {
   const started = Date.now();
   const dailyDiscovery = require('./dailyDiscovery');
   const dailyBrief = require('./dailyBrief');
@@ -80,7 +80,14 @@ async function runDailyCron(chainDepth) {
       return total;
     }],
     // the headline is guaranteed: generated once, when collection is done (or at the 10:00 KST deadline); never refreshed
-    ['ensure_daily_brief', async () => dailyBrief.ensureDailyBrief(new Date(), { discoveryDone: (await dailyDiscovery.getDailyDiscoveryStatus()).completedToday })],
+    ['ensure_daily_brief', async () => {
+      const discoveryDone = (await dailyDiscovery.getDailyDiscoveryStatus()).completedToday;
+      if (forceHeadline) {
+        const r = await dailyBrief.requestDailyBriefRegeneration();
+        return { ran: r.started, reason: r.started ? 'generated' : r.reason };
+      }
+      return dailyBrief.ensureDailyBrief(new Date(), { discoveryDone });
+    }],
     ['scope_analysis', () => maybeRunWeeklyScopeAnalysis()],
     ['entity_maintenance', () => require('./entityMaintenance').maybeRunEntityMaintenance()],
     ['verification', () => require('./verificationRoutine').runQueue()],
@@ -133,7 +140,8 @@ function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
     if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
     const chainDepth = Number(req.get('x-cron-chain')) || 0;
     // everything this invocation starts (headline generation included) is cut off by the host ~300 s after now
-    const runBounded = (depth) => require('./dailyBrief').runWithDeadline(Date.now() + 285000, () => run(depth));
+    const forceHeadline = String(req.query && req.query.force_headline || '') === '1';
+    const runBounded = (depth) => require('./dailyBrief').runWithDeadline(Date.now() + 285000, () => run(depth, { forceHeadline }));
     if (chainDepth === 0) await require('./triggerHeartbeat').recordTrigger(req.get('user-agent') || '', req.get('x-trigger-source') || '').catch(() => {}); // external callers only
     if (chainDepth > 0) {
       track(runBounded(chainDepth).catch((err) => console.error('cron chain hop failed:', err.message)));
