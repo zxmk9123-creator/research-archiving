@@ -15,6 +15,11 @@ on:
     # them from running at the same time, and a run that finds nothing to do is a few seconds long.
     - cron: '*/10 22,23,0,1 * * *'
   workflow_dispatch:
+    inputs:
+      force_headline:
+        description: 'Force one headline regeneration from the existing archive'
+        type: boolean
+        default: false
 
 concurrency:
   group: scheduled-jobs
@@ -29,6 +34,7 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
+          FORCE_HEADLINE: ${{ inputs.force_headline }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET secret is not set"; exit 1; fi
           # The run keeps calling the endpoint until the morning discovery reports done (each call advances a saved cursor), so a hop
@@ -37,9 +43,12 @@ jobs:
           end=$((SECONDS + 3900))
           i=0
           bad=0
+          force_pending="$FORCE_HEADLINE"
           while [ "$SECONDS" -lt "$end" ]; do
             i=$((i + 1))
-            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" -H "X-Trigger-Source: github-actions" "$APP_URL/api/cron/daily" || true)
+            url="$APP_URL/api/cron/daily"
+            if [ "$force_pending" = "true" ]; then url="$url?force_headline=1"; force_pending=false; fi
+            code=$(curl -sS -m 290 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" -H "X-Trigger-Source: github-actions" "$url" || true)
             echo "call $i: HTTP $code"
             cat out.json 2>/dev/null | head -c 3000; echo
             # a 3xx means the domain moved (the old research-archiving.vercel.app now redirects to oilfats-research.vercel.app): curl does not
