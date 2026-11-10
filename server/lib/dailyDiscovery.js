@@ -271,20 +271,32 @@ async function runSourceBounded(source, collect, options, { timeoutMs = SOURCE_T
 
 const slimResult = (r) => ({ sourceId: r.sourceId, ok: r.ok, error: r.error, discovered: r.discovered, archived: r.archived, filtered: r.filtered, failed: r.failed });
 
-// Pure step function (tested without a database): runs sources [offset, total) in groups until the budget is spent.
+// Pure step function (tested without a database): runs sources [offset, total) with `concurrency` workers until the budget is spent.
+// A worker takes the next source the moment it is free, so one slow source (up to the 90 s hard timeout) no longer holds back the others
+// the way a lock-step group of three did: a slice used to reach only 9-15 of ~88 sources because every group waited for its slowest member.
+// Sources are STARTED in index order and every started one is awaited, so when the loop ends the finished sources are exactly [offset, next);
+// during the run the saved offset only covers the contiguous finished prefix, so a killed function never skips a source.
 async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, concurrency = 3, now = () => Date.now(), onGroup = null } = {}) {
   const started = now();
-  const next = { offset: cursor.offset || 0, results: [...(cursor.results || [])] };
-  while (next.offset < total && now() - started < budgetMs) {
-    const group = [];
-    for (let i = 0; i < concurrency && next.offset + i < total; i++) group.push(next.offset + i);
-    const done = await Promise.all(group.map((idx) => runOne(idx).then((r) => slimResult(r), (err) => ({ sourceId: null, ok: false, error: String(err && err.message).slice(0, 160) }))));
-    next.results.push(...done);
-    next.offset += group.length;
-    // progress is saved after EVERY group: a function killed by the host's time limit loses at most the group in flight
-    if (onGroup) await onGroup({ offset: next.offset, results: next.results });
-  }
-  return { ...next, done: next.offset >= total };
+  const base = cursor.offset || 0;
+  const results = [...(cursor.results || [])];
+  const finished = [];
+  let nextIdx = base;
+  let contiguous = base;
+  let saving = Promise.resolve();
+  const worker = async () => {
+    while (nextIdx < total && now() - started < budgetMs) {
+      const idx = nextIdx++;
+      finished[idx - base] = await runOne(idx).then((r) => slimResult(r), (err) => ({ sourceId: null, ok: false, error: String(err && err.message).slice(0, 160) }));
+      let moved = false;
+      while (finished[contiguous - base] !== undefined) { results.push(finished[contiguous - base]); contiguous++; moved = true; }
+      // progress is saved as soon as the finished prefix grows (one save at a time, in order)
+      if (moved && onGroup) { const state = { offset: contiguous, results: [...results] }; saving = saving.then(() => onGroup(state)); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(0, Math.min(concurrency, total - base)) }, worker));
+  await saving;
+  return { offset: contiguous, results, done: contiguous >= total };
 }
 
 async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } = {}) {
@@ -308,7 +320,7 @@ async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } =
   // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
   // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
   const runOne = (idx) => runSourceBounded(srcRows[idx], collectWebDiscoverySource, dailyDiscoverySearchOptions(srcRows[idx]));
-  const leaseMs = budgetMs + 60000;
+  const leaseMs = budgetMs + 100000; // sources still in flight at the budget may run up to the 90 s hard timeout
   const step = await advanceDiscovery(saved, srcRows.length, runOne, {
     budgetMs,
     onGroup: (state) => save({ offset: state.offset, results: state.results, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + leaseMs }),

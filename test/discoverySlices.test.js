@@ -37,11 +37,24 @@ test('advanceDiscovery: a source that throws is recorded as failed and does not 
   assert.match(out.results[1].error, /network down/);
 });
 
-test('advanceDiscovery: progress is reported after every group, so a killed function loses at most the group in flight', async () => {
+test('advanceDiscovery: progress is saved as the finished prefix grows, in order, so a killed function loses only what was in flight', async () => {
   const seen = [];
   const run = async (idx) => ({ sourceId: idx, ok: true, discovered: 1, archived: 0, filtered: 0, failed: 0 });
   await advanceDiscovery({ offset: 0, results: [] }, 7, run, { budgetMs: 10000, concurrency: 3, onGroup: async (s) => { seen.push(s.offset); } });
-  assert.deepEqual(seen, [3, 6, 7]);
+  assert.equal(seen[seen.length - 1], 7);
+  assert.ok(seen.every((v, i) => i === 0 || v > seen[i - 1]), 'offsets only grow');
+});
+
+test('advanceDiscovery: one slow source does not hold the others back, and the saved offset never jumps over it', async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const order = []; const saved = [];
+  const run = async (idx) => { await sleep(idx === 0 ? 120 : 5); order.push(idx); return { sourceId: idx, ok: true }; };
+  const out = await advanceDiscovery({ offset: 0, results: [] }, 6, run, { budgetMs: 10000, concurrency: 2, onGroup: async (s) => { saved.push(s.offset); } });
+  assert.equal(out.done, true);
+  assert.equal(out.results.length, 6);
+  assert.ok(order.indexOf(0) > order.indexOf(3), 'sources 1..3 finished while source 0 was still running');
+  assert.ok(saved[0] >= 1 && saved.every((v) => v === 0 || v >= 1) && saved[0] !== 3, 'nothing is saved past an unfinished source');
+  assert.deepEqual(out.results.map((r) => r.sourceId), [0, 1, 2, 3, 4, 5], 'results stay in source order');
 });
 
 const pool = require('../server/db/pool');
