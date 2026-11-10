@@ -318,3 +318,20 @@ test('guardrail: when every model attempt fails, a model-free degraded brief fro
     assert.ok(writes[0].developments.length >= 1 && writes[0].lead.length > 0);
   } finally { pool.query = q; h.restore(); }
 });
+
+test('language guard: an all-English brief is rejected, retried with a Korean-only hint, and the Korean answer is published', async () => {
+  const ENGLISH = JSON.stringify({
+    lead: 'Indonesia raised the palm oil export levy again this month',
+    market_summary: 'The levy increase raises supply pressure and price support for palm oil exporters across the region.',
+    developments: [{ item_id: 101, importance: 4, summary: 'Indonesia raised the palm oil export levy', significance: 'Supply pressure and price support for exporters' }],
+    watchpoints: ['Follow-up measures'],
+  });
+  const h = harness([ENGLISH, GOOD]);
+  try {
+    await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
+    assert.equal(h.state.ready, true);
+    assert.match(h.state.attempts[0], /not_korean_output/);
+    assert.match(h.state.prompts[1], /영어로 작성되어 무효/);
+    assert.match(h.state.prompts[0], /한국어로 작성한다/, 'the language reminder closes the first prompt too');
+  } finally { h.restore(); }
+});

@@ -236,6 +236,13 @@ function validateBrief(raw, evidence) {
   if (/[\u0E00-\u0E7F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF]/u.test(briefText)) {
     throw new Error('unexpected_non_korean_script');
   }
+  // LANGUAGE GUARD: Latin letters are allowed (company names, units), a whole answer in English is not. Share of Hangul among all letters:
+  // overall, and for the two headline fields on their own (2026-11-10: the model answered in English and nothing rejected it).
+  const hangulShare = (text) => { const h = (String(text).match(/[\uAC00-\uD7A3]/g) || []).length; const l = (String(text).match(/[A-Za-z]/g) || []).length; return h + l ? h / (h + l) : 1; };
+  const devText = normalizedDevelopments.map((d) => `${d.summary} ${d.significance}`).join(' ');
+  if (hangulShare(lead) < 0.3 || hangulShare(marketSummary) < 0.3 || hangulShare(devText) < 0.3 || hangulShare(briefText) < 0.5) {
+    throw new Error('not_korean_output');
+  }
   return {
     lead: lead.slice(0, 500).replace(/[.。]+$/u, ''),
     market_summary: marketSummary.slice(0, 1000),
@@ -268,6 +275,7 @@ async function countEvidenceCandidates(briefDate) {
 // parseable JSON and, unlike a random glitch, repeats on an identical prompt — so it is recognised and the next attempt says why.
 const PLACEHOLDER_OUTPUT_RE = /\[\s*(?:\.{3}|…)\s*\]|"\s*:\s*(?:int|integer|string|number|정수)\s*[,}]|:\s*1~5\b|A사가 B 공장|증설 소식으로 원료 수급이 빠듯|A사가 연 10만 톤|증설 일정 확정 여부/;
 const TRUNCATED_HINT = '\n\n[재시도 안내] 직전 응답은 생각·해설을 길게 쓰다가 중간에 잘려 JSON이 완성되지 않았다. 해설·사고 과정 없이 곧바로 JSON 객체만 출력하고, 항목은 짧게 쓴다.';
+const KOREAN_HINT = '\n\n[재시도 안내] 직전 응답은 영어로 작성되어 무효였다. 입력 자료의 제목이 영어여도 모든 출력 문장을 한국어로 다시 작성한다.';
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
 async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null } = {}) {
@@ -331,9 +339,9 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     'market_summary는 developments 전체를 한 건당 완결된 평서문 한 문장("~다"로 끝남)으로 쓴다. 명사구로 끝나는 문장이나 자료 문장의 복사는 쓰지 않는다.',
     '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 developments에 담은 자료 전체(최대 5건)를 빠짐없이 포괄한다: 자료마다 핵심 변화와 영향을 한 문장씩, 가장 시의적인 현상부터 순서대로 쓰고, 1위 자료 하나로 채우지 않는다.',
     'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead는 앞쪽 자료를 중심으로 쓰고 market_summary는 developments 전체를 아우른다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
-    'lead와 market_summary, 모든 배열 문자열은 한국어로 쓴다.',
+    '언어(최우선 규칙): lead, market_summary, 각 development의 summary·significance, watchpoints의 모든 문장은 반드시 한국어 문장으로 쓴다. 입력 자료의 제목이 영어여도 영어 문장으로 답하지 않는다(고유명사·단위·약어만 원문 표기 허용).',
   ].join('\n');
-  const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint === 'short' ? TRUNCATED_HINT : repairHint ? REPAIR_HINT : ''}`;
+  const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint === 'short' ? TRUNCATED_HINT : repairHint === 'korean' ? KOREAN_HINT : repairHint ? REPAIR_HINT : ''}\n\n※ 출력의 모든 문장(lead, market_summary, summary, significance, watchpoints)은 한국어로 작성한다.`;
 
   // The brief is a small JSON object, but the router's `auto` lane can land on a reasoning model that spends the default 6000 tokens thinking and
   // cuts the answer off (the most frequent failure so far), so it gets a larger budget; FREELLMAPI_BRIEF_MODEL pins a non-reasoning model if set.
@@ -418,7 +426,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       ).catch((updateErr) => console.error(`daily_brief retry state update failed: ${updateErr.message}`));
       if (exhausted) await publishFallbackBrief(briefDate, message).catch((e) => console.error(`daily_brief fallback failed: ${e.message}`));
       if (final) return;
-      repairHint = repairHint || (/brief_truncated_by_max_tokens/.test(message) ? 'short' : /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message)); // a cut-off answer is retried with less input and the short-answer hint
+      repairHint = repairHint || (/not_korean_output/.test(message) ? 'korean' : /brief_truncated_by_max_tokens/.test(message) ? 'short' : /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message)); // a cut-off answer is retried with less input and the short-answer hint
       await sleep(delayMs);
     }
   }
