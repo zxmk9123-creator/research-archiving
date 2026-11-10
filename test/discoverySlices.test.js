@@ -115,3 +115,34 @@ test('runSourceBounded: a source cut off by the hard timeout leaves stage/timing
   assert.equal(fast.ok, true);
   assert.equal(events.length, 1);
 });
+
+test('fan-out claims: hops never take the same source, a dead hop\'s claim is retaken, and exactly one worker completes the run', () => {
+  const { beginRun, claimNext, finishOne } = require('../server/lib/dailyDiscovery');
+  let doc = {}; const t0 = 1000000;
+  assert.equal(beginRun(doc, t0).value.idle, true);
+  doc = beginRun(doc, t0).doc;
+  assert.equal(beginRun(doc, t0 + 1000).value.idle, false, 'a second trigger does not start a second fan-out');
+  const taken = [];
+  for (let i = 0; i < 4; i++) { const c = claimNext(doc, 4, t0 + i); doc = c.doc; taken.push(c.value.idx); }
+  assert.deepEqual(taken, [0, 1, 2, 3]);
+  assert.equal(claimNext(doc, 4, t0 + 10).value.idx, null, 'everything is claimed');
+  assert.equal(claimNext(doc, 4, t0 + 200000).value.idx, 0, 'an expired claim is retaken');
+  let completes = 0;
+  for (const i of [3, 1, 0, 2]) { const f = finishOne(doc, i, { sourceId: i, ok: true }, 4, t0 + 300000 + i); doc = f.doc; if (f.value.complete) { completes++; assert.deepEqual(f.value.results.map((r) => r.sourceId), [0, 1, 2, 3]); } }
+  assert.equal(completes, 1);
+  assert.equal(finishOne(doc, 2, { sourceId: 2, ok: true }, 4, t0 + 300100).value.complete, false, 'a repeated result does not complete twice');
+});
+
+test('runClaimed: concurrent workers share the claims, every source runs once and completion fires once', async () => {
+  const { runClaimed, claimNext, finishOne } = require('../server/lib/dailyDiscovery');
+  let doc = {}; const ran = []; let done = 0;
+  const out = await runClaimed({
+    claim: async () => { const c = claimNext(doc, 9, Date.now()); doc = c.doc; return c.value; },
+    record: async (i, r) => { const f = finishOne(doc, i, r, 9, Date.now()); doc = f.doc; return f.value; },
+    onComplete: async (results) => { done++; assert.equal(results.length, 9); },
+    runOne: async (i) => { ran.push(i); await new Promise((r) => setTimeout(r, 3)); return { sourceId: i, ok: true }; },
+    budgetMs: 10000, concurrency: 4,
+  });
+  assert.deepEqual(ran.sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(done, 1); assert.equal(out.completed, true); assert.equal(out.count, 9);
+});

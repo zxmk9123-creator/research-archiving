@@ -20,6 +20,14 @@ on:
         description: 'Force one headline regeneration from the existing archive'
         type: boolean
         default: false
+      generation:
+        description: 'Internal: how many times this run chain has re-dispatched itself'
+        type: string
+        default: '0'
+
+permissions:
+  contents: read
+  actions: write # lets a run start its own continuation (gh workflow run)
 
 concurrency:
   group: scheduled-jobs
@@ -35,6 +43,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_URL: ${{ vars.APP_URL || 'https://oilfats-research.vercel.app' }}
           FORCE_HEADLINE: ${{ inputs.force_headline }}
+          GENERATION: ${{ inputs.generation }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$CRON_SECRET" ]; then echo "CRON_SECRET secret is not set"; exit 1; fi
           # The run keeps calling the endpoint until the morning discovery reports done (each call advances a saved cursor), so a hop
@@ -44,6 +54,13 @@ jobs:
           i=0
           bad=0
           force_pending="$FORCE_HEADLINE"
+          # One run cannot outlast its timeout, and a call series that keeps failing must not end the day's work: when work remains, the run
+          # starts its own continuation (new run, same workflow), at most 3 times in a row so it can never loop forever.
+          redispatch() {
+            gen=${GENERATION:-0}; gen=$((gen + 0))
+            if [ "$gen" -ge 3 ]; then return 1; fi
+            gh workflow run scheduled-jobs.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f generation=$((gen + 1)) && echo "re-dispatched continuation $((gen + 1))"
+          }
           while [ "$SECONDS" -lt "$end" ]; do
             i=$((i + 1))
             url="$APP_URL/api/cron/daily"
@@ -58,7 +75,10 @@ jobs:
             if [ "$code" != "200" ]; then
               # timeout (000) or a 5xx: the chain and the saved cursor survive it, so retry — but not forever
               bad=$((bad + 1))
-              if [ "$bad" -ge 5 ]; then echo "::error::5 failed calls in a row (last HTTP $code)"; exit 1; fi
+              if [ "$bad" -ge 5 ]; then
+                if redispatch; then exit 0; fi
+                echo "::error::5 failed calls in a row (last HTTP $code)"; exit 1
+              fi
             else
               bad=0
               # a step that errored is reported inside a 200 response: fail the run so GitHub sends its failure notification
@@ -72,4 +92,5 @@ jobs:
             fi
             sleep 20
           done
+          if redispatch; then exit 0; fi
           echo "::error::morning discovery or the headline still not done after 65 minutes"; exit 1

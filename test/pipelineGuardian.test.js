@@ -50,8 +50,8 @@ test('maybeKickStalledPipeline: a stalled morning collection starts a fresh chai
   let m = mockPool(true); const seen = [];
   try {
     const r = await maybeKickStalledPipeline({ now: kst(8, 10), status: stalled, env: ENV, sleep: noSleep, fetchImpl: async (url, opts) => { seen.push({ url, depth: opts.headers['x-cron-chain'] }); return { status: 202 }; } });
-    assert.deepEqual([r.kicked, r.result], [true, 'hop_1_http_202']);
-    assert.deepEqual(seen, [{ url: 'https://h.vercel.app/api/cron/daily', depth: '1' }]);
+    assert.deepEqual([r.kicked, r.result], [true, '3/3_ok']);
+    assert.deepEqual(seen, Array(3).fill({ url: 'https://h.vercel.app/api/cron/daily', depth: '1' }));
     const claim = m.calls.find((c) => /UPDATE scheduler_jobs SET last_completed_at/.test(c.text));
     assert.equal(claim.params[0] * 1000, KICK_MIN_GAP_MS);
     const trace = m.calls.find((c) => /INSERT INTO scheduler_jobs \(job_name, last_run_date, last_totals\)/.test(c.text) && c.params[0] === 'pipeline_trace');

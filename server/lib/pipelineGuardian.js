@@ -57,7 +57,7 @@ async function maybeKickStalledPipeline({ now = new Date(), status, env, fetchIm
   if (!needsKick(st, now)) return { kicked: false, reason: 'not_needed' };
   if (!(await claimKick())) return { kicked: false, reason: 'recently_kicked' };
   // depth 1 starts a fresh hop budget, so a pipeline that ran out of hops can still finish
-  const result = await guard.chainNext(1, { env, fetchImpl, sleep });
+  const result = await guard.fanOut(guard.FAN_OUT, { env, fetchImpl, sleep });
   await recordPipelineEvent('self_heal_kick', { state: st.state, progress: st.progress ? `${st.progress.done}/${st.progress.total}` : null, result });
   return { kicked: true, result };
 }

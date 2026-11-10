@@ -44,6 +44,13 @@ async function chainNext(depth, { env = process.env, fetchImpl = fetch, timeoutM
   return `${last}_gave_up`;
 }
 
+// Starts `n` concurrent hops at depth 1 (each answers 202 at once and works in its own invocation); all of them share the cursor's claims.
+const FAN_OUT = 3;
+async function fanOut(n = FAN_OUT, opts = {}) {
+  const r = await Promise.all(Array.from({ length: n }, () => chainNext(1, opts)));
+  return `${r.filter((x) => /_http_(202|200)/.test(x)).length}/${n}_ok`;
+}
+
 // null when healthy, otherwise a short incident message. status = getDailyDiscoveryStatus(), brief = { state, completedAt }.
 function pipelineIncident(status, brief, { hourKst, now = Date.now() } = {}) {
   if (!status.completedToday) {
@@ -93,4 +100,4 @@ function opsWarnings(allEvents = [], health = {}, { day = new Date().toISOString
   return out;
 }
 
-module.exports = { opsWarnings, MAX_CHAIN_DEPTH, chainTarget, shouldChain, chainNext, pipelineIncident };
+module.exports = { opsWarnings, MAX_CHAIN_DEPTH, chainTarget, shouldChain, chainNext, fanOut, FAN_OUT, pipelineIncident };

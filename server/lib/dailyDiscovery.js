@@ -299,43 +299,122 @@ async function advanceDiscovery(cursor, total, runOne, { budgetMs = 200000, conc
   return { offset: contiguous, results, done: contiguous >= total };
 }
 
-async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 200000 } = {}) {
+// ---- Fan-out: concurrent hops share one cursor through per-source claims ---------------------------------------------------
+// Hops run side by side (depth 1 only: Vercel's loop detection refuses deep chains) and each takes the next unclaimed source under a row lock,
+// so no source runs twice, a killed hop's claims expire and are retaken, and exactly one worker records the completion.
+const CLAIM_LEASE_MS = 150000; // hard source timeout (90 s) plus slack: an older unfinished claim belongs to a dead hop
+const ACTIVE_LEASE_MS = 100000; // after a claim or a result the run counts as "being worked on" for this long
+const COMPLETING_RETRY_MS = 300000;
+const finishedOf = (doc) => doc.finished || (doc.results ? Object.fromEntries(doc.results.map((r, i) => [i, r])) : {}); // old cursor shape
+
+// Pure reducers over the cursor document: each returns { doc, value }.
+function beginRun(doc, now) {
+  if (doc.leaseUntil && doc.leaseUntil > now) return { doc, value: { idle: false } };
+  return { doc: { ...doc, savedAt: now, leaseUntil: now + ACTIVE_LEASE_MS }, value: { idle: true } };
+}
+function claimNext(doc, total, now) {
+  const finished = finishedOf(doc);
+  const claims = { ...(doc.claims || {}) };
+  let idx = null;
+  for (let i = 0; i < total; i++) {
+    if (finished[i] !== undefined) continue;
+    if (claims[i] && now - claims[i] < CLAIM_LEASE_MS) continue;
+    idx = i; break;
+  }
+  const count = Object.keys(finished).length;
+  if (idx == null) return { doc, value: { idx: null, count } };
+  claims[idx] = now;
+  return { doc: { ...doc, finished, claims, total, offset: count, savedAt: now, leaseUntil: Math.max(doc.leaseUntil || 0, now + ACTIVE_LEASE_MS) }, value: { idx, count } };
+}
+function finishOne(doc, idx, result, total, now) {
+  const finished = { ...finishedOf(doc), [idx]: result };
+  const claims = { ...(doc.claims || {}) }; delete claims[idx];
+  const count = Object.keys(finished).length;
+  const complete = count >= total && !(doc.completingAt && now - doc.completingAt < COMPLETING_RETRY_MS);
+  const next = { ...doc, finished, claims, total, offset: count, savedAt: now, leaseUntil: count >= total ? 0 : Math.max(doc.leaseUntil || 0, now + ACTIVE_LEASE_MS) };
+  if (complete) next.completingAt = now;
+  delete next.results;
+  return { doc: next, value: { count, complete, results: complete ? Array.from({ length: total }, (_, i) => finished[i]) : null } };
+}
+
+async function mutateCursor(today, fn) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`INSERT INTO scheduler_jobs (job_name, last_run_date, last_totals) VALUES ($1, $2::date, '{}'::jsonb) ON CONFLICT (job_name) DO NOTHING`, [CURSOR_JOB, today]);
+    const { rows } = await c.query(`SELECT last_run_date, last_totals FROM scheduler_jobs WHERE job_name = $1 FOR UPDATE`, [CURSOR_JOB]);
+    const sameDay = rows[0].last_run_date && new Date(rows[0].last_run_date).toISOString().slice(0, 10) === today;
+    const out = fn(sameDay ? rows[0].last_totals || {} : {});
+    await c.query(`UPDATE scheduler_jobs SET last_run_date = $2::date, last_totals = $3 WHERE job_name = $1`, [CURSOR_JOB, today, JSON.stringify(out.doc)]);
+    await c.query('COMMIT');
+    return out.value;
+  } catch (err) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    c.release();
+  }
+}
+
+// Worker pool over claims (pure given its injected claim/record, so it is tested without a database).
+async function runClaimed({ claim, runOne, record, onComplete, budgetMs = 170000, concurrency = 3, now = () => Date.now() }) {
+  const started = now();
+  let ran = 0; let count = null; let completed = false;
+  const worker = async () => {
+    while (now() - started < budgetMs) {
+      const c = await claim();
+      count = c.count;
+      if (c.idx == null) return;
+      const r = await runOne(c.idx).then((x) => slimResult(x), (err) => ({ sourceId: null, ok: false, error: String(err && err.message).slice(0, 160) }));
+      const v = await record(c.idx, r);
+      ran++; count = v.count;
+      if (v.complete) { completed = true; await onComplete(v.results); }
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return { ran, count, completed };
+}
+
+// depth 0 = a trigger (external ping, GitHub, Vercel cron): starts the run only when nobody is working on it, then fans out `fanOut()` extra hops.
+// depth >= 1 = a hop: joins the run and takes whatever is unclaimed.
+async function runDailyDiscoverySliced({ now = new Date(), budgetMs = 170000, depth = 0, fanOut = null } = {}) {
   const parts = kstPartsOf(now);
   const today = parts.date;
   if ((await getDailyDiscoveryStatus(now)).completedToday) return { ran: false, reason: 'already_ran_today' };
   if (Number(parts.hour) < 7) return { ran: false, reason: 'not_due_hour' }; // starts in the 07:00-08:00 KST window
-  const { rows } = await pool.query(`SELECT last_run_date, last_totals FROM scheduler_jobs WHERE job_name = $1`, [CURSOR_JOB]);
-  const saved = rows[0] && rows[0].last_run_date && new Date(rows[0].last_run_date).toISOString().slice(0, 10) === today ? rows[0].last_totals || {} : {};
-  if (saved.leaseUntil && saved.leaseUntil > Date.now()) return { ran: false, reason: 'in_progress', offset: saved.offset || 0 };
+  if (depth === 0) {
+    const b = await mutateCursor(today, (d) => beginRun(d, Date.now()));
+    if (!b.idle) return { ran: false, reason: 'in_progress' };
+  }
   const { rows: srcRows } = await pool.query(
     `SELECT * FROM sources WHERE method = 'crawl' AND is_daily_discovery = true AND url IS NOT NULL AND is_active = true ORDER BY id`
   );
-  const save = (state) => pool.query(
-    `INSERT INTO scheduler_jobs (job_name, last_run_date, last_totals) VALUES ($1, $2::date, $3)
-     ON CONFLICT (job_name) DO UPDATE SET last_run_date = $2::date, last_totals = $3`,
-    [CURSOR_JOB, today, JSON.stringify(state)]
-  );
-  await save({ ...saved, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + budgetMs + 60000 });
-  console.log(`daily_discovery sliced start offset=${saved.offset || 0}/${srcRows.length}`);
-  // one slow source must not outlive the function: the budget is only checked between groups, so a group that ran past the host's
-  // hard limit killed the call before it could save its result or chain the next hop (2026-10-28 07:22 KST stall)
+  const total = srcRows.length;
+  const fanned = depth === 0 && fanOut ? await fanOut().catch((err) => `fan_out_failed_${String(err && err.message).slice(0, 60)}`) : undefined;
+  console.log(`daily_discovery sliced start depth=${depth} total=${total}`);
   const runOne = (idx) => runSourceBounded(srcRows[idx], collectWebDiscoverySource, dailyDiscoverySearchOptions(srcRows[idx]));
-  const leaseMs = budgetMs + 100000; // sources still in flight at the budget may run up to the 90 s hard timeout
-  const step = await advanceDiscovery(saved, srcRows.length, runOne, {
-    budgetMs,
-    onGroup: (state) => save({ offset: state.offset, results: state.results, total: srcRows.length, savedAt: Date.now(), leaseUntil: Date.now() + leaseMs }),
+  const out = await runClaimed({
+    claim: () => mutateCursor(today, (d) => claimNext(d, total, Date.now())),
+    record: (idx, r) => mutateCursor(today, (d) => finishOne(d, idx, r, total, Date.now())),
+    onComplete: async (results) => {
+      const failedSources = await recordDailyDiscoveryCompletion({ results });
+      console.log(`daily_discovery sliced completed sources=${results.length} failed=${failedSources.length}`);
+    },
+    runOne, budgetMs,
   });
-  await save({ offset: step.offset, results: step.results, total: srcRows.length, savedAt: Date.now(), leaseUntil: 0 });
-  if (!step.done) return { ran: true, done: false, progress: `${step.offset}/${srcRows.length}` };
-  const failedSources = await recordDailyDiscoveryCompletion({ results: step.results });
-  console.log(`daily_discovery sliced completed sources=${step.results.length} failed=${failedSources.length}`);
-  return { ran: true, done: true, progress: `${step.offset}/${srcRows.length}`, failedSources: failedSources.length };
+  const res = { ran: true, done: out.count >= total, progress: `${out.count}/${total}` };
+  if (fanned !== undefined) res.fanOut = fanned;
+  return res;
 }
 
 module.exports = {
   withTimeout,
   runSourceBounded,
   advanceDiscovery,
+  beginRun,
+  claimNext,
+  finishOne,
+  runClaimed,
   runDailyDiscoverySliced,
   kstPartsOf,
   isDailyDiscoveryHourKst,
