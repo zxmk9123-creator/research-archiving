@@ -208,7 +208,7 @@ async function maybeRunDailyDiscovery(now = new Date()) {
 // stalled (started but no progress for STALL_MS, or nothing started by 08:00 KST) — the home light shows each differently.
 // No lease and no progress for this long = nobody is working on it (a hop hands over to the next within seconds). It was 45 minutes, which
 // kept the light green ("running") for most of an hour after a chain had already died; the self-heal in pipelineGuardian.js acts on this too.
-const STALL_MS = 5 * 60 * 1000;
+const STALL_MS = 90 * 1000; // a hop hands over to the next within seconds, and an external ping arrives every ~5 min: acting after 90 s means the next ping always restarts a chain that ended (it was 5 min, i.e. up to two pings late)
 async function getDailyDiscoveryStatus(now = new Date()) {
   const { date: today, hour } = kstPartsOf(now);
   const { rows } = await pool.query(

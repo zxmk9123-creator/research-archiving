@@ -123,3 +123,19 @@ test('opsWarnings: missing data is reported as missing (not as a healthy zero); 
   const old = (id) => ({ kind: 'source_timeout', sourceId: id, stage: 'search', at: '2026-10-27T01:00:00Z' });
   assert.deepEqual(opsWarnings([old(5), old(5), old(5)], { days: { [day]: { brave: { requests: 1, success: 1 } } } }, { day, now }), [], 'timeouts older than 24 h are not "repeated" today');
 });
+
+test('maybeAlertLate: unfinished collection from 09:30 KST is reported once per call with progress; nothing before 09:30, after completion, or after the window', async () => {
+  const { maybeAlertLate } = require('../server/lib/pipelineGuardian');
+  const sent = [];
+  const dispatch = async (alerts) => { sent.push(...alerts); return { sent: alerts.length }; };
+  const st = { completedToday: false, state: 'running', progress: { done: 63, total: 88 } };
+  const kstTime = (h, m) => new Date(Date.UTC(2026, 10, 9, h - 9, m)); // 2026-11-09 h:m KST
+  assert.equal(await maybeAlertLate(st, kstTime(9, 29), dispatch), false);
+  assert.equal(await maybeAlertLate({ ...st, completedToday: true }, kstTime(9, 40), dispatch), false);
+  assert.equal(await maybeAlertLate(st, kstTime(12, 5), dispatch), false);
+  assert.equal(sent.length, 0);
+  assert.equal(await maybeAlertLate(st, kstTime(9, 31), dispatch), true);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].key, 'late-collection:2026-11-09');
+  assert.match(sent[0].text, /63\/88/);
+});
