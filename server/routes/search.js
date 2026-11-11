@@ -1604,10 +1604,13 @@ async function handleSearch(req, res, signal) {
   // Not logged to ai_search_logs — an empty query never reaches retrieval
   // or the provider, so there's no operation to report telemetry for
   // (existing callers/tests rely on this guard touching the DB at all).
-  const question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
+  let question = typeof req.body.question === 'string' ? req.body.question.trim() : '';
   if (!question) return res.status(400).json({ error: '질문을 입력해 주세요.' });
   if (question.length > MAX_QUESTION_CHARS) return res.status(400).json({ error: `질문은 ${MAX_QUESTION_CHARS}자 이내로 입력해 주세요.` });
   const fingerprint = questionFingerprint(question);
+  // near-miss of a known term (typo / mistaken word): suggest it in the answer and search for the real concept
+  const termGuess = glossary.didYouMean(question);
+  if (termGuess.length) question = glossary.correctQuestion(question, termGuess);
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
@@ -1715,13 +1718,13 @@ async function handleSearch(req, res, signal) {
   if (!candidates.length) {
     const httpStatus = 200;
     const cards = glossary.matchCards(question);
-    if (cards.length) {
+    if (cards.length || termGuess.length) {
       // nothing archived matches, but the question asks what a known term is: answer from the reviewed cards (no model call)
       await recordSearchTelemetry({
         requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
         candidateCount: 0, sourceCount: 0, provider: 'glossary', isFollowup, questionFingerprint: fingerprint, streamed: streaming,
       });
-      return res.status(httpStatus).json({ answer: glossary.cardsAnswer(cards), insufficient: false, glossary: true, sources: [] });
+      return res.status(httpStatus).json({ answer: (termGuess.length ? `${glossary.dymLead(termGuess)}\n\n` : '') + (cards.length ? glossary.cardsAnswer(cards) : glossary.cardsAnswer([])).replace(/^# 기초 지식\n\n/, ''), insufficient: false, glossary: true, sources: [] });
     }
     await recordSearchTelemetry({
       requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
@@ -1842,7 +1845,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${oilScope === 'edible' ? oilTaxonomy.CLASSIFICATION_NOTE : ''}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${opportunityMode && oilStats ? oilMarket.evidenceBlock(oilStats) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${glossary.dymPromptBlock(termGuess)}${oilScope === 'edible' ? oilTaxonomy.CLASSIFICATION_NOTE : ''}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${opportunityMode && oilStats ? oilMarket.evidenceBlock(oilStats) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;

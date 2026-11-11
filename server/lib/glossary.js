@@ -61,4 +61,84 @@ function cardsPromptBlock(cards) {
   return `\n\n[기초 지식 카드 — "자료만 사용" 규칙의 예외] 아래는 편집 검수된 정의이다. 답변 맨 앞에 "# 기초 지식" 섹션을 두고 카드 내용만 풀어 쓴다(카드에 없는 내용 추가 금지, [N] 인용 불필요, 수치·날짜·기업 사실은 쓰지 않는다). 이어서 "# 아카이브 근거" 섹션에는 자료로 확인되는 내용만 [N] 인용과 함께 쓴다. 카드와 자료가 어긋나면 자료를 따르고 그 사실을 한 줄로 밝힌다.\n${cards.map((c) => `- ${c.name}: ${c.def}`).join('\n')}`;
 }
 
-module.exports = { CARDS, matchCards, cardsAnswer, cardsPromptBlock };
+// ---- "~을 찾으시나요?" : typo / mistaken-term suggestion --------------------------------------------------------------------
+// A question word that is not a known term but is a near miss of one (Hangul compared by jamo, so "대투유"/"팜오일유" differ by a jamo or two,
+// Latin by Damerau edit distance) gets a suggestion; the answer then opens with "'X'를 찾으시나요?" and explains the concept from its card.
+const HANGUL_START = 0xac00;
+const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const JUNG = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
+const JONG = ['', ...'ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ'];
+function jamo(str) {
+  let out = '';
+  for (const ch of str) {
+    const c = ch.codePointAt(0) - HANGUL_START;
+    if (c < 0 || c > 11171) { out += ch; continue; }
+    out += CHO[Math.floor(c / 588)] + JUNG[Math.floor((c % 588) / 28)] + JONG[c % 28];
+  }
+  return out;
+}
+// Damerau-Levenshtein (adjacent swap = 1 edit)
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+const PARTICLE = /(이란|란|이|가|은|는|을|를|의|에|도|로|과|와|이나|나|요|인가요|인가|이에요|예요|이야|야)$/;
+// plain-string terms only (regex cards are phrase patterns), long enough that a near miss means something
+const FUZZY_TERMS = CARDS.flatMap((c) => c.terms.filter((t) => typeof t === 'string' && !/\s/.test(t) && t.length >= 3).map((t) => ({ card: c, term: t })));
+
+function nearTerm(word, cue) {
+  const w = word.toLowerCase();
+  const latin = /^[a-z0-9]+$/.test(w);
+  let best = null;
+  for (const { card, term } of FUZZY_TERMS) {
+    if (latin !== /^[a-z0-9]+$/.test(term)) continue;
+    if (latin) {
+      if (w.length < 3 || (w.length === 3 && !cue)) continue;
+      const max = w.length >= 7 ? 2 : 1;
+      if (/\d/.test(term) !== /\d/.test(w)) continue; // B30 vs B40-style neighbours are other terms, not typos
+      const dist = editDistance(w, term);
+      if (dist >= 1 && dist <= max && Math.abs(w.length - term.length) <= max && (!best || dist < best.dist)) best = { card, term, dist };
+    } else {
+      if ([...w].length < 3) continue;
+      const a = jamo(w); const b = jamo(term);
+      const dist = editDistance(a, b);
+      if (dist >= 1 && dist <= 2 && dist / Math.max(a.length, b.length) <= 0.2 && (!best || dist < best.dist)) best = { card, term, dist };
+    }
+  }
+  return best;
+}
+
+// [{ typed, term, card }] (at most 2): words of the question that are not known terms but are near misses of one.
+function didYouMean(question) {
+  const q = String(question || '').toLowerCase();
+  const cue = DEFINITION_CUE.test(q);
+  const out = [];
+  const seen = new Set();
+  for (const raw of q.match(/[a-z0-9]+|[가-힣]+/g) || []) {
+    for (const w of new Set([raw, raw.replace(PARTICLE, '')])) {
+      if (!w || seen.has(w)) continue;
+      if (FUZZY_TERMS.some(({ term }) => w.includes(term) || (term.includes(w) && w.length >= 3 && /^[가-힣]/.test(w)))) { seen.add(w); continue; } // already a known term (or a fragment of one)
+      const hit = nearTerm(w, cue);
+      if (hit && !out.some((o) => o.card.id === hit.card.id)) { out.push({ typed: w, term: hit.term, card: hit.card }); seen.add(w); }
+      if (out.length >= 2) return out;
+    }
+  }
+  return out;
+}
+
+// The question with each typed word swapped for the term it was taken to mean (used for retrieval, so the archive is searched for the real concept).
+const correctQuestion = (question, found) => found.reduce((q, f) => q.replace(new RegExp(f.typed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), f.term), String(question || ''));
+
+const dymLead = (found) => found.map((f) => `**'${f.card.name}'${/[가-힣]$/.test(f.card.name.replace(/\([^)]*\)$/, '')) && (f.card.name.replace(/\([^)]*\)$/, '').slice(-1).charCodeAt(0) - 0xac00) % 28 ? '을' : '를'} 찾으시나요?** 입력하신 '${f.typed}'와(과) 비슷한 용어입니다. ${f.card.def}`).join('\n\n');
+
+function dymPromptBlock(found) {
+  if (!found.length) return '';
+  return `\n\n[용어 보정] 질문의 일부 단어가 아래 용어의 오타·착각으로 보인다. 답변 맨 앞에 아래 문장을 그대로 두고(문구 변경 금지), 그 아래에 자료 기반 답변을 이어 쓴다. 정의 문장에는 수치·날짜를 덧붙이지 않는다.\n${dymLead(found)}`;
+}
+
+module.exports = { CARDS, matchCards, cardsAnswer, cardsPromptBlock, didYouMean, correctQuestion, dymLead, dymPromptBlock };
