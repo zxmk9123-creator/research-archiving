@@ -113,11 +113,18 @@ const CERTAINTY_CLAIMS = [
   },
 ];
 
+// A claim phrase inside a doubtful or negated clause ("공급 확보에 차질", "확보가 불확실") is not an assertion that something was secured.
+const DOUBT_AROUND = /(차질|불확실|불투명|우려|가능성|어렵|난항|지연|불발|무산|부족|위협|리스크|못\s?(?:했|하|한)|않|없|중단|if |may |could |risk|uncertain|doubt|fail|unable)/iu;
+
 function assertSupportedCertainty(claimText, sourceText, itemId) {
   for (const rule of CERTAINTY_CLAIMS) {
-    if (rule.claim.test(claimText) && !rule.evidence.test(sourceText)) {
-      throw new Error(`unsupported_certainty_${rule.name}${itemId ? `_item_${itemId}` : ''}`);
-    }
+    const m = rule.claim.exec(claimText);
+    if (!m || rule.evidence.test(sourceText)) continue;
+    const ctx = claimText.slice(Math.max(0, m.index - 12), m.index + m[0].length + 24);
+    if (DOUBT_AROUND.test(ctx)) continue;
+    const err = new Error(`unsupported_certainty_${rule.name}${itemId ? `_item_${itemId}` : ''}`);
+    err.snippet = ctx.replace(/\s+/g, ' ').slice(0, 160);
+    throw err;
   }
 }
 
@@ -409,7 +416,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       const budgetSpent = !exhausted && Boolean(callBudget) && callBudget.used >= callBudget.max;
       if (budgetSpent) callBudget.exhausted = true;
       const final = exhausted || outOfTime || budgetSpent;
-      const message = String(err.message || 'generation_failed').slice(0, 480);
+      const message = String(err.message || 'generation_failed').slice(0, 300) + (err.snippet ? ` | text: "${err.snippet}"` : '');
       console.error(`daily_brief attempt failed date=${briefDate} retry=${failureCount - 1} exhausted=${exhausted} out_of_time=${outOfTime} delay_ms=${delayMs} error=${message}`);
       await pool.query(
         'INSERT INTO daily_brief_attempts (brief_date, failure_count, exhausted, error) VALUES ($1, $2, $3, $4)',
@@ -424,7 +431,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
           WHERE brief_date = $1 AND status = 'generating'`,
         [briefDate, budgetSpent ? `call_budget_exhausted: ${message}`.slice(0, 500) : outOfTime ? `retry_deferred: ${message}`.slice(0, 500) : message, final]
       ).catch((updateErr) => console.error(`daily_brief retry state update failed: ${updateErr.message}`));
-      if (exhausted) await publishFallbackBrief(briefDate, message).catch((e) => console.error(`daily_brief fallback failed: ${e.message}`));
+      if (final) await publishFallbackBrief(briefDate, message).catch((e) => console.error(`daily_brief fallback failed: ${e.message}`));
       if (final) return;
       repairHint = repairHint || (/not_korean_output/.test(message) ? 'korean' : /brief_truncated_by_max_tokens/.test(message) ? 'short' : /brief_placeholder_output|not valid JSON|invalid_brief_json/.test(message)); // a cut-off answer is retried with less input and the short-answer hint
       await sleep(delayMs);
@@ -612,4 +619,4 @@ async function getLatestDailyBrief(now = new Date()) {
   return brief;
 }
 
-module.exports = { publishFallbackBrief, softenForecast, countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, runWithCallBudget, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };
+module.exports = { assertSupportedCertainty, publishFallbackBrief, softenForecast, countEvidenceCandidates, ensureSummaryCoversDevelopments, runWithDeadline, runWithCallBudget, buildDailyBrief, PLACEHOLDER_OUTPUT_RE, MAX_AUTO_DAILY_ATTEMPTS, GENERATION_STALE_AFTER_MINUTES, validateBrief, compactSentence, ensureDailyBrief, getBriefState, kstDate, parseJsonObject, pendingBriefFor, queueDailyBriefGeneration, requestDailyBriefRegeneration, getLatestDailyBrief };

@@ -65,7 +65,7 @@ test('retries do not outlive the invocation: when the next delay + attempt canno
     assert.equal(h.state.updates.length, 1);
     assert.equal(h.state.updates[0].status, 'failed', 'released for the next cron call, not left generating');
     assert.match(h.state.updates[0].error, /^retry_deferred: invalid_brief_json/);
-    assert.equal(h.state.ready, false);
+    assert.equal(h.state.ready, true, 'never blank: the model-free headline is shown while the next call retries');
   } finally { h.restore(); }
 });
 
@@ -191,7 +191,7 @@ test('call budget: without a budget the guard makes its full 6 attempts (unchang
     const last = h.state.updates[h.state.updates.length - 1];
     assert.equal(last.status, 'failed', 'released for a person/next cycle, not left generating');
     assert.match(last.error, /^call_budget_exhausted: AI provider returned 503/);
-    assert.equal(h.state.ready, false, 'no false ready');
+    assert.equal(h.state.ready, true, 'never blank: the model-free headline is shown');
   } finally { h.restore(); }
 });
 
@@ -234,7 +234,7 @@ test('time budget is enforced IN FLIGHT: a budgeted attempt that outlives the de
     assert.match(last.error, /attempt_exceeded_time_budget/);
     assert.equal(budget.timedOut, true);
     await new Promise((r) => setTimeout(r, 700)); // the abandoned call finishes now
-    assert.equal(h.state.ready, false, 'a late answer must not publish after the budget ended');
+    assert.equal(h.state.ready, true, 'only the model-free headline is shown; a late model answer must not publish after the budget ended');
   } finally { h.restore(); }
 });
 

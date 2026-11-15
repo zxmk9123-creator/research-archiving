@@ -23,3 +23,11 @@ test('callProvider keeps its defaults when no override is given', async () => {
     assert.equal(seen[0].max_tokens, 6000);
   });
 });
+
+test('certainty guard: a claim phrase inside a doubtful clause is not an unsupported assertion, a plain one still is, and the failing text is kept', () => {
+  const { assertSupportedCertainty } = require('../server/lib/dailyBrief');
+  assert.doesNotThrow(() => assertSupportedCertainty('공장 가동 중단으로 식용유 공급 확보에 차질이 예상된다', '공장이 가동을 멈췄다', 4557));
+  assert.doesNotThrow(() => assertSupportedCertainty('장기 공급 확보가 불확실해졌다', '기사 본문', 1));
+  assert.throws(() => assertSupportedCertainty('A사는 장기 공급을 확보했다', '기사 본문', 7), (e) => /unsupported_certainty_supply_commitment_item_7/.test(e.message) && /공급을 확보/.test(e.snippet));
+  assert.doesNotThrow(() => assertSupportedCertainty('A사는 장기 공급을 확보했다', 'A사가 공급 계약을 체결했다', 7));
+});
