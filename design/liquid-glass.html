@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oil&amp;Fat Research Center — Liquid Glass</title>
+<style>
+:root{
+  --text:#14202e; --text2:#46566a; --text3:#6d7c90;
+  --action:#2f7bff; --action2:#6a5cff; --ok:#12a150; --warn:#c98a00; --bad:#e0443e;
+  --glass:rgba(255,255,255,.42); --glass-strong:rgba(255,255,255,.62); --glass-line:rgba(255,255,255,.75);
+  --shadow:0 10px 30px rgba(34,60,110,.14), 0 2px 6px rgba(34,60,110,.08);
+  --blur:blur(22px) saturate(1.8);
+  --r-lg:26px; --r-md:18px; --r-sm:12px;
+  --bg1:#dfe9ff; --bg2:#ffe3f1; --bg3:#d9f5ee;
+}
+@media (prefers-color-scheme:dark){:root{
+  --text:#eef3fb; --text2:#b4c0d3; --text3:#8896ad;
+  --glass:rgba(30,40,64,.42); --glass-strong:rgba(40,52,82,.6); --glass-line:rgba(255,255,255,.2);
+  --shadow:0 14px 36px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.3);
+  --bg1:#0e1730; --bg2:#2a1236; --bg3:#07272a;
+}}
+*{box-sizing:border-box;margin:0}
+html{-webkit-text-size-adjust:100%}
+body{font:15px/1.6 "Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:var(--text);min-height:100vh;background:var(--bg1);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+/* living backdrop: soft colour fields that glass refracts */
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;background:linear-gradient(135deg,var(--bg1),var(--bg2) 55%,var(--bg3))}
+.bg i{position:absolute;border-radius:50%;filter:blur(60px);opacity:.75;animation:drift 22s ease-in-out infinite alternate}
+.bg i:nth-child(1){width:46vw;height:46vw;left:-8vw;top:-10vw;background:#6aa7ff}
+.bg i:nth-child(2){width:38vw;height:38vw;right:-6vw;top:12vh;background:#ff8fc7;animation-duration:27s}
+.bg i:nth-child(3){width:42vw;height:42vw;left:30vw;bottom:-18vw;background:#5fe0c1;animation-duration:31s}
+.bg i:nth-child(4){width:24vw;height:24vw;left:8vw;bottom:8vh;background:#ffd36a;animation-duration:24s;opacity:.55}
+@keyframes drift{to{transform:translate3d(6vw,5vh,0) scale(1.12)}}
+@media (prefers-reduced-motion:reduce){.bg i{animation:none}}
+
+/* the glass material */
+.glass{position:relative;background:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border-radius:var(--r-lg);box-shadow:var(--shadow),inset 0 1px 0 var(--glass-line),inset 0 -1px 0 rgba(255,255,255,.12)}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;
+  background:linear-gradient(145deg,rgba(255,255,255,.95),rgba(255,255,255,.08) 38%,rgba(255,255,255,0) 60%,rgba(255,255,255,.55));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.8}
+@supports not (backdrop-filter:blur(1px)){.glass{background:var(--glass-strong)}}
+
+/* floating topbar */
+.topbar{position:sticky;top:14px;z-index:20;margin:14px auto 0;width:min(1180px,calc(100% - 28px));display:flex;align-items:center;gap:14px;padding:8px 10px 8px 16px;border-radius:999px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.brand svg{width:24px;height:24px}
+.nav{display:flex;gap:2px;margin-left:6px;overflow-x:auto;scrollbar-width:none;flex:1}
+.nav::-webkit-scrollbar{display:none}
+.nav a{padding:7px 14px;border-radius:999px;color:var(--text2);text-decoration:none;font-weight:600;font-size:14px;white-space:nowrap;transition:background .2s,color .2s}
+.nav a:hover{background:rgba(255,255,255,.35);color:var(--text)}
+.nav a.on{color:#fff;background:linear-gradient(135deg,var(--action),var(--action2));box-shadow:0 4px 14px rgba(47,123,255,.4),inset 0 1px 0 rgba(255,255,255,.5)}
+.nav .sep{width:1px;background:var(--glass-line);margin:6px 8px;flex:none}
+.guide{border:0;font:inherit;font-weight:600;font-size:13px;color:var(--text);padding:8px 14px;border-radius:999px;background:var(--glass-strong);cursor:pointer;box-shadow:inset 0 1px 0 var(--glass-line);white-space:nowrap}
+.status{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text2);padding:7px 12px;border-radius:999px;background:var(--glass-strong);white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(18,161,80,.18)}
+
+main{width:min(1180px,calc(100% - 28px));margin:26px auto 80px}
+.view{display:none;animation:in .35s ease both}.view.on{display:block}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+h1{font-size:clamp(26px,4vw,38px);letter-spacing:-.03em;line-height:1.2;font-weight:800}
+.lede{color:var(--text2);margin-top:8px;max-width:62ch}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--action)}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1.6fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.g2,.g3,.g4{grid-template-columns:1fr}.topbar{border-radius:26px;flex-wrap:wrap}.status,.guide{display:none}.nav{order:3;flex-basis:100%;margin:0}.hero{padding:22px 20px}}
+.card{padding:20px 22px;border-radius:var(--r-lg)}
+.card h2{font-size:17px;letter-spacing:-.01em;margin-bottom:10px}
+.hero{padding:30px 32px;margin-bottom:16px}
+
+/* AI search */
+.ask{display:flex;gap:10px;align-items:center;margin-top:20px;padding:8px 8px 8px 20px;border-radius:999px;background:var(--glass-strong);box-shadow:inset 0 1px 0 var(--glass-line),0 6px 18px rgba(34,60,110,.1)}
+.ask input{flex:1;border:0;background:transparent;font:inherit;color:var(--text);outline:0;min-width:0}
+.ask input::placeholder{color:var(--text3)}
+.btn{border:0;font:inherit;font-weight:700;color:#fff;padding:10px 20px;border-radius:999px;cursor:pointer;background:linear-gradient(135deg,var(--action),var(--action2));box-shadow:0 6px 16px rgba(47,123,255,.38),inset 0 1px 0 rgba(255,255,255,.5);transition:transform .15s,filter .15s}
+.btn:hover{filter:brightness(1.07);transform:translateY(-1px)}.btn:active{transform:scale(.97)}
+.btn.ghost{color:var(--text);background:var(--glass-strong);box-shadow:inset 0 1px 0 var(--glass-line)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{font-size:13px;font-weight:600;padding:6px 13px;border-radius:999px;background:var(--glass);color:var(--text2);box-shadow:inset 0 1px 0 var(--glass-line);cursor:pointer;border:0;font-family:inherit}
+.chip:hover,.chip.on{color:var(--text);background:var(--glass-strong)}
+.answer{margin-top:16px;padding:16px 18px;border-radius:var(--r-md);background:var(--glass-strong);display:none;box-shadow:inset 0 1px 0 var(--glass-line)}
+.answer.on{display:block;animation:in .3s ease both}
+.answer b.q{color:var(--action)}
+
+/* items */
+.item{display:flex;gap:14px;padding:14px 4px;border-bottom:1px solid rgba(255,255,255,.35)}
+.item:last-child{border:0}
+.tag{flex:none;align-self:flex-start;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;color:#fff}
+.t-news{background:#2f7bff}.t-report{background:#12a150}.t-stat{background:#7c5cff}.t-reg{background:#e0443e}
+.item h3{font-size:15px;line-height:1.45;letter-spacing:-.01em}
+.meta{font-size:12.5px;color:var(--text3);margin-top:3px}
+.brief h3{font-size:19px;letter-spacing:-.02em;margin:6px 0 8px}
+.brief ul{padding-left:18px;color:var(--text2)}
+.brief li{margin:4px 0}
+.kpi{padding:18px 20px}.kpi .n{font-size:30px;font-weight:800;letter-spacing:-.03em}.kpi .l{font-size:13px;color:var(--text2)}
+.bar{height:8px;border-radius:99px;background:rgba(255,255,255,.4);overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--action),var(--action2))}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0}
+.select{font:inherit;color:var(--text);padding:9px 14px;border-radius:999px;border:0;background:var(--glass-strong);box-shadow:inset 0 1px 0 var(--glass-line);outline:0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-size:12px;text-align:left;color:var(--text3);font-weight:700;letter-spacing:.04em;padding:8px 10px}
+td{padding:11px 10px;border-top:1px solid rgba(255,255,255,.35)}
+.pill{font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px;background:rgba(18,161,80,.16);color:var(--ok)}
+.pill.w{background:rgba(201,138,0,.18);color:var(--warn)}.pill.b{background:rgba(224,68,62,.16);color:var(--bad)}
+.pager{display:flex;justify-content:center;gap:8px;margin-top:18px}
+.spark{display:flex;align-items:flex-end;gap:5px;height:110px;margin-top:10px}
+.spark i{flex:1;border-radius:8px 8px 3px 3px;background:linear-gradient(180deg,var(--action),var(--action2));opacity:.85}
+.note{font-size:12.5px;color:var(--text3);margin-top:22px;text-align:center}
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+<header class="topbar glass">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6aa7ff"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><path d="M12 2.5c3.6 4.6 6.5 7.8 6.5 11.4a6.5 6.5 0 0 1-13 0C5.5 10.3 8.4 7.100 12 2.500z" fill="url(#g)"/><path d="M9 14.500a3.200 3.200 0 0 0 3 2.700" stroke="#fff" stroke-opacity=".8" stroke-width="1.500" fill="none" stroke-linecap="round"/></svg>
+    Oil&amp;Fat Research Center
+  </div>
+  <nav class="nav" id="nav">
+    <a href="#/home" data-r="home">Home</a><a href="#/headlines" data-r="headlines">헤드라인</a><a href="#/archive" data-r="archive">자료</a><a href="#/reference" data-r="reference">레퍼런스</a><a href="#/trade" data-r="trade">무역통계</a>
+    <span class="sep"></span>
+    <a href="#/sources" data-r="sources">Sources</a><a href="#/review" data-r="review">Review</a><a href="#/ops" data-r="ops">운영 현황</a>
+  </nav>
+  <div class="status"><span class="dot"></span>오늘 수집 완료</div>
+  <button class="guide" type="button">사용 가이드</button>
+</header>
+
+<main>
+<!-- HOME -->
+<section class="view" id="v-home">
+  <div class="hero glass">
+    <div class="eyebrow">AI 리서치 검색</div>
+    <h1>유지 시장, 근거와 함께 물어보세요</h1>
+    <p class="lede">아카이빙된 자료만 근거로 답합니다. 오타가 있어도 비슷한 용어를 찾아 개념부터 설명해 드려요.</p>
+    <form class="ask" id="ask"><input id="q" placeholder="예) 대투유가 뭐야?" autocomplete="off" aria-label="질문"><button class="btn" type="submit">질문하기</button></form>
+    <div class="chips"><button class="chip" data-q="HVO와 FAME의 차이는?">HVO와 FAME의 차이</button><button class="chip" data-q="대투유가 뭐야?">대투유가 뭐야?</button><button class="chip" data-q="팜유 시황 요약">팜유 시황 요약</button></div>
+    <div class="answer" id="ans"></div>
+  </div>
+  <div class="grid g2">
+    <div class="card glass brief">
+      <div class="eyebrow">오늘의 헤드라인 브리프</div>
+      <h3>(샘플) 주요 유지 시장 동향 한눈에 보기</h3>
+      <ul><li>헤드 메시지 — 오늘 수집된 자료에서 가장 중요한 흐름 한 줄</li><li>핵심 내용 — 근거가 되는 자료 3~5건 요약</li><li>인사이트 — 실무자가 챙겨볼 시사점</li></ul>
+      <div class="chips"><span class="chip">팜유</span><span class="chip">대두유</span><span class="chip">바이오연료</span></div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card glass kpi"><div class="n">88</div><div class="l">오늘 점검한 수집 소스</div><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="card glass kpi"><div class="n">+24</div><div class="l">신규 아카이빙 자료 (샘플)</div><div class="bar"><i style="width:64%"></i></div></div>
+    </div>
+  </div>
+  <div class="card glass" style="margin-top:16px"><h2>최근 아카이빙</h2><div id="recent"></div></div>
+</section>
+
+<!-- HEADLINES -->
+<section class="view" id="v-headlines">
+  <div class="eyebrow">Headlines</div><h1>헤드라인</h1><p class="lede">날짜별로 생성된 일일 브리프를 살펴봅니다.</p>
+  <div class="grid" style="margin-top:20px" id="hl"></div>
+</section>
+
+<!-- ARCHIVE -->
+<section class="view" id="v-archive">
+  <div class="eyebrow">Archive</div><h1>자료</h1><p class="lede">뉴스·리포트·통계·규제 자료를 한곳에서 필터링합니다.</p>
+  <div class="toolbar"><div class="ask" style="flex:1;min-width:220px;margin:0"><input placeholder="제목·키워드 검색" aria-label="검색"></div>
+    <select class="select"><option>전체 유형</option><option>뉴스</option><option>리포트</option><option>통계</option><option>규제</option></select>
+    <select class="select"><option>전체 품목</option><option>팜유</option><option>대두유</option><option>유채씨유</option></select></div>
+  <div class="card glass" id="arch"></div>
+  <div class="pager"><button class="btn ghost">이전</button><button class="btn ghost">다음</button></div>
+</section>
+
+<!-- REFERENCE -->
+<section class="view" id="v-reference">
+  <div class="eyebrow">Reference</div><h1>레퍼런스</h1><p class="lede">용어 카드와 기관·규제 자료를 정리했습니다.</p>
+  <div class="grid g3" style="margin-top:20px">
+    <div class="card glass"><h2>HVO(재생디젤)</h2><p class="lede" style="margin:0">유지를 수소로 처리해 만든 파라핀계 디젤. FAME과 달리 혼합 제약이 적습니다.</p></div>
+    <div class="card glass"><h2>바이오디젤(FAME)</h2><p class="lede" style="margin:0">유지를 메탄올과 반응시켜 만든 지방산 메틸에스테르.</p></div>
+    <div class="card glass"><h2>SAF</h2><p class="lede" style="margin:0">폐식용유·지방 등 지속가능한 원료로 만든 항공유.</p></div>
+    <div class="card glass"><h2>EU RED</h2><p class="lede" style="margin:0">운송 연료 등의 재생에너지 사용 목표를 정한 EU 지침.</p></div>
+    <div class="card glass"><h2>RSPO</h2><p class="lede" style="margin:0">지속가능 팜유 인증 협의체이자 인증 제도.</p></div>
+    <div class="card glass"><h2>혼합의무</h2><p class="lede" style="margin:0">화석연료에 일정 비율 이상 바이오연료를 섞도록 하는 제도.</p></div>
+  </div>
+</section>
+
+<!-- TRADE -->
+<section class="view" id="v-trade">
+  <div class="eyebrow">Trade Statistics</div><h1>무역통계</h1><p class="lede">UN Comtrade 기준 수출입 통계를 조회합니다. (샘플 화면 — 수치는 예시입니다)</p>
+  <div class="toolbar"><select class="select"><option>수출국: 전체 국가</option></select><select class="select"><option>수입국: 전체 국가</option></select><select class="select"><option>팜유 (1511)</option><option>대두유 (1507)</option></select><select class="select"><option>월</option><option>분기</option><option>연</option></select><button class="btn">조회</button></div>
+  <div class="grid g2"><div class="card glass"><h2>수출량 추이 (예시)</h2><div class="spark" id="spark"></div><p class="meta">신고한 전체 수출(모든 상대국 합계) 기준입니다.</p></div>
+  <div class="card glass"><h2>안내</h2><p class="lede" style="margin:0">일부 기간을 받지 못한 경우 달력 버튼으로 추가 기간을 조회할 수 있어요. 로딩에는 시간이 걸릴 수 있습니다.</p><div class="chips"><button class="chip">📅 추가 기간 조회</button></div></div></div>
+</section>
+
+<!-- SOURCES -->
+<section class="view" id="v-sources">
+  <div class="eyebrow">Sources</div><h1>Sources</h1><p class="lede">수집 소스의 상태와 마지막 수집 결과입니다. (샘플)</p>
+  <div class="card glass" style="margin-top:20px"><table><thead><tr><th>소스</th><th>방식</th><th>마지막 수집</th><th>상태</th></tr></thead><tbody>
+  <tr><td>Source A</td><td>크롤</td><td>오늘 07:12</td><td><span class="pill">정상</span></td></tr>
+  <tr><td>Source B</td><td>RSS</td><td>오늘 07:15</td><td><span class="pill">정상</span></td></tr>
+  <tr><td>Source C</td><td>크롤</td><td>어제 07:40</td><td><span class="pill w">지연</span></td></tr>
+  <tr><td>Source D</td><td>API</td><td>3일 전</td><td><span class="pill b">오류</span></td></tr></tbody></table></div>
+</section>
+
+<!-- REVIEW -->
+<section class="view" id="v-review">
+  <div class="eyebrow">Review</div><h1>Review</h1><p class="lede">검수 대기 자료를 확인하고 승인합니다. (샘플)</p>
+  <div class="grid" style="margin-top:20px">
+    <div class="card glass"><span class="tag t-news">뉴스</span><h2 style="margin-top:10px">검수 대기 자료 제목 예시 1</h2><p class="meta">날짜 확인 필요 · 품목 분류 제안: 팜유</p><div class="chips"><button class="btn">승인</button><button class="btn ghost">보류</button></div></div>
+    <div class="card glass"><span class="tag t-report">리포트</span><h2 style="margin-top:10px">검수 대기 자료 제목 예시 2</h2><p class="meta">수치 원문 확인 필요</p><div class="chips"><button class="btn">승인</button><button class="btn ghost">보류</button></div></div>
+  </div>
+</section>
+
+<!-- OPS -->
+<section class="view" id="v-ops">
+  <div class="eyebrow">Operations</div><h1>운영 현황</h1><p class="lede">수집 파이프라인과 헤드라인 생성 상태입니다. (샘플)</p>
+  <div class="grid g4" style="margin-top:20px">
+    <div class="card glass kpi"><div class="n">88/88</div><div class="l">수집 소스 진행</div><div class="bar"><i style="width:100%"></i></div></div>
+    <div class="card glass kpi"><div class="n">완료</div><div class="l">오늘 브리프</div><div class="bar"><i style="width:100%"></i></div></div>
+    <div class="card glass kpi"><div class="n">2</div><div class="l">실패 소스</div><div class="bar"><i style="width:8%;background:linear-gradient(90deg,#ffb04a,#e0443e)"></i></div></div>
+    <div class="card glass kpi"><div class="n">정상</div><div class="l">외부 호출</div><div class="bar"><i style="width:92%"></i></div></div>
+  </div>
+  <div class="card glass" style="margin-top:16px"><h2>최근 이벤트</h2><table><tbody><tr><td>07:08</td><td>수집 시작 (분산 실행)</td><td><span class="pill">정상</span></td></tr><tr><td>07:11</td><td>수집 완료 기록</td><td><span class="pill">정상</span></td></tr><tr><td>07:12</td><td>헤드라인 생성</td><td><span class="pill">정상</span></td></tr></tbody></table></div>
+</section>
+<p class="note">디자인 시안 — 모든 데이터는 예시입니다. Liquid Glass 스타일.</p>
+</main>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const items=[['news','뉴스','팜유 시장 관련 기사 제목 예시','Source A · 오늘'],['report','리포트','대두 크러싱 동향 리포트 예시','Source B · 오늘'],['stat','통계','주요국 유지 수출입 통계 업데이트 예시','Source C · 어제'],['reg','규제','바이오연료 혼합 의무 관련 규제 소식 예시','Source D · 어제'],['news','뉴스','해바라기유 공급 관련 기사 예시','Source A · 2일 전']];
+const row=([k,l,t,m])=>`<div class="item"><span class="tag t-${k}">${l}</span><div><h3>${t}</h3><div class="meta">${m}</div></div></div>`;
+$('#recent').innerHTML=items.slice(0,4).map(row).join('');
+$('#arch').innerHTML=items.concat(items).map(row).join('');
+$('#hl').innerHTML=['오늘','어제','2일 전'].map(d=>`<div class="card glass brief"><div class="eyebrow">${d}</div><h3>(샘플) 일일 브리프 헤드 메시지</h3><ul><li>핵심 내용 요약 1</li><li>핵심 내용 요약 2</li></ul></div>`).join('');
+$('#spark').innerHTML=[40,55,48,62,70,58,76,84,72,90,80,96].map(h=>`<i style="height:${h}%"></i>`).join('');
+// routing
+function route(){const r=(location.hash.match(/#\/(\w+)/)||[])[1]||'home';document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+r));document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on',a.dataset.r===r));window.scrollTo(0,0)}
+addEventListener('hashchange',route);route();
+// "did you mean" demo
+const dym={'대투유':['대두유','대두(콩)를 착유해 얻는 식물성 유지입니다. 착유 부산물로 사료용 대두박이 함께 생산됩니다.'],'hov':['HVO(재생디젤)','유지를 수소로 처리해 만든 파라핀계 디젤입니다.']};
+function ask(q){const a=$('#ans');const k=Object.keys(dym).find(x=>q.toLowerCase().includes(x));a.innerHTML=k?`<b class="q">'${dym[k][0]}'을(를) 찾으시나요?</b> 입력하신 '${k}'와(과) 비슷한 용어입니다. ${dym[k][1]}<div class="meta">샘플 응답 — 실제 서비스에서는 아카이브 자료 기반 답변이 이어집니다.</div>`:`샘플 화면입니다. 실제 서비스에서는 <b>“${q.replace(/</g,'&lt;')}”</b>에 대해 아카이브 자료를 근거로 답변합니다.`;a.classList.add('on')}
+$('#ask').addEventListener('submit',e=>{e.preventDefault();const q=$('#q').value.trim();if(q)ask(q)});
+document.querySelectorAll('.chip[data-q]').forEach(c=>c.addEventListener('click',()=>{$('#q').value=c.dataset.q;ask(c.dataset.q)}));
+</script>
+</body>
+</html>
