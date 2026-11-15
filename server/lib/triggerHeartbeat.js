@@ -24,8 +24,8 @@ function classifyTrigger(userAgent = '', sourceHeader = '') {
   return 'unknown';
 }
 
-async function recordTrigger(userAgent, sourceHeader, now = new Date()) {
-  const via = classifyTrigger(userAgent, sourceHeader);
+async function recordTrigger(userAgent, sourceHeader, now = new Date(), viaOverride = null) {
+  const via = viaOverride || classifyTrigger(userAgent, sourceHeader);
   const at = now.toISOString();
   const day = kstDayOf(now.getTime());
   return mutateJobState(JOB, (doc) => {
@@ -57,6 +57,7 @@ function triggerIncidents(hb, { now = Date.now() } = {}) {
     else if (rec.unknown && rec.unknown.n > 0) out.push({ kind: 'telemetry', key: `github_unattributed:${day}`, text: `${rec.unknown.n} cron call(s) today have no trusted source; GitHub delivery cannot be confirmed (workflow must send X-Trigger-Source)` });
     else out.push({ kind: 'missed', key: `github_morning_missed:${day}`, text: `GitHub scheduled trigger missed: no call by 07:45 KST (vercel cron calls: ${(rec.vercel && rec.vercel.n) || 0})` });
   }
+  if (rec.unauthorized && rec.unauthorized.n > 0) out.push({ kind: 'telemetry', key: `cron_unauthorized:${day}`, text: `${rec.unauthorized.n} cron call(s) today were rejected with 401: a scheduler is calling /api/cron/daily without the correct Authorization: Bearer CRON_SECRET header` });
   const last = hb.last && hb.last.github;
   if (last && now - new Date(last).getTime() > MAX_GAP_MS) {
     out.push({ kind: 'missed', key: `github_gap:${last}`, text: `GitHub scheduled trigger silent for ${Math.round((now - new Date(last).getTime()) / 3600000)} h (last ${last})` });

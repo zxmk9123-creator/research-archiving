@@ -139,3 +139,24 @@ test('maybeAlertLate: unfinished collection from 09:30 KST is reported once per 
   assert.equal(sent[0].key, 'late-collection:2026-11-09');
   assert.match(sent[0].text, /63\/88/);
 });
+
+test('needsHeadlineKick: collection done + headline failed / abandoned / upgradable inside the window, nothing otherwise', () => {
+  const { needsHeadlineKick } = require('../server/lib/pipelineGuardian');
+  const done = { completedToday: true }; const now = kst(7, 40);
+  const row = (o) => ({ status: 'failed', updatedAt: new Date(now.getTime() - 120000), attempts: 2, degraded: false, ...o });
+  assert.equal(needsHeadlineKick(done, row(), now), true);
+  assert.equal(needsHeadlineKick(done, row({ updatedAt: new Date(now.getTime() - 5000) }), now), false, 'just failed: the running call may still retry');
+  assert.equal(needsHeadlineKick(done, row({ status: 'generating', updatedAt: new Date(now.getTime() - 60000) }), now), false);
+  assert.equal(needsHeadlineKick(done, row({ status: 'generating', updatedAt: new Date(now.getTime() - 7 * 60000) }), now), true);
+  assert.equal(needsHeadlineKick(done, row({ status: 'ready', degraded: true, updatedAt: new Date(now.getTime() - 32 * 60000) }), now), true);
+  assert.equal(needsHeadlineKick(done, row({ status: 'ready', degraded: false }), now), false);
+  assert.equal(needsHeadlineKick({ completedToday: false }, row(), now), false);
+  assert.equal(needsHeadlineKick(done, row(), kst(14, 0)), false, 'outside the morning window');
+});
+
+test('trigger heartbeat: a rejected (401) scheduler is counted and reported', () => {
+  const { triggerIncidents } = require('../server/lib/triggerHeartbeat');
+  const now = Date.UTC(2026, 9, 28, 23, 0); // 08:00 KST
+  const hb = { since: '2026-10-01T00:00:00Z', last: {}, days: { '2026-10-29': { github: { n: 3, last: new Date(now).toISOString() }, unauthorized: { n: 4 } } } };
+  assert.ok(triggerIncidents(hb, { now }).some((i) => i.key === 'cron_unauthorized:2026-10-29' && /401/.test(i.text)));
+});

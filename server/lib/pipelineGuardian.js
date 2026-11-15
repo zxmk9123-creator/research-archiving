@@ -27,6 +27,27 @@ function needsKick(status, now = new Date()) {
   return status.state === 'waiting' && !status.progress && hour * 60 + minute >= WINDOW_START_HOUR_KST * 60 + NOT_STARTED_GRACE_MIN;
 }
 
+// Headline side of the same rule: collection is done but today's brief is not (failed row, a generation nobody has touched for longer
+// than its lease, or a model-free stand-in that may be upgraded). Without this the retry waited for the next external cron call.
+function needsHeadlineKick(st, brief, now = new Date()) {
+  if (!st || !st.completedToday || !brief) return false;
+  const { hour } = kstParts(now);
+  if (hour < WINDOW_START_HOUR_KST || hour >= WINDOW_END_HOUR_KST) return false;
+  const ageMs = now.getTime() - new Date(brief.updatedAt).getTime();
+  if (brief.status === 'failed') return ageMs > 30 * 1000;
+  if (brief.status === 'generating') return ageMs > 6 * 60 * 1000;
+  return brief.status === 'ready' && brief.degraded && ageMs > 31 * 60 * 1000 && brief.attempts < require('./dailyBrief').MAX_AUTO_DAILY_ATTEMPTS;
+}
+
+async function readBriefRow(now) {
+  const { rows } = await pool.query(
+    "SELECT status, updated_at, attempt_count, COALESCE(brief->>'degraded', '') = 'true' AS degraded FROM daily_briefs WHERE brief_date = $1",
+    [require('./dailyBrief').kstDate(now)]
+  );
+  const r = rows[0];
+  return r ? { status: r.status, updatedAt: r.updated_at, attempts: Number(r.attempt_count) || 0, degraded: r.degraded } : null;
+}
+
 async function claimKick() {
   await pool.query("INSERT INTO scheduler_jobs (job_name, last_run_date) VALUES ('pipeline_kick', CURRENT_DATE) ON CONFLICT (job_name) DO NOTHING");
   const { rows } = await pool.query(
@@ -54,12 +75,24 @@ async function maybeAlertLate(st, now, dispatch) {
 async function maybeKickStalledPipeline({ now = new Date(), status, env, fetchImpl, sleep, dispatch } = {}) {
   const st = status || await require('./dailyDiscovery').getDailyDiscoveryStatus(now);
   await maybeAlertLate(st, now, dispatch).catch((err) => console.error('late-collection alert failed:', err.message));
-  if (!needsKick(st, now)) return { kicked: false, reason: 'not_needed' };
+  let headline = false;
+  if (!needsKick(st, now)) {
+    if (!(st && st.completedToday)) return { kicked: false, reason: 'not_needed' };
+    const brief = await readBriefRow(now).catch(() => null);
+    if (!needsHeadlineKick(st, brief, now)) return { kicked: false, reason: 'not_needed' };
+    headline = true;
+  }
   if (!(await claimKick())) return { kicked: false, reason: 'recently_kicked' };
+  if (headline) {
+    // one hop is enough: it runs ensure_daily_brief, which restarts (or upgrades) the headline under its own claim and caps
+    const result = await guard.chainNext(1, { env, fetchImpl, sleep });
+    await recordPipelineEvent('self_heal_kick', { state: 'headline', result });
+    return { kicked: true, headline: true, result };
+  }
   // depth 1 starts a fresh hop budget, so a pipeline that ran out of hops can still finish
   const result = await guard.fanOut(guard.FAN_OUT, { env, fetchImpl, sleep });
   await recordPipelineEvent('self_heal_kick', { state: st.state, progress: st.progress ? `${st.progress.done}/${st.progress.total}` : null, result });
   return { kicked: true, result };
 }
 
-module.exports = { maybeAlertLate, needsKick, claimKick, maybeKickStalledPipeline, KICK_MIN_GAP_MS };
+module.exports = { maybeAlertLate, needsKick, needsHeadlineKick, claimKick, maybeKickStalledPipeline, KICK_MIN_GAP_MS };

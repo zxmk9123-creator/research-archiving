@@ -135,9 +135,17 @@ async function runDailyCron(chainDepth, { forceHeadline = false } = {}) {
 
 // Express handler for GET /api/cron/daily. A chained hop (x-cron-chain header, see cronGuard.js) answers 202 at once and keeps working
 // in the background of its own invocation; a normal call answers with the full report.
+let lastRejectedAt = 0;
 function dailyHandler({ run = runDailyCron, track = background.track } = {}) {
   return async (req, res) => {
-    if (!isCronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
+    if (!isCronAuthorized(req)) {
+      // a scheduler with a wrong/missing secret was invisible (401 came before any record): count it, at most once a minute per instance
+      if (Date.now() - lastRejectedAt > 60000) {
+        lastRejectedAt = Date.now();
+        require('./triggerHeartbeat').recordTrigger('', '', new Date(), 'unauthorized').catch(() => {});
+      }
+      return res.status(401).json({ error: 'unauthorized' });
+    }
     const chainDepth = Number(req.get('x-cron-chain')) || 0;
     // everything this invocation starts (headline generation included) is cut off by the host ~300 s after now
     const forceHeadline = String(req.query && req.query.force_headline || '') === '1';
