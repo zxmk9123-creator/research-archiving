@@ -824,6 +824,9 @@ function initHomeCarouselDragReorder() {
 // survives a renderHome() re-render (e.g. Home -> cited article's Detail
 // page -> back to Home) rather than resetting on every visit. A hard page
 // reload clears it naturally, since module state doesn't survive that.
+// answer effort chosen in the dropdown (low | medium | high); remembered per browser
+const AI_EFFORTS = [['low', '낮음 · 간결·빠름'], ['medium', '중간 · 기본'], ['high', '높음 · 상세']];
+let aiEffort = (() => { try { const v = localStorage.getItem('aiEffort'); return AI_EFFORTS.some(([k]) => k === v) ? v : 'medium'; } catch (_) { return 'medium'; } })();
 let aiSearchHistory = [];
 // Structured conversation context returned by the server (sector, card answers, companies of the last table)
 // and sent back with the next question, so a follow-up inherits what it does not restate.
@@ -933,6 +936,7 @@ function aiSearchHtml() {
           <path d="M3 3v5h5"/>
         </svg>
       </button>
+      <select id="ai-effort" class="ai-effort" title="답변 수준(노력 수준): 높을수록 더 많은 자료를 읽고 자세히 답하지만 시간이 더 걸립니다" aria-label="답변 수준">${AI_EFFORTS.map(([k, l]) => `<option value="${k}"${k === aiEffort ? ' selected' : ''}>${l}</option>`).join('')}</select>
       <button type="submit" class="btn">검색</button>
     </form>
     <div class="ai-search-result" id="ai-search-result"></div>
@@ -1703,7 +1707,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       signal: controller.signal,
-      body: JSON.stringify({ question, history: aiSearchHistory, ...(aiSearchContext ? { context: aiSearchContext } : {}), ...(scope ? { scope } : {}) }),
+      body: JSON.stringify({ question, effort: aiEffort, history: aiSearchHistory, ...(aiSearchContext ? { context: aiSearchContext } : {}), ...(scope ? { scope } : {}) }),
     });
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -1875,6 +1879,8 @@ function bindAiSearchForm() {
   if (!form) return;
   warmAiRouter();
   bindRex(form);
+  const effortSel = document.getElementById('ai-effort');
+  if (effortSel) effortSel.onchange = () => { aiEffort = effortSel.value; try { localStorage.setItem('aiEffort', aiEffort); } catch (_) { /* optional */ } };
   const resultEl = document.getElementById('ai-search-result');
   const submitBtn = form.querySelector('button[type="submit"]');
   const resetBtn = document.getElementById('ai-search-reset-btn');

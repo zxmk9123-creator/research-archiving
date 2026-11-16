@@ -230,6 +230,7 @@ const rateLimit = require('../lib/rateLimit');
 const EDIBLE_STRICT_PATTERN = { '식용유': '(^|[^폐비])식용유(?!지)', '식용유지': '(^|[^비])식용유지' };
 const glossary = require('../lib/glossary');
 const agentGuide = require('../lib/agentGuide');
+const effortLib = require('../lib/effort');
 const synthesis = require('../lib/synthesis');
 const oilTaxonomy = require('../lib/oilTaxonomy');
 const oilMarket = require('../lib/oilMarket');
@@ -1619,6 +1620,7 @@ async function handleSearch(req, res, signal) {
     return res.json({ answer: guide.answer, insufficient: false, guide: true, followups: guide.followups, askBack: '어떤 도움이 필요하세요? 아래에서 고르시거나 궁금한 품목·주제를 입력해 주세요.', sources: [] });
   }
   const { followups, askBack } = agentGuide.followupCard(question);
+  const effort = effortLib.normalize(req.body.effort); // 낮음/중간/높음 chosen on the home chat
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
@@ -1715,6 +1717,7 @@ async function handleSearch(req, res, signal) {
       }
     }
     if (quick) candidates = candidates.slice(0, workloadPlan.QUICK_CANDIDATES);
+    if (effort === 'low') candidates = candidates.slice(0, effortLib.LOW_CANDIDATES);
     if (signal.aborted || res.destroyed) return;
   } catch (err) {
     console.error('ai-search retrieval failed:', err.message);
@@ -1779,7 +1782,7 @@ async function handleSearch(req, res, signal) {
     } catch (err) { console.error('ai-search spotlight extras failed:', err.message); }
   }
   if (synthesisMode && !opportunityMode) candidates = synthesis.selectForSynthesis(candidates, Date.now(), { spotlight });
-  const cacheKey = history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${choices ? JSON.stringify(choices) : ''}`);
+  const cacheKey = history.length ? null : answerCacheKey(question, candidates, `${quick ? 'quick' : 'full'}${effort === 'medium' ? '' : `|${effort}`}${choices ? JSON.stringify(choices) : ''}`);
   const cached = cacheKey ? answerCacheGet(cacheKey) : null;
   if (cached) {
     await recordSearchTelemetry({
@@ -1853,7 +1856,7 @@ async function handleSearch(req, res, signal) {
     } catch (_) { /* optional context */ }
   }
   const supplyNote = relationBlock + (feedstockSupply.isFeedstockSupplyQuestion(question) ? feedstockSupply.PROMPT_NOTE : '') + (specQuestion.isSpecQuestion(question) ? specQuestion.PROMPT_NOTE : '') + (diagram.isDiagramQuestion(question) ? diagram.PROMPT_NOTE : '') + (feedstockSupply.isFeedstockChainQuestion(question) ? feedstockSupply.CHAIN_NOTE : '');
-  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${glossary.dymPromptBlock(termGuess)}${oilScope === 'edible' ? oilTaxonomy.CLASSIFICATION_NOTE : ''}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${opportunityMode && oilStats ? oilMarket.evidenceBlock(oilStats) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
+  const user = `${buildHistoryBlock(history)}[Research Center materials]\n${buildMaterialsBlock(candidates)}\n\n[Question]\n${question}${buildCoverageBlock(required)}${subjectBlock}${supplyNote}${profileBlock}${glossary.cardsPromptBlock(glossary.matchCards(question))}${glossary.dymPromptBlock(termGuess)}${effortLib.promptBlock(effort)}${oilScope === 'edible' ? oilTaxonomy.CLASSIFICATION_NOTE : ''}${synthesisMode ? synthesis.promptBlock(question, candidates.length, { spotlight }) : ''}${opportunityMode && oilStats ? oilMarket.evidenceBlock(oilStats) : ''}${scopeBlock}${onlyBlock}${classificationScope.describeChoices(choices)}${referencedEntities.length && !intent.focus.length ? `\n\n[이전 대화에서 다룬 대상: ${referencedEntities.join(', ')} — 질문이 "그/위/해당"으로 가리키는 것은 이 대상들이다.]` : ''}`;
 
   if (!streaming) {
     let text;
