@@ -41,10 +41,10 @@ test('rankForSynthesis: a recent, relevant, quantified material outranks an old 
 });
 
 test('promptBlock: 3+ materials -> issue structure; fewer -> an explicit limit instead of padding', () => {
-  assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단\n\*\*인사이트:\*\*[\s\S]*# 추가 모니터링/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /# 핵심 이슈[\s\S]*# 종합 판단\n\*\*복수 자료[\s\S]*# 추가 모니터링/);
   assert.ok(!/\*\*전망\*\*/.test(synthesis.promptBlock('팜유 동향', 5)));
   assert.match(synthesis.promptBlock('팜유 동향', 5), /채우지 않는다/);
-  assert.match(synthesis.promptBlock('팜유 동향', 5), /\n  - 확인된 핵심 내용 1문장 \[N\]\. \*\*인사이트:\*\* 그 의미/);
+  assert.match(synthesis.promptBlock('팜유 동향', 5), /\n  - 확인된 핵심 내용 1문장 \[N\]\. \*\*그 의미[^*]*인사이트 1문장\*\* \[N\]/);
   assert.match(synthesis.promptBlock('팜유 동향', 5), /별도 불릿·하위 불릿으로 떼어 쓰지 않고/);
   assert.ok(!/\n\s+- (사실|시사점):/.test(synthesis.promptBlock('팜유 동향', 5)));
   assert.match(synthesis.promptBlock('팜유 동향', 5), /줄글 문단을 쓰지 않는다/);
