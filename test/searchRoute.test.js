@@ -755,12 +755,12 @@ test('extractKeywords (via retrieveCandidates SQL): a hyphenated technical term 
   }
 });
 
-async function keywordParamsFor(question) {
+async function keywordParamsFor(question, history) {
   const { calls, restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
   try {
     let params;
     await withServer(async (base) => {
-      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) });
+      await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question, ...(history ? { history } : {}) }) });
       params = calls.find((c) => c.text.includes('ORDER BY ('))?.params;
     });
     return params;
@@ -827,8 +827,26 @@ test('P4: candidate selection keeps Korean and non-Korean relevant rows (any top
 });
 
 test('keywords: a question made ONLY of framing words still searches something (no empty retrieval)', async () => {
-  const params = await keywordParamsFor('자세히 알려줘');
+  // a framing-only question that names a subject word ("회사") still searches; one with no subject at all is asked back instead (next test)
+  const params = await keywordParamsFor('회사 자세히 알려줘');
   assert.ok(params && params.length > 0);
+});
+
+test('a question with no subject and no conversation is answered with one clarifying question, without searching', async () => {
+  const { calls, restore } = mockPool([['FROM items i', () => ({ rows: [] })]]);
+  try {
+    let body;
+    await withServer(async (base) => {
+      const res = await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: '가격 어때?' }) });
+      body = await res.json();
+    });
+    assert.equal(body.clarify, true);
+    assert.match(body.answer, /어떤 품목이나 주제/);
+    assert.ok(body.followups.length >= 2);
+    assert.equal(calls.some((c) => c.text.includes('FROM items i')), false, 'no archive search for an under-specified question');
+  } finally {
+    restore();
+  }
 });
 
 test('retrieveCandidates SQL: the relevance expression reuses the same bound params as the WHERE clause (no duplicate params)', async () => {

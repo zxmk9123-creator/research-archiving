@@ -1765,7 +1765,3 @@ a.btn, a.btn:hover, a.btn:focus-visible { text-decoration: none; }
 .ai-askback { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--text); }
 .ai-followup-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ai-followups .ai-followup { cursor: pointer; font: inherit; font-size: 13px; }
-
-/* answer-effort dropdown beside the search button */
-.ai-effort { flex: none; height: 36px; max-width: 150px; padding: 0 10px; font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-control); cursor: pointer; }
-@media (max-width: 560px) { .ai-effort { max-width: 112px; font-size: 12px; } }
