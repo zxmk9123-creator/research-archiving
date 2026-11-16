@@ -1411,7 +1411,9 @@ a.chip.team-chip.is-on .team-chip-count { opacity: .9; }
   .card-eyebrow .card-team-pick-btn { display: none; } /* still available on the detail page */
   .card h3 { font-size: 15px; line-height: 21px; margin-bottom: 2px; }
   .card .meta { margin-top: 2px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .home-carousel-nav { margin-top: 0; align-self: center; width: 28px; height: 28px; }
+  /* phones: no side arrows (swipe and the dots turn the page), so the cards use the full width */
+  .home-carousel-nav { display: none; }
+  .home-carousel { gap: 0; }
   .archive-month-divider { font-size: 18px; font-weight: 800; color: var(--text); margin: 28px 0 2px; padding-top: 0; border-top: none; letter-spacing: -.02em; }
   .archive-layout { flex-direction: column; gap: var(--sp-3); }
   .archive-month-nav {
