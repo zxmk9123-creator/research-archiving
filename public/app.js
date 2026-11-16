@@ -437,6 +437,41 @@ function initHomeCarousel(containerEl) {
   prevBtn.onclick = () => go(-1);
   nextBtn.onclick = () => go(1);
   dots.forEach((dot, i) => { dot.onclick = () => goTo(i); });
+  // Touch swipe: the slide follows the finger while the gesture is clearly horizontal (vertical scrolling is left alone), and a swipe past
+  // 50 px (or 15% of the width) turns the page; anything shorter springs back.
+  const viewport = containerEl.querySelector('.home-carousel-viewport');
+  if (viewport) {
+    let sx = 0; let sy = 0; let dx = 0; let mode = null; // mode: null (undecided) | 'x' | 'y'
+    viewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) { mode = 'y'; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = 0; mode = null;
+      clearHomeCarouselIntervals(); // no auto-advance while a finger is down
+    }, { passive: true });
+    viewport.addEventListener('touchmove', (e) => {
+      if (mode === 'y' || e.touches.length !== 1) return;
+      const mx = e.touches[0].clientX - sx; const my = e.touches[0].clientY - sy;
+      if (!mode) {
+        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+        mode = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        if (mode === 'x') track.style.transition = 'none';
+      }
+      if (mode !== 'x') return;
+      dx = mx;
+      const w = viewport.clientWidth || 1;
+      track.style.transform = `translateX(calc(-${index * 100}% + ${dx}px))`;
+      if (Math.abs(dx) > w) dx = Math.sign(dx) * w;
+    }, { passive: true });
+    const end = () => {
+      track.style.transition = '';
+      const w = viewport.clientWidth || 1;
+      const turned = mode === 'x' && Math.abs(dx) >= Math.min(50, w * 0.15);
+      const dir = dx < 0 ? 1 : -1; // swipe left -> next
+      mode = null; dx = 0;
+      if (turned) go(dir); else { render(); resetTimer(); }
+    };
+    viewport.addEventListener('touchend', end, { passive: true });
+    viewport.addEventListener('touchcancel', end, { passive: true });
+  }
   render();
   startTimer();
 }
