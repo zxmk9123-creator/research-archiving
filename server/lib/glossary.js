@@ -48,6 +48,12 @@ function matchCards(question, max = 3) {
   return CARDS.filter((c) => (cue || c.cueless) && c.terms.some((t) => termHit(q, t))).slice(0, max);
 }
 
+// Cards whose terms the text mentions, regardless of whether it asks for a definition.
+function mentionedCards(text, max = 3) {
+  const q = String(text || '').toLowerCase();
+  return CARDS.filter((c) => c.terms.some((t) => termHit(q, t))).slice(0, max);
+}
+
 const FOOTNOTE = '※ 위 내용은 Research Center가 편집한 기초 지식이며 아카이빙 자료에 기반한 분석이 아닙니다. 시장 동향·수치는 관련 자료가 축적되면 확인할 수 있습니다.';
 
 // The whole answer when the archive has nothing for the question.
@@ -141,4 +147,4 @@ function dymPromptBlock(found) {
   return `\n\n[용어 보정] 질문의 일부 단어가 아래 용어의 오타·착각으로 보인다. 답변 맨 앞에 아래 문장을 그대로 두고(문구 변경 금지), 그 아래에 자료 기반 답변을 이어 쓴다. 정의 문장에는 수치·날짜를 덧붙이지 않는다.\n${dymLead(found)}`;
 }
 
-module.exports = { CARDS, matchCards, cardsAnswer, cardsPromptBlock, didYouMean, correctQuestion, dymLead, dymPromptBlock };
+module.exports = { CARDS, matchCards, mentionedCards, cardsAnswer, cardsPromptBlock, didYouMean, correctQuestion, dymLead, dymPromptBlock };

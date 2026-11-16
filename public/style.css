@@ -1759,3 +1759,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .archive-month-total { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
 /* buttons drawn as links (the archive pager) carry no underline, in any state */
 a.btn, a.btn:hover, a.btn:focus-visible { text-decoration: none; }
+
+/* agent follow-ups: next-step questions under an answer */
+.ai-followups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ai-followups .ai-followup { cursor: pointer; font: inherit; font-size: 13px; }

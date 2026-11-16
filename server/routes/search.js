@@ -229,6 +229,7 @@ const rateLimit = require('../lib/rateLimit');
 // the classifier, among them misfiled e-SAF items that won on recency)
 const EDIBLE_STRICT_PATTERN = { '식용유': '(^|[^폐비])식용유(?!지)', '식용유지': '(^|[^비])식용유지' };
 const glossary = require('../lib/glossary');
+const agentGuide = require('../lib/agentGuide');
 const synthesis = require('../lib/synthesis');
 const oilTaxonomy = require('../lib/oilTaxonomy');
 const oilMarket = require('../lib/oilMarket');
@@ -1611,6 +1612,13 @@ async function handleSearch(req, res, signal) {
   // near-miss of a known term (typo / mistaken word): suggest it in the answer and search for the real concept
   const termGuess = glossary.didYouMean(question);
   if (termGuess.length) question = glossary.correctQuestion(question, termGuess);
+  // platform / "what can you do" / greeting: answered directly (no search, no model call) and closed with a question offering next steps
+  const guide = agentGuide.guideFor(question);
+  if (guide) {
+    await recordSearchTelemetry({ requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt, candidateCount: 0, sourceCount: 0, provider: 'guide', isFollowup, questionFingerprint: fingerprint, streamed: streaming });
+    return res.json({ answer: guide.answer, insufficient: false, guide: true, followups: guide.followups, sources: [] });
+  }
+  const followups = agentGuide.followupsFor(question);
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
@@ -1724,7 +1732,7 @@ async function handleSearch(req, res, signal) {
         requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
         candidateCount: 0, sourceCount: 0, provider: 'glossary', isFollowup, questionFingerprint: fingerprint, streamed: streaming,
       });
-      return res.status(httpStatus).json({ answer: (termGuess.length ? `${glossary.dymLead(termGuess)}\n\n` : '') + (cards.length ? glossary.cardsAnswer(cards) : glossary.cardsAnswer([])).replace(/^# 기초 지식\n\n/, ''), insufficient: false, glossary: true, sources: [] });
+      return res.status(httpStatus).json({ answer: (termGuess.length ? `${glossary.dymLead(termGuess)}\n\n` : '') + (cards.length ? glossary.cardsAnswer(cards) : glossary.cardsAnswer([])).replace(/^# 기초 지식\n\n/, ''), insufficient: false, glossary: true, followups, sources: [] });
     }
     await recordSearchTelemetry({
       requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
@@ -1780,9 +1788,9 @@ async function handleSearch(req, res, signal) {
       isFollowup, questionFingerprint: fingerprint, streamed: streaming,
     });
     const cachedContext = classificationScope.nextContext(prevContext, { question, choices, focusEntities: intent.focus.map((c) => c.name) });
-    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, sources: cached.sources, context: cachedContext });
+    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, followups, sources: cached.sources, context: cachedContext });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, sources: cached.sources, context: cachedContext })}\n\n`);
+    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, followups, sources: cached.sources, context: cachedContext })}\n\n`);
     return res.end();
   }
   // Heavy requests are confirmed with the user before any AI work starts.
@@ -1877,7 +1885,7 @@ async function handleSearch(req, res, signal) {
     });
     // trace = internal stage counts: admin session only
     queueUncertain(dataset);
-    return res.json({ answer, insufficient: false, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
+    return res.json({ answer, insufficient: false, followups, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
   }
 
   // --- Streaming path ---
@@ -1940,7 +1948,7 @@ async function handleSearch(req, res, signal) {
   const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
-  sendEvent('done', { answer, insufficient: false, sources, context: nextContextFor(dataset) });
+  sendEvent('done', { answer, insufficient: false, followups, sources, context: nextContextFor(dataset) });
   res.end();
   queueUncertain(dataset);
   await recordSearchTelemetry({
