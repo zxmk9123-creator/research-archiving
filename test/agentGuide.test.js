@@ -16,9 +16,15 @@ test('research questions are not intercepted by the guide', () => {
   for (const q of ['팜유 가격 알려줘', '카길 기업 소개해줘', '수입량 분석 도와줘 팜유', 'HVO가 뭐야?', '인도네시아 B50 혼합의무 동향']) assert.equal(guideFor(q), null, q);
 });
 
-test('followups come from the glossary terms of the question, at most two, and none for unrelated text', () => {
+test('every answer gets a follow-up card and an ask-back: term-specific first, generic otherwise, clarifying when evidence is missing', () => {
+  const { followupCard } = require('../server/lib/agentGuide');
   const f = followupsFor('팜유 가격 알려줘');
-  assert.equal(f.length, 2);
+  assert.equal(f.length, 4);
   assert.match(f[0].question, /^팜유의 최근 동향/);
-  assert.deepEqual(followupsFor('오늘 날씨 어때'), []);
+  const g = followupCard('오늘 날씨 어때');
+  assert.equal(g.followups.length, 4);
+  assert.match(g.askBack, /\?/);
+  const i = followupCard('xyz', { insufficient: true });
+  assert.match(i.askBack, /구체적으로/);
+  assert.ok(i.followups.length >= 2 && i.followups.every((x) => x.label && x.question));
 });

@@ -1612,13 +1612,13 @@ function aiAnswerActionsHtml(copyBtnHtml, question, sources, requestId) {
 // evidence, or a client too old/odd to get a stream) and the streaming
 // branch's `done` event, so the two paths never duplicate this bookkeeping.
 // clickable next-step questions (from the server's agent layer); choosing one asks it
-function aiFollowupsHtml(followups) {
+function aiFollowupsHtml(followups, askBack) {
   const list = Array.isArray(followups) ? followups.filter((f) => f && f.label && f.question).slice(0, 4) : [];
   if (!list.length) return '';
-  return `<div class="ai-followups" role="group" aria-label="이어서 물어보기">${list.map((f) => `<button type="button" class="chip ai-followup" data-q="${escapeHtml(String(f.question).slice(0, 300))}">${escapeHtml(String(f.label).slice(0, 60))}</button>`).join('')}</div>`;
+  return `<div class="ai-followups" role="group" aria-label="이어서 물어보기">${askBack ? `<p class="ai-askback">${escapeHtml(String(askBack).slice(0, 200))}</p>` : ''}<div class="ai-followup-chips">${list.map((f) => `<button type="button" class="chip ai-followup" data-q="${escapeHtml(String(f.question).slice(0, 300))}">${escapeHtml(String(f.label).slice(0, 60))}</button>`).join('')}</div></div>`;
 }
 
-function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources, requestId, followups) {
+function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources, requestId, followups, askBack) {
   aiSearchHistory.push({ role: 'user', content: question });
   aiSearchHistory.push({ role: 'assistant', content: answer });
   bodyEl.innerHTML = `
@@ -1626,7 +1626,7 @@ function finishAiSearchTurn(turnEl, bodyEl, question, answer, sources, requestId
     ${aiAnswerActionsHtml(`<button type="button" class="ai-copy-btn" title="답변 복사" aria-label="답변 복사" data-answer="${escapeHtml(String(answer || '').replace(/```chart[\s\S]*?```/g, '').trim())}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`, question, sources, requestId)}
     ${aiEvidenceHtml(sources)}
     ${aiSearchSourcesHtml(sources)}
-    ${aiFollowupsHtml(followups)}
+    ${aiFollowupsHtml(followups, askBack)}
   `;
   // On a retry, this turn wasn't recorded the first time around (only a
   // successful turn gets persisted) — push now, and only now, so a
@@ -1719,7 +1719,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
         return;
       }
       if (body.context) aiSearchContext = body.context;
-      finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources, res.headers.get('x-request-id'), body.followups);
+      finishAiSearchTurn(turnEl, bodyEl, question, body.answer, body.sources, res.headers.get('x-request-id'), body.followups, body.askBack);
       return;
     }
 
@@ -1765,7 +1765,7 @@ async function runAiSearchTurn(turnEl, question, submitBtn, scope = null) {
           followGrowingAnswer();
         } else if (eventName === 'done') {
           if (data.context) aiSearchContext = data.context;
-          finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources, res.headers.get('x-request-id'), data.followups);
+          finishAiSearchTurn(turnEl, bodyEl, question, data.answer, data.sources, res.headers.get('x-request-id'), data.followups, data.askBack);
           // Bypasses the throttle for this last call — the polished swap
           // can change the answer's final height, so this makes sure its
           // actual end is what's left in view, not wherever the last

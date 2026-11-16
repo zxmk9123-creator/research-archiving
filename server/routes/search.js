@@ -1616,9 +1616,9 @@ async function handleSearch(req, res, signal) {
   const guide = agentGuide.guideFor(question);
   if (guide) {
     await recordSearchTelemetry({ requestId, outcome: 'success', httpStatus: 200, latencyMs: Date.now() - startedAt, candidateCount: 0, sourceCount: 0, provider: 'guide', isFollowup, questionFingerprint: fingerprint, streamed: streaming });
-    return res.json({ answer: guide.answer, insufficient: false, guide: true, followups: guide.followups, sources: [] });
+    return res.json({ answer: guide.answer, insufficient: false, guide: true, followups: guide.followups, askBack: '어떤 도움이 필요하세요? 아래에서 고르시거나 궁금한 품목·주제를 입력해 주세요.', sources: [] });
   }
-  const followups = agentGuide.followupsFor(question);
+  const { followups, askBack } = agentGuide.followupCard(question);
   // Scope the user confirmed on the guide card ({confirmed, mode: 'full'|'quick'}).
   const scope = req.body.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
   const classification = classificationScope.sanitizeChoices(scope.classification); // answers from the classification card
@@ -1732,7 +1732,7 @@ async function handleSearch(req, res, signal) {
         requestId, outcome: 'success', httpStatus, latencyMs: Date.now() - startedAt,
         candidateCount: 0, sourceCount: 0, provider: 'glossary', isFollowup, questionFingerprint: fingerprint, streamed: streaming,
       });
-      return res.status(httpStatus).json({ answer: (termGuess.length ? `${glossary.dymLead(termGuess)}\n\n` : '') + (cards.length ? glossary.cardsAnswer(cards) : glossary.cardsAnswer([])).replace(/^# 기초 지식\n\n/, ''), insufficient: false, glossary: true, followups, sources: [] });
+      return res.status(httpStatus).json({ answer: (termGuess.length ? `${glossary.dymLead(termGuess)}\n\n` : '') + (cards.length ? glossary.cardsAnswer(cards) : glossary.cardsAnswer([])).replace(/^# 기초 지식\n\n/, ''), insufficient: false, glossary: true, followups, askBack, sources: [] });
     }
     await recordSearchTelemetry({
       requestId, outcome: 'insufficient_evidence', httpStatus, latencyMs: Date.now() - startedAt,
@@ -1741,7 +1741,7 @@ async function handleSearch(req, res, signal) {
     // Never opens an SSE stream for this case — nothing was ever going to
     // stream, so the client's own content-type check (see app.js) just
     // treats this exactly like a non-streaming response.
-    return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, sources: [] });
+    return res.status(httpStatus).json({ answer: INSUFFICIENT_MESSAGE, insufficient: true, ...agentGuide.followupCard(question, { insufficient: true }), sources: [] });
   }
 
   datasetTrace.push(`candidates ${candidates.map((c) => c.id).join(',')}`);
@@ -1788,9 +1788,9 @@ async function handleSearch(req, res, signal) {
       isFollowup, questionFingerprint: fingerprint, streamed: streaming,
     });
     const cachedContext = classificationScope.nextContext(prevContext, { question, choices, focusEntities: intent.focus.map((c) => c.name) });
-    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, followups, sources: cached.sources, context: cachedContext });
+    if (!streaming) return res.json({ answer: cached.answer, insufficient: false, followups, askBack, sources: cached.sources, context: cachedContext });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, followups, sources: cached.sources, context: cachedContext })}\n\n`);
+    res.write(`event: done\ndata: ${JSON.stringify({ answer: cached.answer, insufficient: false, followups, askBack, sources: cached.sources, context: cachedContext })}\n\n`);
     return res.end();
   }
   // Heavy requests are confirmed with the user before any AI work starts.
@@ -1885,7 +1885,7 @@ async function handleSearch(req, res, signal) {
     });
     // trace = internal stage counts: admin session only
     queueUncertain(dataset);
-    return res.json({ answer, insufficient: false, followups, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
+    return res.json({ answer, insufficient: false, followups, askBack, sources, context: nextContextFor(dataset), ...(req.body.debug === true && isAuthenticated(req) ? { trace: datasetTrace } : {}) });
   }
 
   // --- Streaming path ---
@@ -1948,7 +1948,7 @@ async function handleSearch(req, res, signal) {
   const { answer, sources } = await finalizeAnswer(rawText, candidates, signal, required, question, dataset, { quick });
   if (signal.aborted || res.destroyed) return;
   if (cacheKey && sources.length) answerCacheSet(cacheKey, { answer, sources });
-  sendEvent('done', { answer, insufficient: false, followups, sources, context: nextContextFor(dataset) });
+  sendEvent('done', { answer, insufficient: false, followups, askBack, sources, context: nextContextFor(dataset) });
   res.end();
   queueUncertain(dataset);
   await recordSearchTelemetry({

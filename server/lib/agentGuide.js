@@ -52,15 +52,32 @@ function guideFor(question) {
   return null;
 }
 
-// Up to two follow-up questions for an ordinary answer, from the glossary terms the question mentions (editor-written, deterministic).
-function followupsFor(question) {
+// Follow-up cards for EVERY answer (rule: no answer ends without offering the next step and asking back).
+// { askBack, followups }: term-specific questions first (from the glossary terms the question mentions), then generic next steps, up to four.
+// With `insufficient` the card asks the person to narrow the question instead.
+const GENERIC = [
+  { label: '핵심만 3줄로 요약', question: '방금 답변을 핵심만 3줄로 요약해줘' },
+  { label: '표로 정리', question: '방금 답변 내용을 표로 정리해줘' },
+  { label: '관련 자료 더 보기', question: '방금 주제와 관련된 다른 자료도 알려줘' },
+  { label: '오늘의 유지 시장 동향', question: '오늘 수집된 자료 기준으로 유지 시장 주요 동향을 정리해줘' },
+];
+const CLARIFY = [
+  { label: '품목을 넣어 다시 질문', question: '팜유 최근 동향을 자료 기준으로 정리해줘' },
+  { label: '오늘의 유지 시장 동향', question: '오늘 수집된 자료 기준으로 유지 시장 주요 동향을 정리해줘' },
+  { label: '이 플랫폼에서 뭘 할 수 있어?', question: '뭘 할 수 있어?' },
+];
+function followupCard(question, { insufficient = false } = {}) {
+  if (insufficient) return { askBack: '찾으시는 내용을 조금 더 구체적으로 알려 주시겠어요? 품목·기간·주제를 넣어 다시 물어보셔도 되고, 아래에서 고르셔도 됩니다.', followups: CLARIFY };
+  const out = [];
   const cards = glossary.mentionedCards(question, 1);
-  if (!cards.length) return [];
-  const n = cards[0].name;
-  return [
-    { label: `${n} 최근 동향`, question: `${n}의 최근 동향을 자료 기준으로 정리해줘` },
-    { label: `${n} 관련 규제·정책`, question: `${n}와 관련된 규제나 정책 소식이 있어?` },
-  ];
+  if (cards.length) {
+    const n = cards[0].name;
+    out.push({ label: `${n} 최근 동향`, question: `${n}의 최근 동향을 자료 기준으로 정리해줘` });
+    out.push({ label: `${n} 관련 규제·정책`, question: `${n}와 관련된 규제나 정책 소식이 있어?` });
+  }
+  for (const g of GENERIC) if (out.length < 4) out.push(g);
+  return { askBack: '이어서 어떤 도움이 필요하세요? 더 깊이 보거나 다른 각도로 정리해 드릴 수 있어요.', followups: out };
 }
+const followupsFor = (question, opts) => followupCard(question, opts).followups;
 
-module.exports = { guideFor, followupsFor };
+module.exports = { guideFor, followupsFor, followupCard };

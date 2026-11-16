@@ -1761,5 +1761,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 a.btn, a.btn:hover, a.btn:focus-visible { text-decoration: none; }
 
 /* agent follow-ups: next-step questions under an answer */
-.ai-followups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ai-followups { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.ai-askback { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--text); }
+.ai-followup-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ai-followups .ai-followup { cursor: pointer; font: inherit; font-size: 13px; }
