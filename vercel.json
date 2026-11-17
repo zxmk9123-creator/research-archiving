@@ -7,6 +7,10 @@
   },
   "rewrites": [
     {
+      "source": "/api/nit-llm-check",
+      "destination": "/api/nit-llm-check.js"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api"
     }
