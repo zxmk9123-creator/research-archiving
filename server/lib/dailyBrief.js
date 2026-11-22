@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const provider = require('./ai/provider');
+const { fixTerms, glossaryHints, suspectTranslations } = require('./termFix');
 
 // The host ends a function at its time limit no matter what is still running. A caller that knows when its invocation will be cut off
 // runs the generation inside runWithDeadline(); the retry loop then decides from the time REALLY left, not from when it started itself.
@@ -334,8 +335,10 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     source: String(item.source_name || '출처 미상').slice(0, 120),
     published_at: item.published_at ? new Date(item.published_at).toISOString() : null,
     collected_at: item.collected_at ? new Date(item.collected_at).toISOString() : null,
-    summary: stripForeignScript(item.summary).slice(0, 700),
-    insight: stripForeignScript(item.insight).slice(0, 500),
+    summary: fixTerms(stripForeignScript(item.summary)).slice(0, 700),
+    insight: fixTerms(stripForeignScript(item.insight)).slice(0, 500),
+    // fixed Korean forms for terms this item's English text names (see termFix.js); `summary_suspect` = its stored Korean summary does not use them
+    ...(glossaryHints(item.title, item.summary).length ? { glossary: glossaryHints(item.title, item.summary), ...(suspectTranslations(item.title, item.summary).length ? { summary_suspect: true } : {}) } : {}),
   }));
 
   const system = [
@@ -356,6 +359,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     'market_summary는 developments 전체를 한 건당 완결된 평서문 한 문장("~다"로 끝남)으로 쓴다. 명사구로 끝나는 문장이나 자료 문장의 복사는 쓰지 않는다.',
     '문체는 브리핑이다. lead, market_summary, summary, significance는 "무슨 일이 있었는가(현상)"와 "그로 인한 영향"만 쓴다. 자료 건수·수집 경위·분류(예: "오늘 수집된 N건 중", "세 갈래", "다음과 같다")를 설명하는 서두, 수식어, 부연, 감상, 접속용 미사여구는 쓰지 않는다. market_summary는 developments에 담은 자료 전체(최대 5건)를 빠짐없이 포괄한다: 자료마다 핵심 변화와 영향을 한 문장씩, 가장 시의적인 현상부터 순서대로 쓰고, 1위 자료 하나로 채우지 않는다.',
     'developments는 중요도가 높은 순서대로(1번이 가장 중요) 나열하고, lead는 앞쪽 자료를 중심으로 쓰고 market_summary는 developments 전체를 아우른다. developments는 최대 5개(중요도 3 이상), watchpoints는 최대 4개다. developments.item_id는 입력 item_id만 사용하고 중복 선택하지 않는다.',
+    '각 자료의 glossary는 영어 용어의 고정 한국어 표기다. 자료 요약이 다른 표기를 쓰거나(summary_suspect가 true면 요약의 해당 어휘를 믿지 말고 제목을 근거로 한다) 소리 나는 대로 옮긴 표기가 있어도 glossary의 표기를 쓴다.',
     '언어(최우선 규칙): lead, market_summary, 각 development의 summary·significance, watchpoints의 모든 문장은 반드시 한국어 문장으로 쓴다. 입력 자료의 제목이 영어여도 영어 문장으로 답하지 않는다(고유명사·단위·약어만 원문 표기 허용).',
   ].join('\n');
   const user = `보고일(KST): ${briefDate}\n선정 기준: 오늘 수집되었으며 최근 7일(오늘 포함) 내 발행된 자료. 발행일 최신순으로 검토 및 정렬.\n자료:\n${JSON.stringify(evidence)}${repairHint === 'short' ? TRUNCATED_HINT : repairHint === 'korean' ? KOREAN_HINT : repairHint ? REPAIR_HINT : ''}\n\n※ 출력의 모든 문장(lead, market_summary, summary, significance, watchpoints)은 한국어로 작성한다.`;
@@ -367,7 +371,7 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
   const withHead = (message) => `${message} | head=${String(text || '').replace(/\s+/g, ' ').slice(0, 120)}`;
   let raw;
   try {
-    raw = parseJsonObject(text);
+    raw = parseJsonObject(fixTerms(text)); // known mistranslations in the model's own wording are repaired before validation
   } catch (err) {
     // name what went wrong: cut off by the token limit, a format description echoed instead of content, or plain invalid JSON
     if (/길이 제한으로 인해 중간에 잘렸/.test(String(text || ''))) throw new Error(withHead('brief_truncated_by_max_tokens'));
