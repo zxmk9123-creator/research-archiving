@@ -31,3 +31,11 @@ test('certainty guard: a claim phrase inside a doubtful clause is not an unsuppo
   assert.throws(() => assertSupportedCertainty('A사는 장기 공급을 확보했다', '기사 본문', 7), (e) => /unsupported_certainty_supply_commitment_item_7/.test(e.message) && /공급을 확보/.test(e.snippet));
   assert.doesNotThrow(() => assertSupportedCertainty('A사는 장기 공급을 확보했다', 'A사가 공급 계약을 체결했다', 7));
 });
+
+test('certainty guard: "memorandum of understanding signed" in the source supports an "MOU를 체결" claim (11/23 false positive)', () => {
+  const { assertSupportedCertainty } = require('../server/lib/dailyBrief');
+  const src = 'European Energy, Metafuels, and Norway have signed a memorandum of understanding to establish a Danish e-SAF value chain.';
+  assert.doesNotThrow(() => assertSupportedCertainty('e-SAF 가치사슬 구축을 위한 MOU를 체결했다', src, 5311));
+  assert.doesNotThrow(() => assertSupportedCertainty('e-SAF 가치사슬 MOU를 체결했다', '메모랜드를 체결했다', 5311));
+  assert.throws(() => assertSupportedCertainty('e-SAF 가치사슬 MOU를 체결했다', 'The parties are in talks about a memorandum.', 5311), /unsupported_certainty_contract_execution/);
+});

@@ -73,9 +73,9 @@ test('with time to spare it keeps retrying up to the automatic limit; the model 
   const h = harness([new Error('invalid_brief_json')]);
   try {
     await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
-    assert.equal(h.state.updates.length, 6);
-    assert.equal(h.state.updates.slice(0, 5).every((u) => u.status === 'generating'), true);
-    assert.equal(h.state.updates[5].status, 'failed');
+    assert.equal(h.state.updates.length, 10);
+    assert.equal(h.state.updates.slice(0, 9).every((u) => u.status === 'generating'), true);
+    assert.equal(h.state.updates[9].status, 'failed');
     assert.equal(h.state.ready, true, 'the degraded fallback is published after the last attempt');
   } finally { h.restore(); }
 });
@@ -114,7 +114,7 @@ test('inside an invocation deadline the retry loop uses the time really left, no
     h.state.updates.length = 0;
     // plenty left: it retries as before
     await dailyBrief.runWithDeadline(Date.now() + 10 * 60_000, () => dailyBrief.buildDailyBrief(today, { sleep: async () => {} }));
-    assert.equal(h.state.updates.length, 6);
+    assert.equal(h.state.updates.length, 10);
   } finally { h.restore(); }
 });
 
@@ -173,11 +173,11 @@ test('failure names its cause: truncated by the token limit vs. format descripti
 
 // ---------- bounded cost: a caller-supplied model-call budget (Pipeline Doctor recovery) ----------
 
-test('call budget: without a budget the guard makes its full 6 attempts (unchanged); with max=2 it makes exactly 2, then releases the row as failed with a visible reason', async () => {
+test('call budget: without a budget the guard makes its full 10 attempts (unchanged); with max=2 it makes exactly 2, then releases the row as failed with a visible reason', async () => {
   const unbudgeted = harness([new Error('AI provider returned 503')]);
   try {
     await dailyBrief.buildDailyBrief(today, { sleep: async () => {} });
-    assert.equal(unbudgeted.state.prompts.length, 6, 'existing behaviour: 1 + MAX_AUTOMATIC_RETRIES');
+    assert.equal(unbudgeted.state.prompts.length, 10, 'existing behaviour: 1 + MAX_AUTOMATIC_RETRIES');
   } finally { unbudgeted.restore(); }
 
   const h = harness([new Error('AI provider returned 503')]);

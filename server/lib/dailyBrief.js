@@ -16,7 +16,7 @@ const REPAIR_EVIDENCE_ITEMS = 12;
 // A live generation refreshes updated_at at every attempt (one attempt is bounded by the router's ~135 s cascade plus the retry delay, so
 // well under this), so a row silent for longer than this has lost its worker (the host ended the function): reclaim it quickly.
 const GENERATION_STALE_AFTER_MINUTES = 3;
-const MAX_AUTOMATIC_RETRIES = 5;
+const MAX_AUTOMATIC_RETRIES = 9; // 1 + 9 = 10 model calls per generation
 const BRIEF_MAX_TOKENS = 12000;
 // One cron invocation may run for at most 300 s on the host. Retries stop (and the row is released as 'failed' so the NEXT call picks
 // it up at once) when the next one would not fit, instead of sleeping until the host kills the function and leaves the row 'generating'.
@@ -94,7 +94,7 @@ const CERTAINTY_CLAIMS = [
   {
     name: 'contract_execution',
     claim: /(?:(?:오프테이크|공급|구매|판매|장기|연료)?\s*(?:계약|합의서|합의|오프테이크)\s*(?:을|를)?\s*(?:체결|서명|맺)(?:했|하였|하고|한|됨|됐다|되었습니다)?(?!\s*(?:가능성|여부|추진|협상|예정|계획|검토|논의))|(?:MOU|MoU|양해각서)\s*(?:를)?\s*(?:체결|서명|맺)(?:했|하였|하고|한|됨|됐다|되었습니다)?(?!\s*(?:가능성|여부|추진|협상|예정|계획|검토|논의))|(?:signed|executed|concluded|entered into)\s+(?:a\s+)?(?:binding\s+)?(?:supply\s+|offtake\s+)?(?:agreement|contract|MOU)|(?:agreement|contract|MOU)\s+(?:was\s+)?(?:signed|executed|concluded)|(?:합의에 도달|합의가 타결)|reached\s+(?:a\s+)?(?:binding\s+)?agreement)/iu,
-    evidence: /(?:(?:계약|합의서|합의|오프테이크|agreement|contract|offtake).{0,60}(?:체결|서명|맺|signed|executed|concluded|entered into)|(?:체결|서명|맺|signed|executed|concluded|entered into).{0,60}(?:계약|합의서|합의|오프테이크|agreement|contract|offtake)|(?:MOU|MoU|양해각서).{0,40}(?:체결|서명|signed|executed|concluded)|(?:체결|서명|signed|executed|concluded).{0,40}(?:MOU|MoU|양해각서)|합의.{0,20}(?:도달|타결)|reached.{0,30}agreement)/iu,
+    evidence: /(?:(?:계약|합의서|합의|오프테이크|agreement|contract|offtake).{0,60}(?:체결|서명|맺|signed|executed|concluded|entered into)|(?:체결|서명|맺|signed|executed|concluded|entered into).{0,60}(?:계약|합의서|합의|오프테이크|agreement|contract|offtake)|(?:MOU|MoU|양해\s*각서|memorandum(?:\s+of\s+understanding)?|메모랜드).{0,40}(?:체결|서명|signed|executed|concluded)|(?:체결|서명|signed|executed|concluded).{0,40}(?:MOU|MoU|양해\s*각서|memorandum|메모랜드)|합의.{0,20}(?:도달|타결)|reached.{0,30}agreement)/iu,
   },
   {
     name: 'supply_commitment',
@@ -285,7 +285,11 @@ const TRUNCATED_HINT = '\n\n[재시도 안내] 직전 응답은 생각·해설�
 const KOREAN_HINT = '\n\n[재시도 안내] 직전 응답은 영어로 작성되어 무효였다. 입력 자료의 제목이 영어여도 모든 출력 문장을 한국어로 다시 작성한다.';
 const REPAIR_HINT = '\n\n[재시도 안내] 직전 응답은 `[...]`, `int` 같은 자리표시자나 생략 표기를 담고 있어 무효였다. 모든 값을 입력 자료에서 뽑은 실제 내용으로 채운 완전한 JSON 객체 하나만 출력하라.';
 
-async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null } = {}) {
+// A garbled machine translation can leave kana/Han fragments in a stored Korean summary ('메모랜드 오ファ더'); the model copies them and the
+// Korean-only guard then rejects the brief. They carry no meaning the title does not, so they are dropped before the model sees them.
+const stripForeignScript = (t) => String(t || '').replace(/[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff]+/g, '').replace(/\s{2,}/g, ' ');
+
+async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled = null, excludeIds = [] } = {}) {
   // after an invalid answer the retry gets a shorter input (the freshest items first): less to echo or elide, and the headline only uses 5
   const evidenceLimit = repairHint ? REPAIR_EVIDENCE_ITEMS : MAX_EVIDENCE_ITEMS;
   const { rows: items } = await pool.query(
@@ -300,6 +304,12 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
       LIMIT $5`,
     [...evidenceWindow(briefDate), evidenceLimit]
   );
+  // an item that made two attempts fail the same way is left out of the next ones — one bad source must not hold the whole headline back
+  // (only while at least three others remain, so an exclusion can never turn the day's brief into an empty one)
+  if (excludeIds.length) {
+    const kept = items.filter((item) => !excludeIds.includes(Number(item.id)));
+    if (kept.length >= 3) items.splice(0, items.length, ...kept);
+  }
   const itemIds = items.map((item) => Number(item.id));
   if (!items.length) {
     const emptyBrief = {
@@ -324,8 +334,8 @@ async function buildDailyBriefAttempt(briefDate, { repairHint = false, cancelled
     source: String(item.source_name || '출처 미상').slice(0, 120),
     published_at: item.published_at ? new Date(item.published_at).toISOString() : null,
     collected_at: item.collected_at ? new Date(item.collected_at).toISOString() : null,
-    summary: String(item.summary || '').slice(0, 700),
-    insight: String(item.insight || '').slice(0, 500),
+    summary: stripForeignScript(item.summary).slice(0, 700),
+    insight: stripForeignScript(item.insight).slice(0, 500),
   }));
 
   const system = [
@@ -379,6 +389,8 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
   const callBudget = callBudgetStore.getStore();
   let failureCount = 0;
   let repairHint = false;
+  const itemFailures = new Map();
+  const excludeIds = [];
   while (true) {
     try {
       if (callBudget) {
@@ -387,7 +399,7 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       }
       const abort = new AbortController();
       const cancelled = { v: false, signal: callBudget ? abort.signal : undefined }; // only a budgeted caller can cancel
-      const attempt = buildDailyBriefAttempt(briefDate, { repairHint, cancelled });
+      const attempt = buildDailyBriefAttempt(briefDate, { repairHint, cancelled, excludeIds });
       const deadline0 = deadlineStore.getStore();
       if (callBudget && deadline0) {
         // a budgeted caller's time limit holds IN FLIGHT too: one model call can take 150 s, so waiting for it would silently overrun the budget
@@ -404,6 +416,12 @@ async function buildDailyBrief(briefDate, { budgetMs = INVOCATION_BUDGET_MS, att
       return;
     } catch (err) {
       failureCount += 1;
+      const failedItem = (/_item_(\d+)/.exec(String(err.message || '')) || [])[1];
+      if (failedItem) {
+        const n = (itemFailures.get(failedItem) || 0) + 1;
+        itemFailures.set(failedItem, n);
+        if (n >= 2 && !excludeIds.includes(Number(failedItem))) excludeIds.push(Number(failedItem));
+      }
       const exhausted = failureCount > MAX_AUTOMATIC_RETRIES;
       const delayMs = Math.min(
         RETRY_MAX_DELAY_MS,
