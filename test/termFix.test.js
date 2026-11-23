@@ -26,3 +26,15 @@ test('glossary: known mistranslations are repaired (토스터데이, 메모랜�
   assert.equal(suspectTranslations('Thanksgiving Gas Prices', '미국 명절 주간에 가솔린 가격이').length, 1, 'summary does not use the fixed form');
   assert.equal(suspectTranslations('Thanksgiving Gas Prices', '미국 추수감사절 주간에 가솔린 가격이').length, 0);
 });
+
+test('glossary: 11/23 brief mistranslations (UKMTO, mine, kerosene, methanol-to-jet, Thanksgiving meal)', () => {
+  const { fixTerms, glossaryHints } = require('../server/lib/termFix');
+  assert.equal(fixTerms('영국MTO 보고에 따르면'), '영국해상무역기구(UKMTO) 보고에 따르면');
+  assert.equal(fixTerms('유조선 2척이 미탐침자나 어뢰에 맞아'), '유조선 2척이 기뢰나 어뢰에 맞아');
+  assert.equal(fixTerms('화석 제로케인과 비교해'), '화석 등유(케로신)과 비교해');
+  assert.equal(fixTerms('메소드톤-투-제트 기술'), '메탄올-투-제트 기술');
+  assert.equal(fixTerms('설날 식비가 6% 오른다'), '추수감사절 식비가 6% 오른다');
+  assert.deepEqual(glossaryHints('Two Tanker Incidents Reported Near Oman; Vessel Hit Mine East Of Hormuz').map((h) => h.ko), ['기뢰']);
+  assert.deepEqual(glossaryHints('UKMTO Reports Two Tanker Attacks').map((h) => h.ko), ['영국해상무역기구(UKMTO)']);
+  assert.deepEqual(glossaryHints('Coal mine output rises'), [], 'a plain "mine" is not a naval mine');
+});

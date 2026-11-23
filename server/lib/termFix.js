@@ -9,6 +9,11 @@ const GLOSSARY = [
   { en: /thanksgiving/i, ko: '추수감사절', wrong: /토스터\s*데이|땡스기빙|땡스\s*기빙/g },
   { en: /memorandum\s+of\s+understanding|\bMOU\b/i, ko: '양해각서(MOU)', wrong: /메모랜드\s*오[^\s가-힣]{0,3}더|메모랜드\s*오브\s*언더스탠딩|메모란덤/g },
   { en: /high[\s-]*oleic/i, ko: '고올레인', wrong: /고\s*올레익/g },
+  { en: /\bUKMTO\b/, ko: '영국해상무역기구(UKMTO)', wrong: /영국\s*MTO|UK\s*MTO|영국해사무역기구/g },
+  { en: /\b(?:hit|hits|struck)\s+(?:a\s+)?(?:sea\s+|naval\s+)?mines?\b|\b(?:naval|sea)\s+mines?\b/i, ko: '기뢰', wrong: /미탐침자|미탐침|미탄입/g },
+  { en: /\bkerosene\b/i, ko: '등유(케로신)', wrong: /제로케인|케로세인/g },
+  { en: /methanol[\s-]to[\s-]jet/i, ko: '메탄올-투-제트', wrong: /메소드톤[\s-]*투[\s-]*제트/g },
+  { en: /thanksgiving\s+(?:dinner|meal|food)/i, ko: '추수감사절 식비', wrong: /설날\s*식비/g },
 ];
 
 const TERM_FIXES = GLOSSARY.map((g) => [g.wrong, g.ko]);
